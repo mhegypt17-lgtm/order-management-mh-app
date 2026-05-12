@@ -157,7 +157,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     // Cross-sell: product categories this customer hasn't ordered yet
     const orderedCategories = new Set(Object.values(productMap).map((p) => p.category).filter(Boolean))
-    const allCategories = [...new Set(products.map((p) => p.productCategory).filter(Boolean))]
+    const allCategories = Array.from(new Set(products.map((p) => p.productCategory).filter(Boolean)))
     const unorderedCategories = allCategories.filter((cat) => !orderedCategories.has(cat))
 
     // Recent activity alert
