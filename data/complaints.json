@@ -1,0 +1,125 @@
+[
+  {
+    "channel": "Instashop",
+    "customerId": null,
+    "customerName": null,
+    "customerPhone": null,
+    "linkedOrderId": "ord_1778075279444_ifbzuz28",
+    "createdBy": "خدمة العملاء",
+    "compensationAmount": 0,
+    "openedAt": "2026-05-07T07:42:01.023Z",
+    "id": "comp_1778154121025_85y4sy0v",
+    "ticketNumber": "202605-0001",
+    "comments": [
+      {
+        "id": "comment_1778154138609_0gj4dvot",
+        "authorName": "خدمة العملاء",
+        "text": "frfrfr",
+        "createdAt": "2026-05-07T11:42:18.609Z"
+      },
+      {
+        "id": "comment_1778154145578_9zeo9n28",
+        "authorName": "خدمة العملاء",
+        "text": "fffff",
+        "createdAt": "2026-05-07T11:42:25.578Z"
+      },
+      {
+        "id": "comment_1778154512948_vdjhttk9",
+        "authorName": "الإدارة",
+        "text": "This is a test comment to verify the fix works",
+        "createdAt": "2026-05-07T11:48:32.948Z"
+      }
+    ],
+    "createdAt": "2026-05-07T11:42:01.026Z",
+    "updatedAt": "2026-05-07T12:01:54.165Z",
+    "status": "in-progress"
+  },
+  {
+    "channel": "App",
+    "customerId": null,
+    "customerName": null,
+    "customerPhone": null,
+    "linkedOrderId": null,
+    "createdBy": "خدمة العملاء",
+    "compensationAmount": 251,
+    "openedAt": "2026-05-07T12:00:32.448Z",
+    "id": "comp_1778155232450_e7vrysff",
+    "ticketNumber": "202605-0002",
+    "comments": [
+      {
+        "id": "comment_1778159542650_pjvtzvwk",
+        "authorName": "خدمة العملاء",
+        "text": "jkhkijhk",
+        "createdAt": "2026-05-07T13:12:22.650Z"
+      }
+    ],
+    "createdAt": "2026-05-07T12:00:32.451Z",
+    "updatedAt": "2026-05-07T13:12:22.650Z"
+  },
+  {
+    "channel": "App",
+    "subject": "deded",
+    "description": "deded",
+    "reason": "deded",
+    "status": "open",
+    "priority": "low",
+    "customerId": "cust_1778070632954_885e48e1",
+    "customerName": "ahmed",
+    "customerPhone": "77777",
+    "linkedOrderId": "ord_1778070632962_ew8ka9h5",
+    "assignedTo": "خدمة العملاء",
+    "createdBy": "خدمة العملاء",
+    "compensationAmount": 0,
+    "openedAt": "2026-05-07T12:00:59.500Z",
+    "closedAt": null,
+    "id": "comp_1778155259502_gdohg920",
+    "ticketNumber": "202605-0003",
+    "comments": [],
+    "createdAt": "2026-05-07T12:00:59.503Z",
+    "updatedAt": "2026-05-07T12:00:59.503Z"
+  },
+  {
+    "channel": "App",
+    "subject": "skfhskjdfhs",
+    "description": "fjhkdjhfkdjhkf",
+    "reason": "تأخير التوصيل",
+    "status": "open",
+    "priority": "high",
+    "customerId": "cust_1777969079217_vyr4j219",
+    "customerName": "omnia",
+    "customerPhone": "01020105522",
+    "linkedOrderId": "ord_1778143564446_si376s1q",
+    "assignedTo": "مى",
+    "createdBy": "خدمة العملاء",
+    "compensationAmount": 0,
+    "openedAt": "2026-05-07T13:16:30.626Z",
+    "closedAt": null,
+    "id": "comp_1778159790628_ihkre1wi",
+    "ticketNumber": "202605-0004",
+    "comments": [],
+    "createdAt": "2026-05-07T13:16:30.631Z",
+    "updatedAt": "2026-05-07T13:16:30.632Z"
+  },
+  {
+    "channel": "Instashop",
+    "subject": "dcdfrrdf",
+    "description": "fdfdf",
+    "reason": "تأخير التوصيل",
+    "status": "open",
+    "priority": "medium",
+    "customerId": null,
+    "customerName": null,
+    "customerPhone": null,
+    "linkedOrderId": null,
+    "assignedTo": "خدمة العملاء",
+    "createdBy": "خدمة العملاء",
+    "compensationAmount": 0,
+    "openedAt": "2026-05-09T08:26:43.941Z",
+    "closedAt": null,
+    "id": "comp_1778315203950_32bqfwis",
+    "ticketNumber": "202605-0005",
+    "comments": [],
+    "createdAt": "2026-05-09T08:26:43.974Z",
+    "updatedAt": "2026-05-09T08:26:43.974Z"
+  }
+]

@@ -1,0 +1,51 @@
+[
+  {
+    "id": "prod_1",
+    "productName": "تمر عجوة",
+    "productDescription": "تمر عجوة من المدينة المنورة",
+    "productCategory": "أخرى",
+    "packagingType": "أطباق",
+    "weightGrams": 500,
+    "basePrice": 120,
+    "offerPrice": 100,
+    "productCondition": "فريش",
+    "isActive": true,
+    "stockStatus": "low",
+    "stockQuantity": 3,
+    "stockUpdatedAt": "2026-05-11T11:55:07.551Z",
+    "stockUpdatedBy": "الفرع"
+  },
+  {
+    "id": "prod_2",
+    "productName": "عسل أبيض",
+    "productDescription": "عسل أبيض طبيعي 100%",
+    "productCategory": "أخرى",
+    "packagingType": "أطباق",
+    "weightGrams": 250,
+    "basePrice": 180,
+    "offerPrice": null,
+    "productCondition": "فريش",
+    "isActive": true,
+    "stockStatus": "out",
+    "stockQuantity": 0,
+    "stockUpdatedAt": "2026-05-11T11:55:15.352Z",
+    "stockUpdatedBy": "الفرع"
+  },
+  {
+    "id": null,
+    "productName": "ريب اي",
+    "productDescription": "rib eye",
+    "bestRecipes": "grill",
+    "productCategory": "لحوم",
+    "fatRatioComments": "عالي",
+    "isStandardPackage": true,
+    "packagingType": "فاكيوم",
+    "weightGrams": 500,
+    "basePrice": 500,
+    "offerPrice": 480,
+    "hasDailyPriceChange": false,
+    "isByReservation": false,
+    "productCondition": "مبردة",
+    "isActive": true
+  }
+]

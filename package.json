@@ -1,0 +1,32 @@
+{
+  "name": "oms-next",
+  "version": "1.0.0",
+  "description": "Order Management System using Next.js and Google Sheets",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test:smoke": "node scripts/smoke-check.mjs",
+    "verify": "npm run typecheck && npm run test:smoke"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "next": "^14.2.0",
+    "google-spreadsheet": "^4.1.1",
+    "zustand": "^4.4.1",
+    "react-hot-toast": "^2.4.1"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.1",
+    "postcss": "^8.4.38",
+    "autoprefixer": "^10.4.17",
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "eslint": "^8.56.0",
+    "eslint-config-next": "^14.2.0"
+  }
+}

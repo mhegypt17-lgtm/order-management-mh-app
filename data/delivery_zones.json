@@ -1,0 +1,90 @@
+[
+  {
+    "id": "zone_1778069672881_o16krwzs",
+    "zone": 1,
+    "area": "التجمع",
+    "averageDistanceKm": 11,
+    "deliveryCost": 13,
+    "customerDeliveryFee": 80,
+    "freeDeliveryValue": 500,
+    "createdAt": "2026-05-06T12:14:32.880Z",
+    "updatedAt": "2026-05-09T08:37:32.446Z"
+  },
+  {
+    "id": "zone_1778069672881_uyl5n5vn",
+    "zone": 2,
+    "area": "مدينة نصر",
+    "averageDistanceKm": 14,
+    "deliveryCost": 16,
+    "customerDeliveryFee": 30,
+    "freeDeliveryValue": 900,
+    "createdAt": "2026-05-06T12:14:32.880Z",
+    "updatedAt": "2026-05-09T08:37:32.446Z"
+  },
+  {
+    "id": "zone_1778069672881_rsxe831r",
+    "zone": 3,
+    "area": "المعادي",
+    "averageDistanceKm": 18,
+    "deliveryCost": 21,
+    "customerDeliveryFee": 27,
+    "freeDeliveryValue": 1500,
+    "createdAt": "2026-05-06T12:14:32.880Z",
+    "updatedAt": "2026-05-09T08:37:32.446Z"
+  },
+  {
+    "id": "zone_1778069672881_1vc1fvg3",
+    "zone": 4,
+    "area": "منطقة 4",
+    "averageDistanceKm": 0,
+    "deliveryCost": 0,
+    "customerDeliveryFee": 0,
+    "freeDeliveryValue": 0,
+    "createdAt": "2026-05-06T12:14:32.880Z",
+    "updatedAt": "2026-05-09T08:37:32.446Z"
+  },
+  {
+    "id": "zone_1778069672881_9qg5rsbr",
+    "zone": 5,
+    "area": "منطقة 5",
+    "averageDistanceKm": 0,
+    "deliveryCost": 0,
+    "customerDeliveryFee": 0,
+    "freeDeliveryValue": 0,
+    "createdAt": "2026-05-06T12:14:32.880Z",
+    "updatedAt": "2026-05-09T08:37:32.446Z"
+  },
+  {
+    "id": "zone_1778069672881_caqjsaw7",
+    "zone": 6,
+    "area": "منطقة 6",
+    "averageDistanceKm": 0,
+    "deliveryCost": 0,
+    "customerDeliveryFee": 0,
+    "freeDeliveryValue": 0,
+    "createdAt": "2026-05-06T12:14:32.880Z",
+    "updatedAt": "2026-05-09T08:37:32.446Z"
+  },
+  {
+    "id": "zone_1778069672881_n3y1f57c",
+    "zone": 7,
+    "area": "منطقة 7",
+    "averageDistanceKm": 0,
+    "deliveryCost": 0,
+    "customerDeliveryFee": 0,
+    "freeDeliveryValue": 0,
+    "createdAt": "2026-05-06T12:14:32.880Z",
+    "updatedAt": "2026-05-09T08:37:32.446Z"
+  },
+  {
+    "id": "zone_1778069672881_0etbfysk",
+    "zone": 8,
+    "area": "منطقة 8",
+    "averageDistanceKm": 0,
+    "deliveryCost": 0,
+    "customerDeliveryFee": 0,
+    "freeDeliveryValue": 0,
+    "createdAt": "2026-05-06T12:14:32.880Z",
+    "updatedAt": "2026-05-09T08:37:32.446Z"
+  }
+]

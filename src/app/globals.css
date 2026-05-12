@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  direction: rtl;
+  font-family: 'Segoe UI', 'Arabic Typesetting', Arial, sans-serif;
+}
+
+html[dir="ltr"] {
+  direction: ltr;
+}
+
+body {
+  background-color: #f9fafb;
+  color: #1f2937;
+}
+
+/* Arabic Typography */
+@font-face {
+  font-family: 'Arabic';
+  src: local('Segoe UI'), local('Arial Unicode MS'), local('Arial');
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* RTL Utilities */
+.rtl-text {
+  direction: rtl;
+  text-align: right;
+}
+
+.ltr-text {
+  direction: ltr;
+  text-align: left;
+}
+
+/* Form inputs RTL */
+input[dir="rtl"],
+select[dir="rtl"],
+textarea[dir="rtl"] {
+  text-align: right;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-in;
+}

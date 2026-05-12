@@ -1,0 +1,24 @@
+[
+  {
+    "authorName": "رنا",
+    "authorRole": "cs",
+    "message": "rgrtgrt",
+    "type": "general",
+    "priority": "high",
+    "isCompleted": false,
+    "id": "brief_1778144005808_sfo60rna",
+    "createdAt": "2026-05-07T08:53:25.808Z",
+    "updatedAt": "2026-05-07T08:53:50.830Z"
+  },
+  {
+    "authorName": "مى",
+    "authorRole": "cs",
+    "message": "ferferferferferferferferferferferferfer",
+    "type": "general",
+    "priority": "low",
+    "isCompleted": false,
+    "id": "brief_1778144023321_ipjrmbp6",
+    "createdAt": "2026-05-07T08:53:43.321Z",
+    "updatedAt": "2026-05-07T13:14:50.819Z"
+  }
+]

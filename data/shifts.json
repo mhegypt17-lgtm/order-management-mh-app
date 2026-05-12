@@ -1,0 +1,24 @@
+[
+  {
+    "id": "shift-1778503436710-pb7oq",
+    "name": "Morning",
+    "startTime": "09:00",
+    "endTime": "17:00",
+    "daysOfWeek": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "agents": [
+      "مى",
+      "أمل"
+    ],
+    "active": true,
+    "createdAt": "2026-05-11T12:43:56.710Z",
+    "updatedAt": "2026-05-11T12:43:56.710Z"
+  }
+]

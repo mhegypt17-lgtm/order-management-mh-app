@@ -1,0 +1,40 @@
+[
+  {
+    "id": "adahi_1778076007420_g4ea6sas",
+    "seasonLabel": "2026 موسم الأضاحي",
+    "orderDate": "2026-05-06",
+    "orderTime": "16:59",
+    "orderReceiver": "رنا",
+    "orderMethod": "Call",
+    "customerId": "cust_1778076007420_fqxmb3or",
+    "customerName": "عميل اضاحي",
+    "phone": "01000000123",
+    "deliveryAddressId": "addr_1778076007420_3ql2js1p",
+    "addressLabel": "Home",
+    "deliveryArea": "التجمع",
+    "streetAddress": "عنوان اضاحي 1",
+    "googleMapsLink": "",
+    "items": [
+      {
+        "id": "adahi_item_1778076007412_es0cl3ac",
+        "productName": "باكدج صك 5 ك",
+        "quantity": 1,
+        "unitPrice": 100000,
+        "lineTotal": 100000
+      }
+    ],
+    "subtotal": 100000,
+    "paidAmount": 20000,
+    "remainingAmount": 80000,
+    "collectionPercent": 20,
+    "slaughterDay": "اليوم الأول",
+    "cuttingDetails": "",
+    "cleanOffal": false,
+    "hasDelivery": true,
+    "willWitnessSacrifice": false,
+    "notes": "",
+    "createdBy": "user_1778075100400",
+    "createdAt": "2026-05-06T14:00:07.411Z",
+    "updatedAt": "2026-05-06T14:00:07.411Z"
+  }
+]

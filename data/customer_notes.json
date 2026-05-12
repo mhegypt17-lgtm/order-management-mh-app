@@ -1,0 +1,29 @@
+[
+  {
+    "id": "note_1778316611779_6jxsi3",
+    "customerId": "cust_1777969079217_vyr4j219",
+    "note": "picky customer",
+    "author": "خدمة العملاء",
+    "role": "cs",
+    "createdAt": "2026-05-09T08:50:11.779Z",
+    "updatedAt": "2026-05-09T08:50:11.779Z"
+  },
+  {
+    "id": "note_1778316619794_l99i7v",
+    "customerId": "cust_1777969079217_vyr4j219",
+    "note": "chicken less than 1200g",
+    "author": "خدمة العملاء",
+    "role": "cs",
+    "createdAt": "2026-05-09T08:50:19.794Z",
+    "updatedAt": "2026-05-09T08:50:19.794Z"
+  },
+  {
+    "id": "note_1778316626763_49r5vm",
+    "customerId": "cust_1777969079217_vyr4j219",
+    "note": "Dont call only whatsapp",
+    "author": "خدمة العملاء",
+    "role": "cs",
+    "createdAt": "2026-05-09T08:50:26.763Z",
+    "updatedAt": "2026-05-09T08:50:26.763Z"
+  }
+]

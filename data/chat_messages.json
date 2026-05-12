@@ -1,0 +1,16 @@
+[
+  {
+    "id": "chat-1778502386427-x6jw1",
+    "role": "cs",
+    "author": "خدمة العملاء",
+    "text": "hi",
+    "createdAt": "2026-05-11T12:26:26.427Z"
+  },
+  {
+    "id": "chat-1778502410204-q3dnn",
+    "role": "branch",
+    "author": "الفرع",
+    "text": "hi",
+    "createdAt": "2026-05-11T12:26:50.204Z"
+  }
+]
