@@ -200,7 +200,82 @@ export default function OrdersPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
+      {/* Mobile cards (sm and below) */}
+      <div className="md:hidden space-y-3">
+        {isLoading ? (
+          <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500">⏳ جاري تحميل الطلبات...</div>
+        ) : filteredOrders.length === 0 ? (
+          <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500">📭 لا توجد طلبات مطابقة</div>
+        ) : (
+          filteredOrders.map((order) => (
+            <div
+              key={`m-${order.id}`}
+              onClick={() => router.push(`/orders/${order.id}`)}
+              className={`bg-white rounded-lg border-2 p-3 cursor-pointer hover:shadow ${order.isPriority ? 'border-red-400 bg-red-50/40' : order.isScheduled ? 'border-indigo-300' : 'border-gray-200'}`}
+            >
+              <div className="flex items-start justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {order.isPriority && (
+                    <span title={order.priorityReason || 'أولوية عاجلة'} className="px-1.5 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold animate-pulse">🚨 عاجل</span>
+                  )}
+                  {order.isScheduled && <span title="طلب مجدول">📅</span>}
+                  <span className="font-bold text-gray-900">{order.appOrderNo}</span>
+                </div>
+                <span className={`px-2 py-1 rounded-full text-xs font-semibold ${statusClasses[order.orderStatus] || 'bg-gray-100 text-gray-700'}`}>
+                  {order.orderStatus}
+                </span>
+              </div>
+              <div className="mt-2 text-sm text-gray-800">{order.customer?.customerName || '-'}</div>
+              <div className="text-xs text-gray-600 flex flex-wrap gap-x-3 gap-y-1 mt-1">
+                <span dir="ltr">📞 {order.customer?.phone || '-'}</span>
+                <span dir="ltr">📅 {order.orderDate}</span>
+                {order.isScheduled && order.scheduledDate && (
+                  <span className="text-indigo-700" dir="rtl">⏰ {order.scheduledDate}{order.scheduledTimeSlot ? ` — ${order.scheduledTimeSlot === 'ساعة محددة' ? (order.scheduledSpecificTime || 'موعد') : order.scheduledTimeSlot}` : ''}</span>
+                )}
+              </div>
+              <div className="mt-2">
+                <DeliveryProgressBar status={order.delivery?.deliveryStatus} compact />
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-sm font-bold text-gray-900">{Number(order.orderTotal || 0).toLocaleString()} ج.م</span>
+                <span className="text-xs text-gray-500">👤 {order.createdBy || '-'}</span>
+                <button
+                  disabled={duplicatingId === order.id}
+                  onClick={async (e) => {
+                    e.stopPropagation()
+                    if (duplicatingId) return
+                    setDuplicatingId(order.id)
+                    const t = toast.loading('جاري إعادة الطلب...')
+                    try {
+                      const res = await fetch(`/api/orders/${order.id}/duplicate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ createdBy: user?.id || 'unknown' }),
+                      })
+                      if (!res.ok) throw new Error('Failed')
+                      const data = await res.json()
+                      toast.dismiss(t)
+                      toast.success(`✅ تم إنشاء الطلب ${data.order?.appOrderNo || ''}`)
+                      await fetchOrders()
+                    } catch {
+                      toast.dismiss(t)
+                      toast.error('تعذرت إعادة الطلب')
+                    } finally {
+                      setDuplicatingId(null)
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50 text-emerald-700 text-xs font-semibold min-h-[36px]"
+                >
+                  {duplicatingId === order.id ? '⏳ ...' : '🔄 إعادة'}
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Desktop table (md and up) */}
+      <div className="hidden md:block bg-white rounded-lg border border-gray-200 overflow-x-auto">
         {isLoading ? (
           <div className="p-8 text-center text-gray-500">⏳ جاري تحميل الطلبات...</div>
         ) : filteredOrders.length === 0 ? (
