@@ -178,7 +178,7 @@ export default function ChatButton({ user }: ChatButtonProps) {
       {open && (
         <div
           dir="rtl"
-          className="absolute left-0 mt-2 w-[360px] sm:w-[420px] bg-white rounded-xl shadow-2xl border border-gray-200 z-50 flex flex-col"
+          className="fixed sm:absolute top-16 sm:top-auto right-2 sm:right-auto left-2 sm:left-0 sm:mt-2 sm:w-[420px] max-w-[calc(100vw-1rem)] bg-white rounded-xl shadow-2xl border border-gray-200 z-50 flex flex-col"
           style={{ maxHeight: '70vh' }}
         >
           {/* Header */}

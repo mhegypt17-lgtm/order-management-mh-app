@@ -75,7 +75,7 @@ export default function OnDutyBadge() {
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div dir="rtl" className="absolute left-0 mt-2 w-[300px] bg-white rounded-xl shadow-2xl border border-gray-200 z-40 p-3">
+          <div dir="rtl" className="absolute left-0 mt-2 w-[280px] sm:w-[300px] max-w-[calc(100vw-1rem)] bg-white rounded-xl shadow-2xl border border-gray-200 z-40 p-3">
             {isHoliday ? (
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-center">
                 <div className="text-2xl mb-1">🎉</div>

@@ -8,6 +8,11 @@
   box-sizing: border-box;
 }
 
+html, body {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
 html {
   direction: rtl;
   font-family: 'Segoe UI', 'Arabic Typesetting', Arial, sans-serif;
