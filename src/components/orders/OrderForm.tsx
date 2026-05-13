@@ -824,7 +824,109 @@ export default function OrderForm({ mode, orderId, repeatFromOrderId }: Props) {
 
       <details open className="bg-white rounded-lg border border-gray-200 p-4">
         <summary className="font-bold text-gray-900 cursor-pointer">3) تفاصيل الطلب</summary>
-        <div className="mt-4 overflow-x-auto">
+        {/* Mobile cards */}
+        <div className="mt-4 md:hidden space-y-3">
+          {items.map((item, index) => {
+            const selectedProduct = findProductByName(products, item.productNameInput)
+            const lineTotal = (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0)
+            const stock = selectedProduct?.stockStatus || (selectedProduct ? 'available' : null)
+            return (
+              <div key={`m-${index}`} className="border-2 border-gray-200 rounded-lg p-3 bg-gray-50 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-gray-500">عنصر #{index + 1}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeItem(index)}
+                    className="px-3 py-2 rounded bg-red-100 text-red-700 text-sm font-semibold min-h-[40px]"
+                  >
+                    🗑️ حذف
+                  </button>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1 text-right">المنتج</label>
+                  <input
+                    list={`products-m-${index}`}
+                    value={item.productNameInput}
+                    onChange={(e) => onProductNameChange(index, e.target.value)}
+                    className={`w-full px-3 py-2 border rounded text-right ${stock === 'out' ? 'border-red-400 bg-red-50' : stock === 'low' ? 'border-amber-400 bg-amber-50' : 'border-gray-300 bg-white'}`}
+                    placeholder="ابحث عن منتج"
+                    dir="rtl"
+                  />
+                  <datalist id={`products-m-${index}`}>
+                    {products.map((p) => (
+                      <option key={p.id} value={p.productName} />
+                    ))}
+                  </datalist>
+                  {selectedProduct && (
+                    <div className="mt-1 flex flex-wrap gap-1 text-[11px]">
+                      {stock === 'out' && <span className="px-2 py-0.5 rounded-full font-bold border bg-red-100 text-red-700 border-red-300">⛔ غير متاح</span>}
+                      {stock === 'low' && <span className="px-2 py-0.5 rounded-full font-bold border bg-amber-100 text-amber-800 border-amber-300">⚠️ منخفض</span>}
+                      {stock === 'available' && <span className="px-2 py-0.5 rounded-full font-bold border bg-green-100 text-green-700 border-green-300">✅ متاح</span>}
+                      <span className="px-2 py-0.5 rounded-full bg-white border border-gray-300 text-gray-700">سعر: {Number(selectedProduct.basePrice || 0).toLocaleString()} ج.م</span>
+                      {selectedProduct.offerPrice != null && (
+                        <span className="px-2 py-0.5 rounded-full bg-blue-50 border border-blue-300 text-blue-800">برومو: {Number(selectedProduct.offerPrice || 0).toLocaleString()} ج.م</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1 text-right">الكمية</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={item.quantity}
+                      onChange={(e) => updateItem(index, { quantity: Number(e.target.value) || 1 })}
+                      className="w-full px-2 py-2 border border-gray-300 rounded text-left bg-white"
+                      dir="ltr"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1 text-right">الوزن</label>
+                    <input
+                      type="number"
+                      value={item.weightGrams}
+                      onChange={(e) => updateItem(index, { weightGrams: Number(e.target.value) || 0 })}
+                      className="w-full px-2 py-2 border border-gray-300 rounded text-left bg-white"
+                      dir="ltr"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1 text-right">سعر الوحدة</label>
+                    <input
+                      type="number"
+                      value={item.unitPrice}
+                      onChange={(e) => updateItem(index, { unitPrice: Number(e.target.value) || 0 })}
+                      className="w-full px-2 py-2 border border-gray-300 rounded text-left bg-white"
+                      dir="ltr"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1 text-right">تعليمات خاصة</label>
+                  <input
+                    type="text"
+                    value={item.specialInstructions}
+                    onChange={(e) => updateItem(index, { specialInstructions: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded text-right bg-white"
+                    dir="rtl"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between bg-white rounded p-2 border border-gray-200">
+                  <span className="text-xs text-gray-600">الإجمالي</span>
+                  <span className="text-base font-bold text-gray-900">{lineTotal.toLocaleString()} ج.م</span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Desktop table */}
+        <div className="mt-4 hidden md:block overflow-x-auto">
           <table className="w-full min-w-[980px]">
             <thead className="bg-gray-100">
               <tr>
