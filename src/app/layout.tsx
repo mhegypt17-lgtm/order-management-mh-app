@@ -1,13 +1,16 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Toaster } from 'react-hot-toast'
 import './globals.css'
 
 export const metadata: Metadata = {
   title: 'نظام إدارة الطلبات',
   description: 'Order Management System - نظام متكامل لإدارة الطلبات والعملاء',
-  charset: 'utf-8',
-  viewport: 'width=device-width, initial-scale=1',
-  language: 'ar-EG',
+}
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
 }
 
 export default function RootLayout({

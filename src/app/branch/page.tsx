@@ -139,16 +139,16 @@ export default function BranchPage() {
           </select>
         </div>
         <div className="md:col-span-2 flex items-end">
-          <div className="flex gap-2">
+          <div className="flex gap-2 w-full">
             <button
               onClick={fetchOrders}
-              className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold"
+              className="flex-1 md:flex-initial px-4 py-3 sm:py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold min-h-[44px]"
             >
               تحديث القائمة
             </button>
             <button
               onClick={clearFilters}
-              className="px-4 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 font-semibold"
+              className="flex-1 md:flex-initial px-4 py-3 sm:py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 font-semibold min-h-[44px]"
             >
               رجوع لليوم
             </button>

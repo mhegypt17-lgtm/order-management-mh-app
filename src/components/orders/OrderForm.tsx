@@ -283,6 +283,8 @@ export default function OrderForm({ mode, orderId, repeatFromOrderId }: Props) {
             scheduledDate: order.scheduledDate || '',
             scheduledTimeSlot: order.scheduledTimeSlot || '',
             scheduledSpecificTime: order.scheduledSpecificTime || '',
+            isPriority: Boolean(order.isPriority),
+            priorityReason: order.priorityReason || '',
           })
 
           if (order.customer?.phone) {
@@ -1179,15 +1181,15 @@ export default function OrderForm({ mode, orderId, repeatFromOrderId }: Props) {
       )}
       </fieldset>
 
-      <div className="flex gap-3">
+      <div className="flex flex-col sm:flex-row gap-3 sticky bottom-0 sm:static bg-gray-50 sm:bg-transparent -mx-3 sm:mx-0 px-3 sm:px-0 py-3 sm:py-0 border-t sm:border-0 border-gray-200">
         <button
           type="submit"
           disabled={isSaving || isLockedForCs}
-          className="px-5 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:bg-red-300 text-white font-semibold"
+          className="w-full sm:w-auto px-5 py-3 sm:py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:bg-red-300 text-white font-semibold min-h-[44px]"
         >
           {isSaving ? '... جاري الحفظ' : mode === 'create' ? 'حفظ الطلب' : 'تحديث الطلب'}
         </button>
-        <button type="button" onClick={() => router.push('/orders')} className="px-5 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold">
+        <button type="button" onClick={() => router.push('/orders')} className="w-full sm:w-auto px-5 py-3 sm:py-2 rounded-lg bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold min-h-[44px]">
           رجوع
         </button>
       </div>

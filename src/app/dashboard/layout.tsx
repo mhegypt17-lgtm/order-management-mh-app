@@ -34,7 +34,7 @@ export default function DashboardLayout({
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar user={user} />
-      <main className="p-6 max-w-7xl mx-auto">
+      <main className="p-3 sm:p-4 lg:p-6 max-w-7xl mx-auto">
         {children}
       </main>
     </div>
