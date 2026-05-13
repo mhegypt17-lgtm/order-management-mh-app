@@ -250,5 +250,27 @@
     "deliveredAt": null,
     "updatedBy": "",
     "updatedAt": "2026-02-10T11:40:13.397Z"
+  },
+  {
+    "id": "del_1778685576255_8ely1o2a",
+    "orderId": "ord_1778510501993_90imh99c",
+    "deliveryStatus": "قبول",
+    "branchComments": "",
+    "productPhotos": [],
+    "invoicePhoto": "",
+    "deliveredAt": null,
+    "updatedBy": "",
+    "updatedAt": "2026-05-11T14:56:27.069Z"
+  },
+  {
+    "id": "del_1778685576342_107vapgm",
+    "orderId": "ord_1778683136097_exwop03x",
+    "deliveryStatus": "قبول",
+    "branchComments": "",
+    "productPhotos": [],
+    "invoicePhoto": "",
+    "deliveredAt": null,
+    "updatedBy": "",
+    "updatedAt": "2026-05-13T14:38:56.079Z"
   }
 ]

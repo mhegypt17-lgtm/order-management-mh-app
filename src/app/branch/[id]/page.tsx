@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
+import PhotoCapture from '@/components/branch/PhotoCapture'
 
 type OrderDetail = {
   id: string
@@ -94,27 +95,6 @@ export default function BranchOrderDetailPage() {
 
     load()
   }, [params.id])
-
-  const fileToDataUrl = (file: File): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(String(reader.result || ''))
-      reader.onerror = reject
-      reader.readAsDataURL(file)
-    })
-
-  const handleAddProductPhotos = async (files: FileList | null) => {
-    if (!files || files.length === 0) return
-    const list = Array.from(files).slice(0, 5)
-    const urls = await Promise.all(list.map(fileToDataUrl))
-    setProductPhotos((prev) => [...prev, ...urls].slice(0, 10))
-  }
-
-  const handleInvoicePhoto = async (files: FileList | null) => {
-    if (!files || files.length === 0) return
-    const url = await fileToDataUrl(files[0])
-    setInvoicePhoto(url)
-  }
 
   const handleStatusChange = async (newStatus: OrderDetail['delivery']['deliveryStatus']) => {
     setDeliveryStatus(newStatus)
@@ -292,23 +272,23 @@ export default function BranchOrderDetailPage() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1 text-right">صور المنتجات (متعددة)</label>
-            <input type="file" accept="image/*" multiple onChange={(e) => handleAddProductPhotos(e.target.files)} className="w-full" />
-            <div className="mt-2 grid grid-cols-3 gap-2">
-              {productPhotos.map((photo, idx) => (
-                <img key={idx} src={photo} alt={`product-${idx}`} className="w-full h-20 object-cover rounded border border-gray-200" />
-              ))}
-            </div>
-          </div>
+          <PhotoCapture
+            label="صور المنتجات (متعددة)"
+            multiple
+            max={10}
+            photos={productPhotos}
+            onChange={setProductPhotos}
+          />
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1 text-right">صورة الفاتورة (مفردة)</label>
-            <input type="file" accept="image/*" onChange={(e) => handleInvoicePhoto(e.target.files)} className="w-full" />
+            <PhotoCapture
+              label="صورة الفاتورة (مفردة)"
+              max={1}
+              photos={invoicePhoto ? [invoicePhoto] : []}
+              onChange={(arr) => setInvoicePhoto(arr[0] || '')}
+            />
             <div className="mt-2">
-              {invoicePhoto ? (
-                <img src={invoicePhoto} alt="invoice" className="w-full h-28 object-cover rounded border border-gray-200" />
-              ) : (
+              {invoicePhoto ? null : (
                 <div className="w-full h-28 border border-dashed border-gray-300 rounded flex items-center justify-center text-sm text-gray-500">
                   لا توجد صورة فاتورة
                 </div>
