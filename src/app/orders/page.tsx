@@ -92,20 +92,20 @@ export default function OrdersPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">📋 الطلبات</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">📋 الطلبات</h1>
           <p className="text-gray-600 mt-1">قائمة الطلبات مع البحث والتصفية</p>
         </div>
         <button
           onClick={() => router.push('/orders/new')}
-          className="px-5 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold"
+          className="w-full sm:w-auto px-5 py-3 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold min-h-[44px]"
         >
           + طلب جديد
         </button>
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 p-4 grid grid-cols-1 md:grid-cols-5 gap-3">
+      <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
         <input
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
