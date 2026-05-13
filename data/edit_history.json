@@ -809,5 +809,21 @@
       "itemCount": 1,
       "orderTotal": 480
     }
+  },
+  {
+    "id": "hist_1778683136115_1djpvn3f",
+    "changedAt": "2026-05-13T14:38:56.115Z",
+    "entityType": "order",
+    "entityId": "ord_1778683136097_exwop03x",
+    "orderId": "ord_1778683136097_exwop03x",
+    "action": "created",
+    "changedBy": "user_1778503158875",
+    "summary": "تم إنشاء الطلب MH-260513-001",
+    "details": {
+      "orderNo": "MH-260513-001",
+      "orderTotal": 130,
+      "itemCount": 1,
+      "isPriority": false
+    }
   }
 ]

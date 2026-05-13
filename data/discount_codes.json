@@ -1,0 +1,16 @@
+[
+  {
+    "id": "disc_1778685337684_rrv9ylkb",
+    "code": "VIP",
+    "type": "percent",
+    "amount": 10,
+    "maxDiscount": null,
+    "minOrderTotal": null,
+    "isActive": true,
+    "expiresAt": null,
+    "usageLimit": null,
+    "usedCount": 0,
+    "createdAt": "2026-05-13T15:15:37.683Z",
+    "updatedAt": "2026-05-13T15:15:37.683Z"
+  }
+]

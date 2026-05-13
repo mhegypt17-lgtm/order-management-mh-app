@@ -9,6 +9,7 @@ interface CustomerSummary {
   id: string
   customerName: string
   phone: string
+  wallet?: number
   createdAt: string
   addressCount: number
   totalOrders: number
@@ -109,7 +110,7 @@ interface Insights {
 }
 
 interface CustomerProfile {
-  customer: { id: string; customerName: string; phone: string; createdAt: string }
+  customer: { id: string; customerName: string; phone: string; wallet?: number; createdAt: string }
   addresses: Address[]
   orders: Order[]
   stats: Stats
@@ -171,6 +172,86 @@ export default function CRMView({ role }: CRMViewProps) {
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
   const [editingNoteText, setEditingNoteText] = useState('')
   const [savingNote, setSavingNote] = useState(false)
+
+  // ── Customer add/edit modal ───────────────────────────────────────────────
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [formPhone, setFormPhone] = useState('')
+  const [formName, setFormName] = useState('')
+  const [formWallet, setFormWallet] = useState('0')
+  const [savingCustomer, setSavingCustomer] = useState(false)
+
+  const refreshCustomerList = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/crm/customers?search=${encodeURIComponent(search)}`, { cache: 'no-store' })
+      if (res.ok) setCustomers(await res.json())
+    } catch {}
+  }, [search])
+
+  const openAddModal = () => {
+    setFormPhone('')
+    setFormName('')
+    setFormWallet('0')
+    setShowAddModal(true)
+  }
+
+  const openEditModal = () => {
+    if (!profile) return
+    setFormName(profile.customer.customerName)
+    setFormWallet(String(profile.customer.wallet ?? 0))
+    setShowEditModal(true)
+  }
+
+  const handleCreateCustomer = async () => {
+    if (!formPhone.trim() || !formName.trim()) {
+      toast.error('الهاتف والاسم مطلوبان')
+      return
+    }
+    setSavingCustomer(true)
+    try {
+      const res = await fetch('/api/customers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: formPhone, customerName: formName, wallet: Number(formWallet) || 0 }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'failed')
+      toast.success('تم إضافة العميل')
+      setShowAddModal(false)
+      await refreshCustomerList()
+      if (data.customer?.id) handleSelectCustomer(data.customer.id)
+    } catch (e: any) {
+      toast.error(e?.message || 'تعذر الحفظ')
+    } finally {
+      setSavingCustomer(false)
+    }
+  }
+
+  const handleUpdateCustomer = async () => {
+    if (!profile) return
+    if (!formName.trim()) {
+      toast.error('الاسم مطلوب')
+      return
+    }
+    setSavingCustomer(true)
+    try {
+      const res = await fetch(`/api/crm/customers/${profile.customer.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customerName: formName, wallet: Number(formWallet) || 0 }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'failed')
+      toast.success('تم تحديث العميل')
+      setShowEditModal(false)
+      await refreshCustomerList()
+      if (selectedId) loadProfile(selectedId)
+    } catch (e: any) {
+      toast.error(e?.message || 'تعذر الحفظ')
+    } finally {
+      setSavingCustomer(false)
+    }
+  }
 
   // Load customer list
   useEffect(() => {
@@ -316,7 +397,16 @@ export default function CRMView({ role }: CRMViewProps) {
       {/* ── Sidebar: Customer List ─────────────────────────────────────────── */}
       <div className="w-72 flex-shrink-0 border-l border-gray-200 bg-white flex flex-col">
         <div className="p-3 border-b border-gray-200">
-          <h2 className="text-base font-bold text-gray-800 mb-2">👥 قاعدة العملاء</h2>
+          <div className="flex items-center justify-between mb-2 gap-2">
+            <h2 className="text-base font-bold text-gray-800">👥 قاعدة العملاء</h2>
+            <button
+              onClick={openAddModal}
+              className="text-xs bg-red-600 hover:bg-red-700 text-white px-2 py-1.5 rounded font-semibold"
+              title="إضافة عميل جديد"
+            >
+              + إضافة
+            </button>
+          </div>
           <input
             type="text"
             placeholder="بحث بالاسم أو الهاتف..."
@@ -381,11 +471,21 @@ export default function CRMView({ role }: CRMViewProps) {
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 mb-4">
               <div className="flex justify-between items-start flex-wrap gap-3">
                 <div>
-                  <div className="flex items-center gap-3 mb-1">
+                  <div className="flex items-center gap-3 mb-1 flex-wrap">
                     <h1 className="text-2xl font-bold text-gray-900">{profile.customer.customerName}</h1>
                     <span className={`px-2 py-0.5 rounded-full text-sm font-bold ${profile.insights.tierColor || TIER_COLORS[profile.insights.tier] || 'bg-gray-100 text-gray-700'}`}>
                       {profile.insights.tierIcon ? `${profile.insights.tierIcon} ` : ''}{profile.insights.tier}
                     </span>
+                    <span className="px-2 py-0.5 rounded-full text-sm font-bold bg-emerald-100 text-emerald-800 border border-emerald-300" title="رصيد محفظة العميل">
+                      💳 {formatCurrency(Number(profile.customer.wallet) || 0)}
+                    </span>
+                    <button
+                      onClick={openEditModal}
+                      className="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold"
+                      title="تعديل اسم / محفظة العميل"
+                    >
+                      ✏️ تعديل
+                    </button>
                   </div>
                   <p className="text-gray-500 text-sm">{profile.customer.phone}</p>
                   {profile.insights.customerSource && (
@@ -958,6 +1058,58 @@ export default function CRMView({ role }: CRMViewProps) {
           </div>
         ) : null}
       </div>
+
+      {/* ── Add Customer Modal ─────────────────────────────────────────────── */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3" onClick={() => setShowAddModal(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-[95vw] sm:w-[90vw] md:max-w-md max-h-[85vh] overflow-y-auto p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-gray-900">+ إضافة عميل جديد</h3>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">رقم الهاتف</label>
+              <input value={formPhone} onChange={(e) => setFormPhone(e.target.value)} dir="ltr" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-left" placeholder="01234567890" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">اسم العميل</label>
+              <input value={formName} onChange={(e) => setFormName(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-right" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">رصيد المحفظة (ج.م)</label>
+              <input type="number" value={formWallet} onChange={(e) => setFormWallet(e.target.value)} dir="ltr" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-left" />
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+              <button disabled={savingCustomer} onClick={handleCreateCustomer} className="w-full sm:w-auto sm:flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg font-medium min-h-[44px]">{savingCustomer ? '⏳ ...' : 'حفظ'}</button>
+              <button onClick={() => setShowAddModal(false)} className="w-full sm:w-auto px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 min-h-[44px]">إلغاء</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Edit Customer Modal ────────────────────────────────────────────── */}
+      {showEditModal && profile && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3" onClick={() => setShowEditModal(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-[95vw] sm:w-[90vw] md:max-w-md max-h-[85vh] overflow-y-auto p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-gray-900">✏️ تعديل بيانات العميل</h3>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">رقم الهاتف</label>
+              <input value={profile.customer.phone} disabled dir="ltr" className="w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-left text-gray-500" />
+              <p className="text-xs text-gray-400 mt-1">لا يمكن تغيير رقم الهاتف.</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">اسم العميل</label>
+              <input value={formName} onChange={(e) => setFormName(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-right" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">رصيد المحفظة (ج.م)</label>
+              <input type="number" value={formWallet} onChange={(e) => setFormWallet(e.target.value)} dir="ltr" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-left" />
+              <p className="text-xs text-gray-500 mt-1">يمكن تعديله لإضافة أو خصم رصيد.</p>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+              <button disabled={savingCustomer} onClick={handleUpdateCustomer} className="w-full sm:w-auto sm:flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg font-medium min-h-[44px]">{savingCustomer ? '⏳ ...' : 'حفظ التعديلات'}</button>
+              <button onClick={() => setShowEditModal(false)} className="w-full sm:w-auto px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 min-h-[44px]">إلغاء</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

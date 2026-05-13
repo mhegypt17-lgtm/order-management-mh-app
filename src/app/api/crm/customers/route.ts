@@ -61,6 +61,7 @@ export async function GET(req: NextRequest) {
           id: c.id,
           customerName: c.customerName,
           phone: c.phone,
+          wallet: Number(c.wallet) || 0,
           createdAt: c.createdAt,
           addressCount: custAddresses.length,
           totalOrders: custOrders.length,

@@ -170,6 +170,12 @@ export default function OrderForm({ mode, orderId, repeatFromOrderId }: Props) {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [isLookupLoading, setIsLookupLoading] = useState(false)
+  const [customerWallet, setCustomerWallet] = useState<number | null>(null)
+  const [useWallet, setUseWallet] = useState(false)
+  const [walletAmountInput, setWalletAmountInput] = useState('')
+  const [discountCodeInput, setDiscountCodeInput] = useState('')
+  const [appliedDiscount, setAppliedDiscount] = useState<{ code: string; amount: number; type: 'percent' | 'value'; value: number } | null>(null)
+  const [isCheckingDiscount, setIsCheckingDiscount] = useState(false)
 
   const [products, setProducts] = useState<Product[]>([])
   const [addresses, setAddresses] = useState<CustomerAddress[]>([])
@@ -291,6 +297,7 @@ export default function OrderForm({ mode, orderId, repeatFromOrderId }: Props) {
             const lookupRes = await fetch(`/api/customers?phone=${encodeURIComponent(order.customer.phone)}`)
             const lookupData = await lookupRes.json()
             setAddresses(lookupData.addresses || [])
+            if (lookupData.customer) setCustomerWallet(Number(lookupData.customer.wallet) || 0)
           } else {
             setAddresses([])
           }
@@ -434,6 +441,21 @@ export default function OrderForm({ mode, orderId, repeatFromOrderId }: Props) {
     : 95
   const orderTotal = subtotal + deliveryFee
 
+  // Discount code applied first to gross total
+  const grossTotal = orderTotal
+  const discountAmount = appliedDiscount ? Math.min(appliedDiscount.amount, grossTotal) : 0
+  const afterDiscount = Math.max(0, grossTotal - discountAmount)
+
+  // Wallet credit applied after discount
+  const walletAvailable = Math.max(0, Number(customerWallet) || 0)
+  const requestedWallet = useWallet
+    ? walletAmountInput.trim() === ''
+      ? walletAvailable
+      : Math.max(0, Number(walletAmountInput) || 0)
+    : 0
+  const walletApplied = mode === 'create' ? Math.min(requestedWallet, walletAvailable, afterDiscount) : 0
+  const netTotal = afterDiscount - walletApplied
+
   // CS lock: once branch marks the order as out for delivery or delivered,
   // customer service can no longer edit it. Admin can still override.
   const lockedDeliveryStatuses = ['في الطريق', 'تم التوصيل']
@@ -442,6 +464,36 @@ export default function OrderForm({ mode, orderId, repeatFromOrderId }: Props) {
     user?.role === 'cs' &&
     !!deliveryData?.deliveryStatus &&
     lockedDeliveryStatuses.includes(deliveryData.deliveryStatus)
+
+  const handleApplyDiscount = async () => {
+    const code = discountCodeInput.trim().toUpperCase()
+    if (!code) {
+      toast.error('أدخل كود الخصم')
+      return
+    }
+    setIsCheckingDiscount(true)
+    try {
+      const gross = subtotal + deliveryFee
+      const res = await fetch(`/api/discount-codes/validate?code=${encodeURIComponent(code)}&gross=${gross}`, { cache: 'no-store' })
+      const data = await res.json()
+      if (!data.ok) {
+        setAppliedDiscount(null)
+        toast.error(data.reason || 'الكود غير صالح')
+        return
+      }
+      setAppliedDiscount({ code: data.code, amount: Number(data.discount) || 0, type: data.type, value: Number(data.amount) || 0 })
+      toast.success(`✅ تم تطبيق خصم ${(Number(data.discount) || 0).toLocaleString()} ج.م`)
+    } catch {
+      toast.error('تعذر التحقق من الكود')
+    } finally {
+      setIsCheckingDiscount(false)
+    }
+  }
+
+  const handleClearDiscount = () => {
+    setAppliedDiscount(null)
+    setDiscountCodeInput('')
+  }
 
   const handleLookupCustomer = async () => {
     const cleanPhone = form.phone.trim()
@@ -462,6 +514,7 @@ export default function OrderForm({ mode, orderId, repeatFromOrderId }: Props) {
 
       if (!data.customer) {
         setAddresses([])
+        setCustomerWallet(null)
         setForm((prev) => ({
           ...prev,
           customerName: '',
@@ -476,6 +529,7 @@ export default function OrderForm({ mode, orderId, repeatFromOrderId }: Props) {
       }
 
       setAddresses(data.addresses || [])
+      setCustomerWallet(Number(data.customer.wallet) || 0)
       const firstAddress = data.addresses?.[0]
 
       setForm((prev) => ({
@@ -618,6 +672,8 @@ export default function OrderForm({ mode, orderId, repeatFromOrderId }: Props) {
         ...form,
         deliveryArea: resolvedDeliveryArea,
         items: validItems,
+        walletApplied,
+        discountCode: appliedDiscount?.code || null,
         createdBy: user?.id || 'unknown',
         actorRole: user?.role || 'unknown',
       }
@@ -775,6 +831,11 @@ export default function OrderForm({ mode, orderId, repeatFromOrderId }: Props) {
                 {isLookupLoading ? '...' : 'بحث'}
               </button>
             </div>
+            {customerWallet !== null && (
+              <div className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-300 text-emerald-800 text-sm font-semibold">
+                💳 رصيد المحفظة: {customerWallet.toLocaleString('ar-EG')} ج.م
+              </div>
+            )}
           </div>
 
           <FieldInput label="اسم العميل" value={form.customerName} onChange={(v) => updateForm('customerName', v)} />
@@ -1041,8 +1102,92 @@ export default function OrderForm({ mode, orderId, repeatFromOrderId }: Props) {
         <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
           <SummaryCard label="الإجمالي الفرعي" value={`${subtotal.toLocaleString()} ج.م`} />
           <SummaryCard label="رسوم التوصيل" value={`${deliveryFee.toLocaleString()} ج.م`} />
-          <SummaryCard label="الإجمالي الكلي" value={`${orderTotal.toLocaleString()} ج.م`} highlight />
+          <SummaryCard label={walletApplied > 0 ? 'الإجمالي بعد المحفظة' : (discountAmount > 0 ? 'الإجمالي بعد الخصم' : 'الإجمالي الكلي')} value={`${netTotal.toLocaleString()} ج.م`} highlight />
         </div>
+
+        {mode === 'create' && (
+          <div className="mt-3 rounded-lg border-2 border-amber-200 bg-amber-50 p-3">
+            <div className="text-sm font-semibold text-amber-900 mb-2">🏷️ كود الخصم</div>
+            {appliedDiscount ? (
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div className="text-sm text-amber-900">
+                  <span className="font-bold">{appliedDiscount.code}</span> —{' '}
+                  {appliedDiscount.type === 'percent'
+                    ? `خصم ${appliedDiscount.value}% (${appliedDiscount.amount.toLocaleString()} ج.م)`
+                    : `خصم ${appliedDiscount.amount.toLocaleString()} ج.م`}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleClearDiscount}
+                  className="w-full sm:w-auto px-3 py-2 rounded-lg bg-red-100 text-red-700 hover:bg-red-200 text-sm font-semibold min-h-[40px]"
+                >
+                  ✖ إزالة
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  value={discountCodeInput}
+                  onChange={(e) => setDiscountCodeInput(e.target.value.toUpperCase())}
+                  placeholder="أدخل كود الخصم"
+                  className="flex-1 px-3 py-2 border border-amber-300 rounded-lg text-left bg-white focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  dir="ltr"
+                />
+                <button
+                  type="button"
+                  onClick={handleApplyDiscount}
+                  disabled={isCheckingDiscount}
+                  className="w-full sm:w-auto px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-semibold min-h-[40px]"
+                >
+                  {isCheckingDiscount ? '...' : 'تطبيق'}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {mode === 'create' && walletAvailable > 0 && (
+          <div className="mt-3 rounded-lg border-2 border-emerald-200 bg-emerald-50 p-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={useWallet}
+                onChange={(e) => {
+                  setUseWallet(e.target.checked)
+                  if (!e.target.checked) setWalletAmountInput('')
+                }}
+                className="w-5 h-5 accent-emerald-600"
+              />
+              <span className="text-sm font-semibold text-emerald-900">
+                💳 خصم من رصيد المحفظة ({walletAvailable.toLocaleString()} ج.م متاح)
+              </span>
+            </label>
+            {useWallet && (
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-medium text-emerald-900 mb-1">المبلغ المطلوب خصمه (اتركه فارغًا للخصم الأقصى)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={Math.min(walletAvailable, grossTotal)}
+                    value={walletAmountInput}
+                    onChange={(e) => setWalletAmountInput(e.target.value)}
+                    placeholder={String(Math.min(walletAvailable, grossTotal))}
+                    className="w-full px-3 py-2 border border-emerald-300 rounded-lg text-left bg-white"
+                    dir="ltr"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <div className="w-full text-right text-sm text-emerald-900">
+                    <div>سيتم خصم: <strong>{walletApplied.toLocaleString()} ج.م</strong></div>
+                    <div>الرصيد بعد الحفظ: <strong>{(walletAvailable - walletApplied).toLocaleString()} ج.م</strong></div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {selectedZone && freeDeliveryValue > 0 && (
           <p className="mt-2 text-xs text-gray-600 text-right">

@@ -1,373 +1,365 @@
 {
   "orderReceivers": [
     {
-      "id": "lookup_1778140374135_zv7s0jez",
+      "id": "lookup_1778683596707_ued8517k",
       "label": "رنا",
       "isActive": true,
       "sortOrder": 1,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_7sikojcc",
+      "id": "lookup_1778683596707_39xotvkj",
       "label": "مى",
       "isActive": true,
       "sortOrder": 2,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_rvj4wgqa",
+      "id": "lookup_1778683596707_2q5pniko",
       "label": "ميرنا",
       "isActive": true,
       "sortOrder": 3,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_5f93rwrx",
+      "id": "lookup_1778683596707_k5tjntld",
       "label": "أمل",
       "isActive": true,
       "sortOrder": 4,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
-    },
-    {
-      "id": "tmp_1778315895610_6vx7p",
-      "label": "بترا",
-      "isActive": true,
-      "sortOrder": 5,
-      "createdAt": "2026-05-09T08:38:17.100Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     }
   ],
   "orderMethods": [
     {
-      "id": "lookup_1778140374135_1kef0xza",
+      "id": "lookup_1778683596707_1l8ckqau",
       "label": "FB",
       "isActive": true,
       "sortOrder": 1,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_1twxdhsm",
+      "id": "lookup_1778683596707_y0rbr9g1",
       "label": "Call",
       "isActive": true,
       "sortOrder": 2,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_83gevneh",
+      "id": "lookup_1778683596707_xm6akaq9",
       "label": "App",
       "isActive": true,
       "sortOrder": 3,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_h2wxwdx1",
+      "id": "lookup_1778683596707_k4a3ey6d",
       "label": "WhatsApp",
       "isActive": true,
       "sortOrder": 4,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_gqqoacas",
+      "id": "lookup_1778683596707_67scry0d",
       "label": "B2B",
       "isActive": true,
       "sortOrder": 5,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_r95m58zt",
+      "id": "lookup_1778683596707_xyj29qir",
       "label": "W.S",
       "isActive": true,
       "sortOrder": 6,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     }
   ],
   "customerSources": [
     {
-      "id": "lookup_1778140374135_b4xj8xqu",
+      "id": "lookup_1778683596707_ibvvnben",
       "label": "Facebook",
       "isActive": true,
       "sortOrder": 1,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_lqo129xq",
+      "id": "lookup_1778683596707_m6azahrv",
       "label": "Instashop",
       "isActive": true,
       "sortOrder": 2,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_taoro71v",
+      "id": "lookup_1778683596707_ufz8kusl",
       "label": "Google",
       "isActive": true,
       "sortOrder": 3,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_3laqv47i",
+      "id": "lookup_1778683596707_e6whmk1i",
       "label": "Breadfast",
       "isActive": true,
       "sortOrder": 4,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_opoyrq80",
+      "id": "lookup_1778683596707_5jh6awvs",
       "label": "Friend",
       "isActive": true,
       "sortOrder": 5,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_2jlq0zr1",
+      "id": "lookup_1778683596707_bq6uqo6u",
       "label": "Branch",
       "isActive": true,
       "sortOrder": 6,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_xorsftcl",
+      "id": "lookup_1778683596707_350nh89k",
       "label": "Family",
       "isActive": true,
       "sortOrder": 7,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_kkzjeesd",
+      "id": "lookup_1778683596707_r8ibqp0j",
       "label": "Instagram",
       "isActive": true,
       "sortOrder": 8,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_4v1jxu7y",
+      "id": "lookup_1778683596707_ftboxg41",
       "label": "Play Store",
       "isActive": true,
       "sortOrder": 9,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_5bl1k73i",
+      "id": "lookup_1778683596707_zzwtxkd6",
       "label": "Ad",
       "isActive": true,
       "sortOrder": 10,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_tvsm32jn",
+      "id": "lookup_1778683596707_kicfvu7c",
       "label": "GoodsMart",
       "isActive": true,
       "sortOrder": 11,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_sbjpcfeq",
+      "id": "lookup_1778683596707_gy911e23",
       "label": "Other",
       "isActive": true,
       "sortOrder": 12,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     }
   ],
   "orderTypes": [
     {
-      "id": "lookup_1778140374135_gk1tcfkm",
+      "id": "lookup_1778683596707_1kzsvxp5",
       "label": "B2B",
       "isActive": true,
       "sortOrder": 1,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_f82mhvqt",
+      "id": "lookup_1778683596707_iaqp38wu",
       "label": "Online",
       "isActive": true,
       "sortOrder": 2,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_ht1miizx",
+      "id": "lookup_1778683596707_g1lype7l",
       "label": "Instashop",
       "isActive": true,
       "sortOrder": 3,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_rrbswwxj",
+      "id": "lookup_1778683596707_lq812wt2",
       "label": "App",
       "isActive": true,
       "sortOrder": 4,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     }
   ],
   "paymentMethods": [
     {
-      "id": "lookup_1778140374135_91lbiv1g",
+      "id": "lookup_1778683596707_m2r80b5u",
       "label": "Instapay",
       "isActive": true,
       "sortOrder": 1,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_y22uhjwz",
+      "id": "lookup_1778683596707_zsvb66ua",
       "label": "Cash",
       "isActive": true,
       "sortOrder": 2,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_bgj36n85",
+      "id": "lookup_1778683596707_dadybiaf",
       "label": "Visa",
       "isActive": true,
       "sortOrder": 3,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_rbtacdvn",
+      "id": "lookup_1778683596707_muhjnl5v",
       "label": "Credit",
       "isActive": true,
       "sortOrder": 4,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     }
   ],
   "orderStatuses": [
     {
-      "id": "lookup_status_sari",
+      "id": "lookup_1778683596707_a34qjo4x",
       "label": "ساري",
       "isActive": true,
       "sortOrder": 1,
-      "createdAt": "2026-05-11T10:00:00.000Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_9zmq0cz0",
+      "id": "lookup_1778683596707_8uhjpoh6",
       "label": "مؤجل",
       "isActive": true,
       "sortOrder": 2,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778140374135_ftpw0rn5",
+      "id": "lookup_1778683596707_3e4tdu47",
       "label": "حجز",
       "isActive": true,
       "sortOrder": 3,
-      "createdAt": "2026-05-07T07:52:54.135Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_status_laghi",
+      "id": "lookup_1778683596707_cct5h8ua",
       "label": "لاغي",
       "isActive": true,
       "sortOrder": 4,
-      "createdAt": "2026-05-11T10:00:00.000Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     }
   ],
   "complaintChannels": [
     {
-      "id": "lookup_1778144630553_845wo56y",
+      "id": "lookup_1778683596707_fhe0dlzn",
       "label": "Instashop",
       "isActive": true,
       "sortOrder": 1,
-      "createdAt": "2026-05-07T09:03:50.553Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778144630553_5skch2l7",
+      "id": "lookup_1778683596707_yv89ysbx",
       "label": "App",
       "isActive": true,
       "sortOrder": 2,
-      "createdAt": "2026-05-07T09:03:50.553Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778144630553_5sr2s841",
+      "id": "lookup_1778683596707_o79as9l0",
       "label": "Branch",
       "isActive": true,
       "sortOrder": 3,
-      "createdAt": "2026-05-07T09:03:50.553Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778144630553_3r25ub5j",
+      "id": "lookup_1778683596707_h2qs0k2y",
       "label": "Breadfast",
       "isActive": true,
       "sortOrder": 4,
-      "createdAt": "2026-05-07T09:03:50.553Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     }
   ],
   "complaintReasons": [
     {
-      "id": "lookup_1778157691484_dmgw04a4",
+      "id": "lookup_1778683596707_ko7p3d6h",
       "label": "تأخير التوصيل",
       "isActive": true,
       "sortOrder": 1,
-      "createdAt": "2026-05-07T12:41:31.484Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778157691484_gkmjhjtg",
+      "id": "lookup_1778683596707_5nkf40x0",
       "label": "جودة المنتج",
       "isActive": true,
       "sortOrder": 2,
-      "createdAt": "2026-05-07T12:41:31.484Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778157691484_hjkh2bw5",
+      "id": "lookup_1778683596707_ngv36mya",
       "label": "اختلاف الطلب",
       "isActive": true,
       "sortOrder": 3,
-      "createdAt": "2026-05-07T12:41:31.484Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778157691484_jab3sgmr",
+      "id": "lookup_1778683596707_jx0dh6eo",
       "label": "سوء الخدمة",
       "isActive": true,
       "sortOrder": 4,
-      "createdAt": "2026-05-07T12:41:31.484Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     },
     {
-      "id": "lookup_1778157691484_9eduki9k",
+      "id": "lookup_1778683596707_a6q8xovr",
       "label": "أخرى",
       "isActive": true,
       "sortOrder": 5,
-      "createdAt": "2026-05-07T12:41:31.484Z",
-      "updatedAt": "2026-05-13T10:53:47.985Z"
+      "createdAt": "2026-05-13T14:46:36.707Z",
+      "updatedAt": "2026-05-13T15:17:04.111Z"
     }
   ],
-  "monthlyCompensationBudget": 200,
+  "monthlyCompensationBudget": 5000,
   "slaHours": 4,
   "loyalty": {
     "mode": "frequency",
@@ -380,13 +372,13 @@
       },
       {
         "name": "فضي",
-        "threshold": 2,
+        "threshold": 5,
         "color": "bg-gray-100 text-gray-700",
         "icon": "🥈"
       },
       {
         "name": "ذهبي",
-        "threshold": 4,
+        "threshold": 10,
         "color": "bg-yellow-100 text-yellow-800",
         "icon": "🥇"
       },
@@ -416,9 +408,9 @@
     }
   },
   "agentNotice": {
-    "message": "new promo for minced meat",
+    "message": "",
     "type": "info",
-    "isActive": true,
-    "updatedAt": "2026-05-11T11:26:10.125Z"
+    "isActive": false,
+    "updatedAt": "2026-05-13T14:46:36.707Z"
   }
 }

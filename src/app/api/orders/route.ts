@@ -20,6 +20,9 @@ import {
   writeCustomers,
   writeOrderItems,
   writeOrders,
+  evaluateDiscountCode,
+  readDiscountCodes,
+  writeDiscountCodes,
 } from '@/lib/omsData'
 
 const PRODUCTS_FILE = path.join(process.cwd(), 'data', 'products.json')
@@ -213,7 +216,31 @@ export async function POST(request: NextRequest) {
 
     const subtotal = normalizedItems.reduce((sum, i) => sum + i.lineTotal, 0)
     const deliveryFee = computeDeliveryFeeByArea(subtotal, body.deliveryArea || deliveryAddress.area)
-    const orderTotal = subtotal + deliveryFee
+    const grossTotal = subtotal + deliveryFee
+
+    // Discount code (validated server-side)
+    let discountApplied = 0
+    let discountCodeUsed: string | null = null
+    let discountCodeId: string | null = null
+    if (body.discountCode) {
+      const evalResult = evaluateDiscountCode(String(body.discountCode), grossTotal)
+      if (evalResult.ok && evalResult.code) {
+        discountApplied = evalResult.discount
+        discountCodeUsed = evalResult.code.code
+        discountCodeId = evalResult.code.id
+      }
+    }
+    const afterDiscount = Math.max(0, grossTotal - discountApplied)
+
+    // Wallet credit (capped by remaining payable)
+    const requestedWallet = Math.max(0, Number(body.walletApplied) || 0)
+    const customerWallet = Math.max(0, Number(customer.wallet) || 0)
+    const walletApplied = Math.min(requestedWallet, customerWallet, afterDiscount)
+    const orderTotal = afterDiscount - walletApplied
+    if (walletApplied > 0) {
+      customer.wallet = customerWallet - walletApplied
+      customer.updatedAt = now
+    }
 
     const appOrderNo = generateAppOrderNo(body.orderDate, body.orderType, orders)
 
@@ -244,6 +271,9 @@ export async function POST(request: NextRequest) {
       priorityReason: body.isPriority ? (body.priorityReason || null) : null,
       subtotal,
       deliveryFee,
+      walletApplied,
+      discountCode: discountCodeUsed,
+      discountApplied,
       orderTotal,
       createdBy: body.createdBy || 'unknown',
       createdAt: now,
@@ -268,6 +298,15 @@ export async function POST(request: NextRequest) {
     writeAddresses(addresses)
     writeOrders(orders)
     writeOrderItems([...orderItems, ...newItems])
+
+    if (discountCodeId) {
+      const allCodes = readDiscountCodes()
+      const ci = allCodes.findIndex((c) => c.id === discountCodeId)
+      if (ci >= 0) {
+        allCodes[ci] = { ...allCodes[ci], usedCount: (allCodes[ci].usedCount || 0) + 1, updatedAt: now }
+        writeDiscountCodes(allCodes)
+      }
+    }
 
     appendEditHistory({
       entityType: 'order',

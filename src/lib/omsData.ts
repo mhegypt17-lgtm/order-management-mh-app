@@ -14,6 +14,7 @@ const ADAHI_ORDERS_FILE = path.join(DATA_DIR, 'adahi_orders.json')
 const ORDER_SETTINGS_FILE = path.join(DATA_DIR, 'order_settings.json')
 const DAILY_BRIEFINGS_FILE = path.join(DATA_DIR, 'daily_briefings.json')
 const COMPLAINTS_FILE = path.join(DATA_DIR, 'complaints.json')
+const DISCOUNT_CODES_FILE = path.join(DATA_DIR, 'discount_codes.json')
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -48,6 +49,7 @@ export interface CustomerRecord {
   id: string
   phone: string
   customerName: string
+  wallet?: number
   createdAt: string
   updatedAt: string
 }
@@ -88,6 +90,9 @@ export interface OrderRecord {
   priorityReason?: string | null
   subtotal: number
   deliveryFee: number
+  walletApplied?: number
+  discountCode?: string | null
+  discountApplied?: number
   orderTotal: number
   createdBy: string
   createdAt: string
@@ -819,6 +824,79 @@ export function readComplaints() {
 
 export function writeComplaints(data: ComplaintRecord[]) {
   writeJsonFile<ComplaintRecord>(COMPLAINTS_FILE, data)
+}
+
+// ─── Discount codes ───────────────────────────────────────────────────────────
+
+export interface DiscountCodeRecord {
+  id: string
+  code: string                  // uppercased, unique
+  type: 'percent' | 'value'
+  amount: number                // percent: 0-100, value: ج.م
+  maxDiscount?: number | null   // optional cap for percent
+  minOrderTotal?: number | null // optional minimum gross to qualify
+  isActive: boolean
+  expiresAt?: string | null     // ISO date or null
+  usageLimit?: number | null    // null/0 = unlimited
+  usedCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export function readDiscountCodes(): DiscountCodeRecord[] {
+  return readJsonFile<DiscountCodeRecord>(DISCOUNT_CODES_FILE)
+}
+
+export function writeDiscountCodes(data: DiscountCodeRecord[]) {
+  writeJsonFile<DiscountCodeRecord>(DISCOUNT_CODES_FILE, data)
+}
+
+/**
+ * Validate a discount code against an order's gross total.
+ * Returns { ok, reason?, discount, code } where `discount` is the ج.م amount to deduct.
+ */
+export function evaluateDiscountCode(
+  code: string,
+  grossTotal: number
+): { ok: boolean; reason?: string; discount: number; code: DiscountCodeRecord | null } {
+  const trimmed = String(code || '').trim().toUpperCase()
+  if (!trimmed) return { ok: false, reason: 'كود فارغ', discount: 0, code: null }
+
+  const codes = readDiscountCodes()
+  const found = codes.find((c) => c.code.toUpperCase() === trimmed) || null
+  if (!found) return { ok: false, reason: 'الكود غير موجود', discount: 0, code: null }
+  if (!found.isActive) return { ok: false, reason: 'الكود متوقف', discount: 0, code: found }
+
+  if (found.expiresAt) {
+    const expiry = new Date(found.expiresAt).getTime()
+    if (Number.isFinite(expiry) && Date.now() > expiry) {
+      return { ok: false, reason: 'الكود منتهي الصلاحية', discount: 0, code: found }
+    }
+  }
+
+  if (found.usageLimit && found.usageLimit > 0 && found.usedCount >= found.usageLimit) {
+    return { ok: false, reason: 'تم استنفاد الكود', discount: 0, code: found }
+  }
+
+  if (found.minOrderTotal && grossTotal < found.minOrderTotal) {
+    return {
+      ok: false,
+      reason: `الحد الأدنى للطلب ${found.minOrderTotal.toLocaleString()} ج.م`,
+      discount: 0,
+      code: found,
+    }
+  }
+
+  let discount = 0
+  if (found.type === 'percent') {
+    discount = (grossTotal * Math.max(0, Math.min(100, found.amount))) / 100
+    if (found.maxDiscount && found.maxDiscount > 0) discount = Math.min(discount, found.maxDiscount)
+  } else {
+    discount = Math.max(0, found.amount)
+  }
+  discount = Math.min(discount, grossTotal)
+
+  return { ok: true, discount: Math.round(discount * 100) / 100, code: found }
 }
 
 export function createComplaint(

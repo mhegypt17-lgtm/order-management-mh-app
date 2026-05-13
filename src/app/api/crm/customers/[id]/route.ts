@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import {
   readCustomers,
+  writeCustomers,
   readAddresses,
   readOrders,
   readOrderItems,
@@ -253,5 +254,38 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   } catch (err) {
     console.error('CRM customer detail error:', err)
     return NextResponse.json({ error: 'Server error' }, { status: 500 })
+  }
+}
+
+// Update customer name and/or wallet. Never deletes a record.
+export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const body = await req.json()
+    const customers = readCustomers()
+    const idx = customers.findIndex((c) => c.id === params.id)
+    if (idx < 0) return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
+
+    const current = customers[idx]
+    const next = { ...current }
+
+    if (typeof body.customerName === 'string' && body.customerName.trim()) {
+      next.customerName = body.customerName.trim()
+    }
+    if (body.wallet !== undefined && body.wallet !== null && body.wallet !== '') {
+      const w = Number(body.wallet)
+      if (!Number.isFinite(w)) {
+        return NextResponse.json({ error: 'قيمة المحفظة غير صحيحة' }, { status: 400 })
+      }
+      next.wallet = w
+    }
+    next.updatedAt = new Date().toISOString()
+
+    customers[idx] = next
+    writeCustomers(customers)
+
+    return NextResponse.json({ customer: next })
+  } catch (err) {
+    console.error('CRM customer update error:', err)
+    return NextResponse.json({ error: 'تعذر تحديث بيانات العميل' }, { status: 500 })
   }
 }

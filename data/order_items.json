@@ -273,5 +273,16 @@
     "lineTotal": 400,
     "specialInstructions": "",
     "createdAt": "2026-05-11T14:56:27.069Z"
+  },
+  {
+    "id": "item_1778683136097_5i2dhkts",
+    "orderId": "ord_1778683136097_exwop03x",
+    "productId": "prod_1",
+    "quantity": 1,
+    "weightGrams": 500,
+    "unitPrice": 100,
+    "lineTotal": 100,
+    "specialInstructions": "",
+    "createdAt": "2026-05-13T14:38:56.079Z"
   }
 ]

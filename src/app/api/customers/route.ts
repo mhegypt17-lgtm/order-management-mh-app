@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
+  generateId,
   normalizePhone,
   readAddresses,
   readCustomers,
+  writeCustomers,
 } from '@/lib/omsData'
+
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 export async function GET(request: NextRequest) {
   try {
@@ -54,5 +59,40 @@ export async function GET(request: NextRequest) {
     )
   } catch {
     return NextResponse.json({ error: 'Failed to lookup customer' }, { status: 500 })
+  }
+}
+
+// Create a new customer (CS / admin). Wallet defaults to 0 if omitted.
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const phone = normalizePhone(String(body.phone || ''))
+    const customerName = String(body.customerName || '').trim()
+    const wallet = Number(body.wallet) || 0
+
+    if (!phone) return NextResponse.json({ error: 'phone مطلوب' }, { status: 400 })
+    if (!customerName) return NextResponse.json({ error: 'اسم العميل مطلوب' }, { status: 400 })
+
+    const customers = readCustomers()
+    const exists = customers.find((c) => normalizePhone(c.phone) === phone)
+    if (exists) {
+      return NextResponse.json({ error: 'يوجد عميل بنفس رقم الهاتف' }, { status: 409 })
+    }
+
+    const now = new Date().toISOString()
+    const customer = {
+      id: generateId('CUST'),
+      phone,
+      customerName,
+      wallet,
+      createdAt: now,
+      updatedAt: now,
+    }
+    customers.push(customer)
+    writeCustomers(customers)
+
+    return NextResponse.json({ customer }, { status: 201 })
+  } catch {
+    return NextResponse.json({ error: 'تعذر إنشاء العميل' }, { status: 500 })
   }
 }
