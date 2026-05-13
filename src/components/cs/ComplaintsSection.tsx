@@ -439,9 +439,9 @@ export default function ComplaintsSection() {
   return (
     <div className="space-y-6" dir="rtl">
       {/* Quick Search Section */}
-      <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-200 rounded-xl p-6 shadow-md">
+      <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-200 rounded-xl p-4 sm:p-6 shadow-md">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">🔍 البحث السريع عن طلب</h2>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">رقم هاتف العميل</label>
             <input
@@ -512,9 +512,9 @@ export default function ComplaintsSection() {
       </div>
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">🎫 إدارة الشكاوى</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">🎫 إدارة الشكاوى</h1>
           <p className="text-sm text-gray-500 mt-1">تتبع وإدارة شكاوى العملاء والطلبات</p>
         </div>
         <button
@@ -523,7 +523,7 @@ export default function ComplaintsSection() {
             setSelectedComplaint(null)
             setSelectedOrder(null)
           }}
-          className="bg-red-600 hover:bg-red-700 text-white px-5 py-3 rounded-lg transition font-medium shadow-lg"
+          className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white px-5 py-3 rounded-lg transition font-medium shadow-lg min-h-[44px]"
         >
           {showForm ? '✕ إلغاء' : '🎫 فتح شكوى جديدة'}
         </button>
