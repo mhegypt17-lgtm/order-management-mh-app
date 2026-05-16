@@ -11,6 +11,10 @@ export interface CustomerNote {
   updatedAt: string
 }
 
+function generateTextId(prefix: string) {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+}
+
 // GET: list notes for a customer
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -46,7 +50,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     const now = new Date().toISOString()
     const newNote: CustomerNote = {
-      id: `note_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      id: generateTextId('note'),
       customerId: params.id,
       note: noteText,
       author,

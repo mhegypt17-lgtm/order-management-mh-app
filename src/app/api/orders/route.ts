@@ -7,7 +7,6 @@ import {
   OrderRecord,
   appendEditHistory,
   generateAppOrderNo,
-  generateId,
   normalizePhone,
   readAddresses,
   readCustomers,
@@ -20,6 +19,10 @@ import {
   writeOrderItems,
   writeOrders,
 } from '@/lib/omsData'
+
+function generateTextId(prefix: string) {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+}
 
 type OrderInputItem = {
   productId: string
@@ -144,7 +147,7 @@ export async function POST(request: NextRequest) {
 
     // 1. Upsert customer
     const normalizedPhone = normalizePhone(body.phone)
-    const customerId = generateId('cust')
+    const customerId = generateTextId('cust')
     const customer: CustomerRecord = {
       id: customerId,
       phone: normalizedPhone,
@@ -168,7 +171,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 2. Insert address
-    const addressId = generateId('addr')
+    const addressId = generateTextId('addr')
     const deliveryAddress: CustomerAddressRecord = {
       id: addressId,
       customerId: customerId,
@@ -221,7 +224,7 @@ export async function POST(request: NextRequest) {
     const appOrderNo = await generateAppOrderNo(body.orderDate, body.orderType, existingOrders as OrderRecord[])
 
     // 3. Insert order
-    const orderId = generateId('ord')
+    const orderId = generateTextId('ord')
     const order: OrderRecord = {
       id: orderId,
       appOrderNo,
@@ -261,7 +264,7 @@ export async function POST(request: NextRequest) {
 
     // 4. Insert order items
     const newItems: OrderItemRecord[] = normalizedItems.map((i) => ({
-      id: generateId('item'),
+      id: generateTextId('item'),
       orderId: orderId,
       productId: i.productId,
       quantity: i.quantity,
@@ -286,7 +289,7 @@ export async function POST(request: NextRequest) {
     const { error: deliveryError } = await supabase
       .from('order_delivery')
       .insert([{
-        id: generateId('del'),
+        id: generateTextId('del'),
         orderId: orderId,
         deliveryStatus: 'لم يخرج بعد',
         branchComments: '',
