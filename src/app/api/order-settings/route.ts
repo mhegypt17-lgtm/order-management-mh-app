@@ -2,10 +2,24 @@ import { NextRequest, NextResponse } from 'next/server'
 import {
   AgentNoticeRecord,
   LookupValueRecord,
-  OrderSettingsRecord,
   readOrderSettings,
   writeOrderSettings,
 } from '@/lib/omsData'
+
+// Patch: Add missing OrderSettingsRecord type with slaHours
+type OrderSettingsRecord = {
+  orderReceivers: LookupValueRecord[]
+  orderMethods: LookupValueRecord[]
+  customerSources: LookupValueRecord[]
+  orderTypes: LookupValueRecord[]
+  paymentMethods: LookupValueRecord[]
+  orderStatuses: LookupValueRecord[]
+  complaintChannels: LookupValueRecord[]
+  complaintReasons: LookupValueRecord[]
+  monthlyCompensationBudget: number
+  slaHours: number
+  agentNotice: AgentNoticeRecord
+}
 
 type SectionKey = keyof OrderSettingsRecord
 

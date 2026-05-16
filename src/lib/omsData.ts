@@ -257,6 +257,7 @@ export interface OrderSettingsRecord {
   complaintChannels: LookupValueRecord[]
   complaintReasons: LookupValueRecord[]
   monthlyCompensationBudget: number
+  slaHours: number
   agentNotice: AgentNoticeRecord
 }
 
@@ -305,6 +306,7 @@ function defaultOrderSettings(): OrderSettingsRecord {
     complaintChannels: defaultsToLookupRows(DEFAULT_COMPLAINT_CHANNELS),
     complaintReasons: defaultsToLookupRows(DEFAULT_COMPLAINT_REASONS),
     monthlyCompensationBudget: 5000,
+    slaHours: 4,
     agentNotice: {
       message: '',
       type: 'info',

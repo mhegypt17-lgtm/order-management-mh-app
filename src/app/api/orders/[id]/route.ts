@@ -178,15 +178,14 @@ export async function PUT(
       deliveryAddress.area = body.deliveryArea || deliveryAddress.area || ''
     }
 
-    const products = readProducts()
+    const products = await readProducts()
     const items: OrderUpdateItem[] = Array.isArray(body.items) ? body.items : []
     const normalizedItems = items
       .map((i) => {
         const matchedProduct = findMatchedProduct(products, i.productNameInput)
-
         return {
           ...i,
-          productId: i.productId || matchedProduct?.id || '',
+          productId: i.productId || (matchedProduct ? matchedProduct.id : ''),
         }
       })
       .filter((i) => i.productId && Number(i.quantity) > 0)

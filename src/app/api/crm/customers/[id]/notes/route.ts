@@ -71,4 +71,4 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     console.error('Error creating note:', error)
     return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
-}}
+}

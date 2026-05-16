@@ -74,7 +74,7 @@ async function enrichOrderForBranch(order: OrderRecord) {
     items: orderItems,
     delivery: await ensureDelivery(order),
   }
-
+}
 
 export async function GET(request: NextRequest) {
   try {
