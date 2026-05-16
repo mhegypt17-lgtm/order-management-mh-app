@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { DeliveryZoneRecord, readDeliveryZones, writeDeliveryZones } from '@/lib/omsData'
+import { supabase } from '@/lib/supabase'
+import { DeliveryZoneRecord, readDeliveryZones } from '@/lib/omsData'
 
 export async function GET() {
   try {
@@ -48,7 +49,16 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'Invalid zones payload' }, { status: 400 })
     }
 
-    await writeDeliveryZones(normalized)
+    // Upsert each zone directly into Supabase
+    for (const z of normalized) {
+      const { error: upsertErr } = await supabase
+        .from('delivery_zones')
+        .upsert(z, { onConflict: 'zone' })
+      if (upsertErr) {
+        console.error('Error upserting zone:', z.zone, upsertErr)
+      }
+    }
+
     return NextResponse.json({ zones: normalized }, { status: 200 })
   } catch {
     return NextResponse.json({ error: 'Failed to update delivery zones' }, { status: 500 })

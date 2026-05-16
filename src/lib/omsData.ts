@@ -214,12 +214,16 @@ export interface ComplaintRecord {
 export interface ProductRecord {
   id: string
   productName: string
-  category: string
-  unit: string
+  category?: string
+  productCategory?: string
+  unit?: string
   unitPrice: number
+  offerPrice?: number
+  basePrice?: number
   buyingPrice?: number
   imageUrl?: string
   barcode?: string
+  packagingType?: string
   isActive: boolean
   createdAt: string
   updatedAt: string
@@ -243,6 +247,18 @@ export const DEFAULT_RETENTION_CONFIG: RetentionConfig = {
   stage3: { days: 90, action: 'task', assignedTo: 'auto' },
 }
 
+export interface LoyaltyTierConfig {
+  name: string
+  threshold: number
+  icon?: string
+  color?: string
+}
+
+export interface LoyaltyConfig {
+  mode: 'orders' | 'revenue'
+  tiers: LoyaltyTierConfig[]
+}
+
 export interface OrderSettingsRecord {
   orderReceivers: LookupValueRecord[]
   orderMethods: LookupValueRecord[]
@@ -256,6 +272,7 @@ export interface OrderSettingsRecord {
   slaHours: number
   agentNotice: AgentNoticeRecord
   retention?: RetentionConfig
+  loyalty?: LoyaltyConfig
 }
 
 const DEFAULT_ORDER_RECEIVERS = ['رنا', 'مى', 'ميرنا', 'أمل']
@@ -850,20 +867,82 @@ export async function deleteComplaint(id: string): Promise<void> {
 
 // ─── Loyalty helpers ──────────────────────────────────────────────────────────
 
-export const DEFAULT_LOYALTY_CONFIG = {
+export const DEFAULT_LOYALTY_CONFIG: LoyaltyConfig = {
+  mode: 'orders',
   tiers: [
-    { name: 'Bronze', minOrders: 0, discount: 0 },
-    { name: 'Silver', minOrders: 5, discount: 0.05 },
-    { name: 'Gold', minOrders: 10, discount: 0.1 },
-    { name: 'Platinum', minOrders: 20, discount: 0.15 },
+    { name: 'Bronze', threshold: 0, icon: '🥉', color: '#cd7f32' },
+    { name: 'Silver', threshold: 5, icon: '🥈', color: '#a8a9ad' },
+    { name: 'Gold', threshold: 10, icon: '🥇', color: '#ffd700' },
+    { name: 'Platinum', threshold: 20, icon: '💎', color: '#e5e4e2' },
   ],
 }
 
-export function resolveCustomerTier(orderCount: number): string {
-  for (let i = DEFAULT_LOYALTY_CONFIG.tiers.length - 1; i >= 0; i--) {
-    if (orderCount >= DEFAULT_LOYALTY_CONFIG.tiers[i].minOrders) {
-      return DEFAULT_LOYALTY_CONFIG.tiers[i].name
-    }
+export function resolveCustomerTier(
+  loyalty: LoyaltyConfig,
+  stats: { completedOrderCount: number; totalRevenue: number }
+): LoyaltyTierConfig {
+  const value = loyalty.mode === 'revenue' ? stats.totalRevenue : stats.completedOrderCount
+  const sorted = [...loyalty.tiers].sort((a, b) => b.threshold - a.threshold)
+  const match = sorted.find((t) => value >= t.threshold)
+  return match || sorted[sorted.length - 1] || { name: 'Bronze', threshold: 0, icon: '🥉', color: '#cd7f32' }
+}
+
+// ─── Discount Codes ───────────────────────────────────────────────────────────
+
+export interface DiscountCodeRecord {
+  id: string
+  code: string
+  type: 'percent' | 'value'
+  amount: number
+  maxDiscount: number | null
+  minOrderTotal: number | null
+  isActive: boolean
+  expiresAt: string | null
+  usageLimit: number | null
+  usedCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export async function readDiscountCodes(): Promise<DiscountCodeRecord[]> {
+  const { data, error } = await supabase.from('discount_codes').select('*')
+  if (error) {
+    console.error('Error reading discount codes:', error)
+    return []
   }
-  return 'Bronze'
+  return data || []
+}
+
+export async function writeDiscountCodes(_data: DiscountCodeRecord[]): Promise<void> {
+  // No-op: writes handled directly in API routes
+}
+
+export async function evaluateDiscountCode(
+  code: string,
+  grossTotal: number
+): Promise<{ ok: boolean; reason?: string; discount: number; code?: DiscountCodeRecord }> {
+  if (!code) return { ok: false, reason: 'الكود مطلوب', discount: 0 }
+
+  const { data } = await supabase
+    .from('discount_codes')
+    .select('*')
+    .ilike('code', code)
+    .limit(1)
+
+  const match = (data || [])[0] as DiscountCodeRecord | undefined
+  if (!match) return { ok: false, reason: 'الكود غير موجود', discount: 0 }
+  if (!match.isActive) return { ok: false, reason: 'الكود غير نشط', discount: 0 }
+  if (match.expiresAt && new Date(match.expiresAt) < new Date())
+    return { ok: false, reason: 'الكود منتهي الصلاحية', discount: 0 }
+  if (match.usageLimit != null && match.usedCount >= match.usageLimit)
+    return { ok: false, reason: 'تم الوصول للحد الأقصى من الاستخدام', discount: 0 }
+  if (match.minOrderTotal != null && grossTotal < match.minOrderTotal)
+    return { ok: false, reason: `الحد الأدنى للطلب ${match.minOrderTotal} جنيه`, discount: 0 }
+
+  let discount =
+    match.type === 'percent' ? (grossTotal * match.amount) / 100 : match.amount
+  if (match.maxDiscount != null) discount = Math.min(discount, match.maxDiscount)
+  discount = Math.min(discount, grossTotal)
+
+  return { ok: true, discount: parseFloat(discount.toFixed(2)), code: match }
 }

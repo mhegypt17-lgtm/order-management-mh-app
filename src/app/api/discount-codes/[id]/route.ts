@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { readDiscountCodes, writeDiscountCodes } from '@/lib/omsData'
+import { supabase } from '@/lib/supabase'
+import { readDiscountCodes } from '@/lib/omsData'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -39,8 +40,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if ('usageLimit' in body) next.usageLimit = body.usageLimit === '' || body.usageLimit == null ? null : Number(body.usageLimit)
 
     next.updatedAt = new Date().toISOString()
-    codes[idx] = next
-    await writeDiscountCodes(codes)
+    const { error: updateErr } = await supabase
+      .from('discount_codes')
+      .update(next)
+      .eq('id', params.id)
+    if (updateErr) {
+      console.error('Error updating discount code:', updateErr)
+      return NextResponse.json({ error: 'تعذر تحديث الكود' }, { status: 500 })
+    }
     return NextResponse.json(next)
   } catch {
     return NextResponse.json({ error: 'تعذر تحديث الكود' }, { status: 500 })
@@ -49,12 +56,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const codes = await readDiscountCodes()
-    const next = codes.filter((c) => c.id !== params.id)
-    if (next.length === codes.length) {
-      return NextResponse.json({ error: 'الكود غير موجود' }, { status: 404 })
+    const { error: deleteErr } = await supabase
+      .from('discount_codes')
+      .delete()
+      .eq('id', params.id)
+    if (deleteErr) {
+      console.error('Error deleting discount code:', deleteErr)
+      return NextResponse.json({ error: 'تعذر حذف الكود' }, { status: 500 })
     }
-    await writeDiscountCodes(next)
     return NextResponse.json({ ok: true })
   } catch {
     return NextResponse.json({ error: 'تعذر حذف الكود' }, { status: 500 })

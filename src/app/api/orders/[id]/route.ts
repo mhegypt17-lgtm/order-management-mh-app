@@ -12,9 +12,6 @@ import {
   readOrderDelivery,
   readOrders,
   readDeliveryZones,
-  writeAddresses,
-  writeOrderItems,
-  writeOrders,
 } from '@/lib/omsData'
 
 type OrderUpdateItem = {
@@ -173,9 +170,15 @@ export async function PUT(
         googleMapsLink: body.googleMapsLink || '',
         createdAt: now,
       }
-      addresses.push(deliveryAddress)
+      // Insert new address into Supabase
+      await supabase.from('customer_addresses').insert([deliveryAddress])
     } else if (deliveryAddress) {
-      deliveryAddress.area = body.deliveryArea || deliveryAddress.area || ''
+      const updatedArea = body.deliveryArea || deliveryAddress.area || ''
+      deliveryAddress.area = updatedArea
+      await supabase
+        .from('customer_addresses')
+        .update({ area: updatedArea })
+        .eq('id', deliveryAddress.id)
     }
 
     const products = await readProducts()
@@ -216,7 +219,21 @@ export async function PUT(
     if (existing.customerSource !== body.customerSource) changedFields.push('customerSource')
     if ((existing.notes || '') !== (body.notes || '')) changedFields.push('notes')
 
-    orders[orderIndex] = {
+    const remainingItems = orderItems.filter((i) => i.orderId !== params.id)
+    const rewrittenItems: OrderItemRecord[] = normalizedItems.map((i) => ({
+      id: generateId('item'),
+      orderId: params.id,
+      productId: i.productId,
+      quantity: i.quantity,
+      weightGrams: i.weightGrams,
+      unitPrice: i.unitPrice,
+      lineTotal: i.lineTotal,
+      specialInstructions: i.specialInstructions || '',
+      createdAt: now,
+    }))
+
+    // Update order in Supabase
+    const updatedOrder = {
       ...existing,
       orderDate: body.orderDate,
       orderTime: body.orderTime,
@@ -237,23 +254,13 @@ export async function PUT(
       orderTotal,
       updatedAt: now,
     }
+    await supabase.from('orders').update(updatedOrder).eq('id', params.id)
 
-    const remainingItems = orderItems.filter((i) => i.orderId !== params.id)
-    const rewrittenItems: OrderItemRecord[] = normalizedItems.map((i) => ({
-      id: generateId('item'),
-      orderId: params.id,
-      productId: i.productId,
-      quantity: i.quantity,
-      weightGrams: i.weightGrams,
-      unitPrice: i.unitPrice,
-      lineTotal: i.lineTotal,
-      specialInstructions: i.specialInstructions || '',
-      createdAt: now,
-    }))
-
-    await writeAddresses(addresses)
-    await writeOrders(orders)
-    await writeOrderItems([...remainingItems, ...rewrittenItems])
+    // Replace order items: delete old, insert new
+    await supabase.from('order_items').delete().eq('orderId', params.id)
+    if (rewrittenItems.length > 0) {
+      await supabase.from('order_items').insert(rewrittenItems)
+    }
 
     await appendEditHistory({
       entityType: 'order',
@@ -261,7 +268,7 @@ export async function PUT(
       orderId: params.id,
       action: 'updated',
       changedBy: body.createdBy || 'unknown',
-      summary: `تم تعديل الطلب ${orders[orderIndex].appOrderNo}`,
+      summary: `تم تعديل الطلب ${updatedOrder.appOrderNo}`,
       details: {
         changedFields,
         itemCount: rewrittenItems.length,
@@ -269,7 +276,7 @@ export async function PUT(
       },
     })
 
-    return NextResponse.json({ order: await enrichOrder(orders[orderIndex]) }, { status: 200 })
+    return NextResponse.json({ order: await enrichOrder(updatedOrder as OrderRecord) }, { status: 200 })
   } catch {
     return NextResponse.json({ error: 'Failed to update order' }, { status: 500 })
   }

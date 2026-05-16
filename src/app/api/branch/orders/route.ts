@@ -9,7 +9,6 @@ import {
   readOrderDelivery,
   readOrderItems,
   readOrders,
-  writeOrderDelivery,
 } from '@/lib/omsData'
 
 async function readProducts() {
@@ -43,9 +42,17 @@ async function ensureDelivery(order: OrderRecord): Promise<OrderDeliveryRecord> 
     updatedAt: order.updatedAt,
   }
 
-  deliveryRows.push(fallback)
-  await writeOrderDelivery(deliveryRows)
-  return fallback
+  // Insert new delivery record to Supabase
+  const { data: newDel, error: insertErr } = await supabase
+    .from('order_delivery')
+    .insert([fallback])
+    .select()
+    .single()
+
+  if (insertErr) {
+    console.error('Error inserting delivery:', insertErr)
+  }
+  return newDel || fallback
 }
 
 async function enrichOrderForBranch(order: OrderRecord) {

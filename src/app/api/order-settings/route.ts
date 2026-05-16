@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { supabase } from '@/lib/supabase'
 import {
   AgentNoticeRecord,
   LookupValueRecord,
   readOrderSettings,
-  writeOrderSettings,
 } from '@/lib/omsData'
 
 // Patch: Add missing OrderSettingsRecord type with slaHours
@@ -111,7 +111,9 @@ export async function PUT(request: NextRequest) {
       [section]: normalizedItems,
     }
 
-    writeOrderSettings(nextSettings)
+    await supabase
+      .from('order_settings')
+      .upsert({ id: 'singleton', ...nextSettings })
 
     return NextResponse.json({ settings: nextSettings }, { status: 200 })
   } catch {
@@ -130,7 +132,9 @@ export async function PATCH(request: NextRequest) {
     if (body.slaHours !== undefined) {
       const parsedSla = Math.max(1, Number(body.slaHours) || 4)
       nextSettings.slaHours = parsedSla
-      await writeOrderSettings(nextSettings)
+      await supabase
+        .from('order_settings')
+        .upsert({ id: 'singleton', ...nextSettings })
       return NextResponse.json({ slaHours: parsedSla }, { status: 200 })
     }
 
@@ -154,7 +158,9 @@ export async function PATCH(request: NextRequest) {
       nextSettings.agentNotice = notice
     }
 
-    await writeOrderSettings(nextSettings)
+    await supabase
+      .from('order_settings')
+      .upsert({ id: 'singleton', ...nextSettings })
 
     return NextResponse.json(
       {

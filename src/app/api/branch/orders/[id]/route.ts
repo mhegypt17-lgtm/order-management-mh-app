@@ -9,7 +9,6 @@ import {
   readOrderDelivery,
   readOrderItems,
   readOrders,
-  writeOrderDelivery,
 } from '@/lib/omsData'
 
 async function readProducts() {
@@ -62,8 +61,7 @@ async function enrich(orderId: string) {
       updatedBy: '',
       updatedAt: order.updatedAt,
     }
-    deliveryRows.push(delivery)
-    await writeOrderDelivery(deliveryRows)
+    await supabase.from('order_delivery').insert([delivery])
   }
 
   return {
@@ -131,12 +129,13 @@ export async function PUT(
     }
 
     if (index >= 0) {
-      rows[index] = updated
+      await supabase
+        .from('order_delivery')
+        .update(updated)
+        .eq('id', updated.id)
     } else {
-      rows.push(updated)
+      await supabase.from('order_delivery').insert([updated])
     }
-
-    await writeOrderDelivery(rows)
 
     await appendEditHistory({
       entityType: 'delivery',

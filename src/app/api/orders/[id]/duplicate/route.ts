@@ -10,9 +10,8 @@ import {
   readOrderItems,
   readOrders,
   readProducts,
-  writeOrderItems,
-  writeOrders,
 } from '@/lib/omsData'
+import { supabase } from '@/lib/supabase'
 
 async function computeDeliveryFeeByArea(subtotal: number, area?: string) {
   const zones = await readDeliveryZones()
@@ -82,7 +81,7 @@ export async function POST(
     const subtotal = newItems.reduce((sum, i) => sum + i.lineTotal, 0)
     const deliveryFee = await computeDeliveryFeeByArea(subtotal, address?.area)
     const orderTotal = subtotal + deliveryFee
-    const appOrderNo = generateAppOrderNo(orderDate, source.orderType, orders)
+    const appOrderNo = await generateAppOrderNo(orderDate, source.orderType, orders)
 
     const newOrder: OrderRecord = {
       id: newOrderId,
@@ -111,10 +110,19 @@ export async function POST(
     }
 
     orders.push(newOrder)
-    await writeOrders(orders)
-    await writeOrderItems([...allItems, ...newItems])
+    const { error: orderErr } = await supabase.from('orders').insert([newOrder])
+    if (orderErr) {
+      console.error('Error inserting duplicate order:', orderErr)
+      return NextResponse.json({ error: 'Failed to duplicate order' }, { status: 500 })
+    }
+    if (newItems.length > 0) {
+      const { error: itemsErr } = await supabase.from('order_items').insert(newItems)
+      if (itemsErr) {
+        console.error('Error inserting duplicate order items:', itemsErr)
+      }
+    }
 
-    appendEditHistory({
+    await appendEditHistory({
       entityType: 'order',
       entityId: newOrder.id,
       orderId: newOrder.id,

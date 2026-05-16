@@ -1,17 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { supabase } from '@/lib/supabase'
 import {
   AdahiOrderItemRecord,
   AdahiOrderRecord,
-  CustomerAddressRecord,
-  CustomerRecord,
   generateId,
   normalizePhone,
   readAdahiOrders,
-  readAddresses,
-  readCustomers,
-  writeAdahiOrders,
-  writeAddresses,
-  writeCustomers,
 } from '@/lib/omsData'
 
 type AdahiOrderInputItem = {
@@ -71,50 +65,82 @@ export async function POST(request: NextRequest) {
     const remainingAmount = Math.max(0, subtotal - paidAmount)
     const collectionPercent = subtotal > 0 ? Math.min(100, Math.round((paidAmount / subtotal) * 100)) : 0
 
-    const [customers, addresses, adahiOrders] = await Promise.all([
-      readCustomers(),
-      readAddresses(),
-      readAdahiOrders(),
-    ])
+    // 1. Find or create customer
+    const { data: existingCustomer } = await supabase
+      .from('customers')
+      .select('id')
+      .eq('phone', phone)
+      .maybeSingle()
 
-    let customer = customers.find((c) => normalizePhone(c.phone) === phone) as CustomerRecord | undefined
-    if (!customer) {
-      customer = {
-        id: generateId('cust'),
+    let customerId: string
+    if (existingCustomer) {
+      customerId = existingCustomer.id
+      await supabase
+        .from('customers')
+        .update({ customerName, updatedAt: now })
+        .eq('id', customerId)
+    } else {
+      customerId = generateId('cust')
+      await supabase.from('customers').insert({
+        id: customerId,
         phone,
         customerName,
         createdAt: now,
         updatedAt: now,
-      }
-      customers.push(customer)
-    } else {
-      customer.customerName = customerName
-      customer.updatedAt = now
+      })
     }
 
-    let address: CustomerAddressRecord | undefined
+    // 2. Find or create address
+    let addressId: string
+    let addressLabel: string
+
     if (body.deliveryAddressId && body.deliveryAddressId !== '__new') {
-      address = addresses.find((a) => a.id === body.deliveryAddressId)
-    }
+      const { data: existingAddr } = await supabase
+        .from('customer_addresses')
+        .select('id, addressLabel')
+        .eq('id', body.deliveryAddressId)
+        .maybeSingle()
 
-    if (!address) {
-      address = {
-        id: generateId('addr'),
-        customerId: customer.id,
-        addressLabel: String(body.addressLabel || 'Home').trim() || 'Home',
+      if (existingAddr) {
+        addressId = existingAddr.id
+        addressLabel = String(body.addressLabel || existingAddr.addressLabel || 'Home').trim() || 'Home'
+        await supabase
+          .from('customer_addresses')
+          .update({
+            addressLabel,
+            area: deliveryArea,
+            streetAddress,
+            googleMapsLink: String(body.googleMapsLink || '').trim(),
+          })
+          .eq('id', addressId)
+      } else {
+        addressId = generateId('addr')
+        addressLabel = String(body.addressLabel || 'Home').trim() || 'Home'
+        await supabase.from('customer_addresses').insert({
+          id: addressId,
+          customerId,
+          addressLabel,
+          area: deliveryArea,
+          streetAddress,
+          googleMapsLink: String(body.googleMapsLink || '').trim(),
+          createdAt: now,
+        })
+      }
+    } else {
+      addressId = generateId('addr')
+      addressLabel = String(body.addressLabel || 'Home').trim() || 'Home'
+      await supabase.from('customer_addresses').insert({
+        id: addressId,
+        customerId,
+        addressLabel,
         area: deliveryArea,
         streetAddress,
         googleMapsLink: String(body.googleMapsLink || '').trim(),
         createdAt: now,
-      }
-      addresses.push(address)
-    } else {
-      address.addressLabel = String(body.addressLabel || address.addressLabel || 'Home').trim() || 'Home'
-      address.area = deliveryArea
-      address.streetAddress = streetAddress
-      address.googleMapsLink = String(body.googleMapsLink || '').trim()
+      })
     }
 
+    // 3. Insert adahi order
     const order: AdahiOrderRecord = {
       id: generateId('adahi'),
       seasonLabel: String(body.seasonLabel || `${new Date().getFullYear()} موسم الأضاحي`),
@@ -122,14 +148,14 @@ export async function POST(request: NextRequest) {
       orderTime: String(body.orderTime || now.slice(11, 16)),
       orderReceiver: body.orderReceiver,
       orderMethod: body.orderMethod,
-      customerId: customer.id,
+      customerId,
       customerName,
       phone,
-      deliveryAddressId: address.id,
-      addressLabel: address.addressLabel,
+      deliveryAddressId: addressId,
+      addressLabel,
       deliveryArea,
       streetAddress,
-      googleMapsLink: address.googleMapsLink || '',
+      googleMapsLink: String(body.googleMapsLink || '').trim(),
       items,
       subtotal,
       paidAmount,
@@ -146,11 +172,11 @@ export async function POST(request: NextRequest) {
       updatedAt: now,
     }
 
-    adahiOrders.push(order)
-
-    await writeCustomers(customers)
-    await writeAddresses(addresses)
-    await writeAdahiOrders(adahiOrders)
+    const { error: insertError } = await supabase.from('adahi_orders').insert([order])
+    if (insertError) {
+      console.error('Error inserting adahi order:', insertError)
+      return NextResponse.json({ error: 'Failed to create adahi order' }, { status: 500 })
+    }
 
     return NextResponse.json({ order }, { status: 201 })
   } catch {

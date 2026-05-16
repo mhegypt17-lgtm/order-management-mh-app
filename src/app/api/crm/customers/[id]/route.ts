@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
   readCustomers,
-  writeCustomers,
   readAddresses,
   readOrders,
   readOrderItems,
@@ -10,6 +9,7 @@ import {
   resolveCustomerTier,
   DEFAULT_LOYALTY_CONFIG,
 } from '@/lib/omsData'
+import { supabase } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -268,8 +268,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
     next.updatedAt = new Date().toISOString()
 
-    customers[idx] = next
-    await writeCustomers(customers)
+    await supabase
+      .from('customers')
+      .update({ customerName: next.customerName, updatedAt: next.updatedAt, ...(next.wallet !== undefined ? { wallet: next.wallet } : {}) })
+      .eq('id', params.id)
 
     return NextResponse.json({ customer: next })
   } catch (err) {

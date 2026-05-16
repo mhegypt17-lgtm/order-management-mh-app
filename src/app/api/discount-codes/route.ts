@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { supabase } from '@/lib/supabase'
 import {
   generateId,
   readDiscountCodes,
-  writeDiscountCodes,
   type DiscountCodeRecord,
 } from '@/lib/omsData'
 
@@ -57,7 +57,11 @@ export async function POST(req: NextRequest) {
     }
 
     codes.push(record)
-    await writeDiscountCodes(codes)
+    const { error: insertErr } = await supabase.from('discount_codes').insert(record)
+    if (insertErr) {
+      console.error('Error inserting discount code:', insertErr)
+      return NextResponse.json({ error: 'تعذر حفظ الكود' }, { status: 500 })
+    }
     return NextResponse.json(record, { status: 201 })
   } catch {
     return NextResponse.json({ error: 'تعذر إنشاء الكود' }, { status: 500 })
