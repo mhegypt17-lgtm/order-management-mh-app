@@ -315,7 +315,7 @@ function defaultDeliveryZones(): DeliveryZoneRecord[] {
   return Array.from({ length: 8 }, (_, idx) => ({
     id: generateId('zone'),
     zone: idx + 1,
-    area: \منطقة \\,
+    area: `منطقة ${idx + 1}`,
     averageDistanceKm: 0,
     deliveryCost: 0,
     customerDeliveryFee: 0,
