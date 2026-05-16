@@ -218,7 +218,7 @@ export default function OrdersPage() {
                   {order.isPriority && (
                     <span title={order.priorityReason || 'أولوية عاجلة'} className="px-1.5 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold animate-pulse">🚨 عاجل</span>
                   )}
-                  {order.isScheduled && <span title="طلب مجدول">📅</span>}
+                  {order.isScheduled && <span title="حجز">📅</span>}
                   <span className="font-bold text-gray-900">{order.appOrderNo}</span>
                 </div>
                 <span className={`px-2 py-1 rounded-full text-xs font-semibold ${statusClasses[order.orderStatus] || 'bg-gray-100 text-gray-700'}`}>
@@ -307,7 +307,7 @@ export default function OrdersPage() {
                     {order.isPriority && (
                       <span title={order.priorityReason || 'أولوية عاجلة'} className="ml-1 inline-block px-1.5 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold animate-pulse">🚨 عاجل</span>
                     )}
-                    {order.isScheduled && <span title="طلب مجدول" className="ml-1">📅</span>}
+                    {order.isScheduled && <span title="حجز" className="ml-1">📅</span>}
                     {order.appOrderNo}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-700" dir="ltr">{order.orderDate}</td>

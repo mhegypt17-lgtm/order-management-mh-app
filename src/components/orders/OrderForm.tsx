@@ -6,6 +6,7 @@ import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
 import { DeliveryProgressBar } from '@/components/orders/DeliveryProgressBar'
 import { WhatsAppShare } from '@/components/orders/WhatsAppShare'
+import ProductCombobox from '@/components/orders/ProductCombobox'
 
 type Product = {
   id: string
@@ -562,21 +563,19 @@ export default function OrderForm({ mode, orderId, repeatFromOrderId }: Props) {
     setItems((prev) => prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item)))
   }
 
-  const onProductNameChange = (index: number, productName: string) => {
+  const onProductSelect = (index: number, selected: { id: string; productName: string; weightGrams?: number; basePrice?: number | null; offerPrice?: number | null }) => {
     setDirtyFlag(true)
-    const selected = findProductByName(products, productName)
-
-    if (!selected) {
-      updateItem(index, { productNameInput: productName, productId: '' })
-      return
-    }
-
     updateItem(index, {
-      productNameInput: productName,
+      productNameInput: selected.productName,
       productId: selected.id,
       weightGrams: Number(selected.weightGrams) || 0,
       unitPrice: Number(selected.offerPrice ?? selected.basePrice ?? 0),
     })
+  }
+
+  const onProductClear = (index: number) => {
+    setDirtyFlag(true)
+    updateItem(index, { productNameInput: '', productId: '', unitPrice: 0, weightGrams: 0 })
   }
 
   const addItem = () => {
@@ -626,19 +625,29 @@ export default function OrderForm({ mode, orderId, repeatFromOrderId }: Props) {
 
     const normalizedItems = items
       .map((i) => {
+        // Re-resolve from current catalog as a safety net (handles stale rows from duplicates)
         const productByName = findProductByName(products, i.productNameInput)
+        const productById = i.productId ? products.find((p) => p.id === i.productId) : null
+        const product = productById || productByName
 
         return {
           ...i,
-          productId: i.productId || productByName?.id || '',
-          weightGrams: Number(i.weightGrams) || Number(productByName?.weightGrams) || 0,
-          unitPrice: Number(i.unitPrice) || Number(productByName?.offerPrice ?? productByName?.basePrice ?? 0),
+          productId: product?.id || i.productId || '',
+          weightGrams: Number(i.weightGrams) || Number(product?.weightGrams) || 0,
+          unitPrice: Number(i.unitPrice) || Number(product?.offerPrice ?? product?.basePrice ?? 0),
         }
       })
-      .filter((i) => i.productId && i.quantity > 0 && i.productNameInput.trim())
+      .filter((i) => i.productId && Number(i.quantity) > 0)
 
     const validItems = normalizedItems
-    if (validItems.length === 0) return toast.error('أضف منتجاً واحداً على الأقل')
+    if (validItems.length === 0) {
+      // Differentiate the cause so the user knows what to fix
+      const hasTypedNames = items.some((i) => i.productNameInput.trim())
+      if (hasTypedNames) {
+        return toast.error('⚠️ لم يتم اختيار منتج من القائمة — اضغط على حقل المنتج واختر من القائمة المنسدلة')
+      }
+      return toast.error('أضف منتجاً واحداً على الأقل')
+    }
 
     // Block if any selected product is out of stock
     const outProducts = validItems
@@ -687,14 +696,22 @@ export default function OrderForm({ mode, orderId, repeatFromOrderId }: Props) {
         body: JSON.stringify(payload),
       })
 
-      if (!response.ok) throw new Error('Save failed')
+      if (!response.ok) {
+        let serverMsg = ''
+        try {
+          const errBody = await response.json()
+          serverMsg = errBody?.error || ''
+        } catch {}
+        throw new Error(serverMsg || `HTTP ${response.status}`)
+      }
 
       const data = await response.json()
       setDirtyFlag(false)
       toast.success(mode === 'create' ? '✅ تم إنشاء الطلب بنجاح' : '✅ تم تحديث الطلب بنجاح')
       router.push(`/orders/${data.order.id}`)
-    } catch {
-      toast.error('حدث خطأ أثناء الحفظ')
+    } catch (err: any) {
+      const detail = err?.message ? ` (${err.message})` : ''
+      toast.error(`حدث خطأ أثناء الحفظ${detail}`)
     } finally {
       setIsSaving(false)
     }
@@ -743,7 +760,7 @@ export default function OrderForm({ mode, orderId, repeatFromOrderId }: Props) {
             <span className="text-2xl">📅</span>
             <div className="text-sm text-gray-900 flex-1">
               <p className="font-bold mb-1">
-                طلب مجدول
+                حجز
                 {overdue && (
                   <span className="mr-2 inline-block px-2 py-0.5 rounded-full bg-red-600 text-white text-xs">🔴 متأخر</span>
                 )}
@@ -906,19 +923,13 @@ export default function OrderForm({ mode, orderId, repeatFromOrderId }: Props) {
 
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1 text-right">المنتج</label>
-                  <input
-                    list={`products-m-${index}`}
+                  <ProductCombobox
+                    products={products}
                     value={item.productNameInput}
-                    onChange={(e) => onProductNameChange(index, e.target.value)}
-                    className={`w-full px-3 py-2 border rounded text-right ${stock === 'out' ? 'border-red-400 bg-red-50' : stock === 'low' ? 'border-amber-400 bg-amber-50' : 'border-gray-300 bg-white'}`}
-                    placeholder="ابحث عن منتج"
-                    dir="rtl"
+                    selectedProductId={item.productId}
+                    onSelect={(p) => onProductSelect(index, p)}
+                    onClear={() => onProductClear(index)}
                   />
-                  <datalist id={`products-m-${index}`}>
-                    {products.map((p) => (
-                      <option key={p.id} value={p.productName} />
-                    ))}
-                  </datalist>
                   {selectedProduct && (
                     <div className="mt-1 flex flex-wrap gap-1 text-[11px]">
                       {stock === 'out' && <span className="px-2 py-0.5 rounded-full font-bold border bg-red-100 text-red-700 border-red-300">⛔ غير متاح</span>}
@@ -1010,19 +1021,14 @@ export default function OrderForm({ mode, orderId, repeatFromOrderId }: Props) {
                 return (
                   <tr key={index} className="border-b border-gray-200">
                     <td className="p-2">
-                      <input
-                        list={`products-${index}`}
+                      <ProductCombobox
+                        products={products}
                         value={item.productNameInput}
-                        onChange={(e) => onProductNameChange(index, e.target.value)}
-                        className={`w-full px-2 py-1 border rounded ${stock === 'out' ? 'border-red-400 bg-red-50' : stock === 'low' ? 'border-amber-400 bg-amber-50' : ''}`}
-                        placeholder="ابحث عن منتج"
-                        dir="rtl"
+                        selectedProductId={item.productId}
+                        onSelect={(p) => onProductSelect(index, p)}
+                        onClear={() => onProductClear(index)}
+                        size="sm"
                       />
-                      <datalist id={`products-${index}`}>
-                        {products.map((p) => (
-                          <option key={p.id} value={p.productName} />
-                        ))}
-                      </datalist>
                       {selectedProduct && (
                         <div className="mt-1">
                           {stock === 'out' && (
@@ -1277,7 +1283,7 @@ export default function OrderForm({ mode, orderId, repeatFromOrderId }: Props) {
               }}
             />
             <label htmlFor="is-scheduled" className="text-sm text-gray-700 cursor-pointer">
-              📅 طلب مجدول (حجز ليوم لاحق)
+              📅 حجز (ليوم لاحق)
             </label>
           </div>
 

@@ -11,8 +11,8 @@
     "productCondition": "فريش",
     "isActive": true,
     "stockStatus": "low",
-    "stockQuantity": 3,
-    "stockUpdatedAt": "2026-05-11T11:55:07.551Z",
+    "stockQuantity": 4,
+    "stockUpdatedAt": "2026-05-14T09:37:55.898Z",
     "stockUpdatedBy": "الفرع"
   },
   {
@@ -26,13 +26,13 @@
     "offerPrice": null,
     "productCondition": "فريش",
     "isActive": true,
-    "stockStatus": "out",
-    "stockQuantity": 0,
-    "stockUpdatedAt": "2026-05-11T11:55:15.352Z",
+    "stockStatus": "low",
+    "stockQuantity": 3,
+    "stockUpdatedAt": "2026-05-14T08:08:09.189Z",
     "stockUpdatedBy": "الفرع"
   },
   {
-    "id": null,
+    "id": "prod_ribeye_500g",
     "productName": "ريب اي",
     "productDescription": "rib eye",
     "bestRecipes": "grill",

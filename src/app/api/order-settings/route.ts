@@ -7,6 +7,9 @@ import {
   writeOrderSettings,
 } from '@/lib/omsData'
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 type SectionKey = keyof OrderSettingsRecord
 
 function normalizeRows(rows: unknown): LookupValueRecord[] {

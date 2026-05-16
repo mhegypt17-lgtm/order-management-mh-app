@@ -825,5 +825,239 @@
       "itemCount": 1,
       "isPriority": false
     }
+  },
+  {
+    "id": "hist_1778686752072_sua5secb",
+    "changedAt": "2026-05-13T15:39:12.072Z",
+    "entityType": "order",
+    "entityId": "ord_1778686752043_x2pm8q4t",
+    "orderId": "ord_1778686752043_x2pm8q4t",
+    "action": "created",
+    "changedBy": "user_1778686711872",
+    "summary": "تم إنشاء الطلب MH-260513-002",
+    "details": {
+      "orderNo": "MH-260513-002",
+      "orderTotal": 180,
+      "itemCount": 1,
+      "isPriority": false
+    }
+  },
+  {
+    "id": "hist_1778686858495_nqcy2myt",
+    "changedAt": "2026-05-13T15:40:58.495Z",
+    "entityType": "order",
+    "entityId": "ord_1778686858471_oz0ygher",
+    "orderId": "ord_1778686858471_oz0ygher",
+    "action": "created",
+    "changedBy": "user_1778686711872",
+    "summary": "تم إنشاء الطلب MH-260513-003",
+    "details": {
+      "orderNo": "MH-260513-003",
+      "orderTotal": 180,
+      "itemCount": 1,
+      "isPriority": false
+    }
+  },
+  {
+    "id": "hist_1778745519134_ah5nfnyt",
+    "changedAt": "2026-05-14T07:58:39.134Z",
+    "entityType": "order",
+    "entityId": "ord_1778745519102_j4vz6wgt",
+    "orderId": "ord_1778745519102_j4vz6wgt",
+    "action": "created",
+    "changedBy": "user_1778745391271",
+    "summary": "تم إنشاء الطلب MH-260514-001",
+    "details": {
+      "orderNo": "MH-260514-001",
+      "orderTotal": 633,
+      "itemCount": 2,
+      "isPriority": false
+    }
+  },
+  {
+    "id": "hist_1778745557085_o3zqxyqn",
+    "changedAt": "2026-05-14T07:59:17.085Z",
+    "entityType": "order",
+    "entityId": "ord_1778745557064_x5y0m9qh",
+    "orderId": "ord_1778745557064_x5y0m9qh",
+    "action": "created",
+    "changedBy": "user_1778745391271",
+    "summary": "تم إنشاء طلب جديد MH-260514-002 (نسخة من MH-260514-001)",
+    "details": {
+      "duplicatedFromOrderId": "ord_1778745519102_j4vz6wgt",
+      "duplicatedFromAppOrderNo": "MH-260514-001",
+      "itemCount": 2,
+      "inactiveProductCount": 0,
+      "priceChangedCount": 0,
+      "orderTotal": 710
+    }
+  },
+  {
+    "id": "hist_1778745904790_6sl5o3j5",
+    "changedAt": "2026-05-14T08:05:04.790Z",
+    "entityType": "delivery",
+    "entityId": "del_1778745857752_52h91k1m",
+    "orderId": "ord_1778745557064_x5y0m9qh",
+    "action": "status_changed",
+    "changedBy": "user_1778745853437",
+    "summary": "تم تغيير حالة التوصيل إلى تم التوصيل",
+    "details": {
+      "fromStatus": "قبول",
+      "toStatus": "تم التوصيل",
+      "hasBranchComments": false,
+      "productPhotosCount": 0,
+      "hasInvoicePhoto": false
+    }
+  },
+  {
+    "id": "hist_1778745927586_jhat64xd",
+    "changedAt": "2026-05-14T08:05:27.586Z",
+    "entityType": "delivery",
+    "entityId": "del_1778745857752_52h91k1m",
+    "orderId": "ord_1778745557064_x5y0m9qh",
+    "action": "updated",
+    "changedBy": "user_1778745853437",
+    "summary": "تم تحديث بيانات التوصيل",
+    "details": {
+      "fromStatus": "تم التوصيل",
+      "toStatus": "تم التوصيل",
+      "hasBranchComments": false,
+      "productPhotosCount": 0,
+      "hasInvoicePhoto": false
+    }
+  },
+  {
+    "id": "hist_1778750466063_os9hp73u",
+    "changedAt": "2026-05-14T09:21:06.063Z",
+    "entityType": "order",
+    "entityId": "ord_1778750466032_obgiokai",
+    "orderId": "ord_1778750466032_obgiokai",
+    "action": "created",
+    "changedBy": "user_1778750243520",
+    "summary": "تم إنشاء الطلب MH-260514-003",
+    "details": {
+      "orderNo": "MH-260514-003",
+      "orderTotal": 1026,
+      "itemCount": 2,
+      "isPriority": true
+    }
+  },
+  {
+    "id": "hist_1778750602506_f9j9xk39",
+    "changedAt": "2026-05-14T09:23:22.506Z",
+    "entityType": "delivery",
+    "entityId": "del_1778750488894_jzq45n10",
+    "orderId": "ord_1778750466032_obgiokai",
+    "action": "status_changed",
+    "changedBy": "user_1778750484851",
+    "summary": "تم تغيير حالة التوصيل إلى تم التوصيل",
+    "details": {
+      "fromStatus": "قبول",
+      "toStatus": "تم التوصيل",
+      "hasBranchComments": false,
+      "productPhotosCount": 1,
+      "hasInvoicePhoto": true
+    }
+  },
+  {
+    "id": "hist_1778750624501_1bf4xqe4",
+    "changedAt": "2026-05-14T09:23:44.502Z",
+    "entityType": "delivery",
+    "entityId": "del_1778750488894_jzq45n10",
+    "orderId": "ord_1778750466032_obgiokai",
+    "action": "updated",
+    "changedBy": "user_1778750484851",
+    "summary": "تم تحديث بيانات التوصيل",
+    "details": {
+      "fromStatus": "تم التوصيل",
+      "toStatus": "تم التوصيل",
+      "hasBranchComments": false,
+      "productPhotosCount": 1,
+      "hasInvoicePhoto": true
+    }
+  },
+  {
+    "id": "hist_1778751625572_zmyu05qt",
+    "changedAt": "2026-05-14T09:40:25.572Z",
+    "entityType": "delivery",
+    "entityId": "del_1778745857628_r79u12if",
+    "orderId": "ord_1778745519102_j4vz6wgt",
+    "action": "status_changed",
+    "changedBy": "user_1778751609518",
+    "summary": "تم تغيير حالة التوصيل إلى جاهز",
+    "details": {
+      "fromStatus": "قبول",
+      "toStatus": "جاهز",
+      "hasBranchComments": false,
+      "productPhotosCount": 0,
+      "hasInvoicePhoto": false
+    }
+  },
+  {
+    "id": "hist_1778751627404_9t1qiogm",
+    "changedAt": "2026-05-14T09:40:27.404Z",
+    "entityType": "delivery",
+    "entityId": "del_1778745857628_r79u12if",
+    "orderId": "ord_1778745519102_j4vz6wgt",
+    "action": "updated",
+    "changedBy": "user_1778751609518",
+    "summary": "تم تحديث بيانات التوصيل",
+    "details": {
+      "fromStatus": "جاهز",
+      "toStatus": "جاهز",
+      "hasBranchComments": false,
+      "productPhotosCount": 0,
+      "hasInvoicePhoto": false
+    }
+  },
+  {
+    "id": "hist_1778751671025_9z5ceu0e",
+    "changedAt": "2026-05-14T09:41:11.025Z",
+    "entityType": "delivery",
+    "entityId": "del_1778745857628_r79u12if",
+    "orderId": "ord_1778745519102_j4vz6wgt",
+    "action": "status_changed",
+    "changedBy": "user_1778751664656",
+    "summary": "تم تغيير حالة التوصيل إلى في الطريق",
+    "details": {
+      "fromStatus": "جاهز",
+      "toStatus": "في الطريق",
+      "hasBranchComments": false,
+      "productPhotosCount": 0,
+      "hasInvoicePhoto": false
+    }
+  },
+  {
+    "id": "hist_1778751672547_5zt5z31k",
+    "changedAt": "2026-05-14T09:41:12.547Z",
+    "entityType": "delivery",
+    "entityId": "del_1778745857628_r79u12if",
+    "orderId": "ord_1778745519102_j4vz6wgt",
+    "action": "updated",
+    "changedBy": "user_1778751664656",
+    "summary": "تم تحديث بيانات التوصيل",
+    "details": {
+      "fromStatus": "في الطريق",
+      "toStatus": "في الطريق",
+      "hasBranchComments": false,
+      "productPhotosCount": 0,
+      "hasInvoicePhoto": false
+    }
+  },
+  {
+    "id": "hist_1778912061560_4z5ic5ni",
+    "changedAt": "2026-05-16T06:14:21.560Z",
+    "entityType": "order",
+    "entityId": "ord_1778912061539_11uu1ydg",
+    "orderId": "ord_1778912061539_11uu1ydg",
+    "action": "created",
+    "changedBy": "user_1778912031585",
+    "summary": "تم إنشاء الطلب MH-260516-001",
+    "details": {
+      "orderNo": "MH-260516-001",
+      "orderTotal": 960,
+      "itemCount": 1,
+      "isPriority": false
+    }
   }
 ]

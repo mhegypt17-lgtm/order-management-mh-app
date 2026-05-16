@@ -121,5 +121,42 @@
     "comments": [],
     "createdAt": "2026-05-09T08:26:43.974Z",
     "updatedAt": "2026-05-09T08:26:43.974Z"
+  },
+  {
+    "channel": "Instashop",
+    "subject": "wefsfsdf",
+    "description": "sdfsdfsdf",
+    "reason": "سوء الخدمة",
+    "status": "open",
+    "priority": "medium",
+    "customerId": null,
+    "customerName": null,
+    "customerPhone": null,
+    "linkedOrderId": null,
+    "assignedTo": "ميرنا",
+    "createdBy": "خدمة العملاء",
+    "compensationAmount": 0,
+    "openedAt": "2026-05-14T08:02:50.901Z",
+    "closedAt": null,
+    "id": "comp_1778745770906_rf4obtq4",
+    "ticketNumber": "202605-0006",
+    "comments": [],
+    "createdAt": "2026-05-14T08:02:50.911Z",
+    "updatedAt": "2026-05-14T08:02:50.911Z"
+  },
+  {
+    "channel": "Instashop",
+    "customerId": null,
+    "customerName": null,
+    "customerPhone": null,
+    "linkedOrderId": null,
+    "createdBy": "خدمة العملاء",
+    "compensationAmount": 10,
+    "openedAt": "2026-05-14T09:28:05.882Z",
+    "id": "comp_1778750885886_62m9qlkc",
+    "ticketNumber": "202605-0007",
+    "comments": [],
+    "createdAt": "2026-05-14T09:28:05.889Z",
+    "updatedAt": "2026-05-14T09:28:33.268Z"
   }
 ]

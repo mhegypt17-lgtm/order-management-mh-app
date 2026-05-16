@@ -38,7 +38,7 @@
     "id": "addr_1778070581878_xu78v8ai",
     "customerId": "cust_1778070581878_3bxkubuy",
     "addressLabel": "Home",
-    "area": "التجمع",
+    "area": "مدينة نصر",
     "streetAddress": "x",
     "googleMapsLink": "",
     "createdAt": "2026-05-06T12:29:41.862Z"
@@ -105,5 +105,14 @@
     "streetAddress": "dddd",
     "googleMapsLink": "dddd",
     "createdAt": "2026-05-11T14:41:41.959Z"
+  },
+  {
+    "id": "addr_1778686752030_ge7ty1eq",
+    "customerId": "cust_1778686752030_59yw3sdr",
+    "addressLabel": "Home",
+    "area": "التجمع",
+    "streetAddress": "23423423",
+    "googleMapsLink": "4323423",
+    "createdAt": "2026-05-13T15:39:12.013Z"
   }
 ]

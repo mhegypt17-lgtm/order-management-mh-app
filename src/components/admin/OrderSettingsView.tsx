@@ -759,7 +759,7 @@ export default function OrderSettingsView() {
       <section className="bg-white border-2 border-yellow-300 rounded-xl p-4">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-4">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">� تنبيه</h2>
+            <h2 className="text-lg font-semibold text-gray-900">📢 تنبيه للوكلاء</h2>
             <p className="text-xs text-gray-500">تظهر أعلى نموذج الطلب الجديد كرسالة ملونة للموظف (upsell، عرض، إجازة...)</p>
           </div>
           <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700">

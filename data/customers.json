@@ -18,8 +18,8 @@
     "phone": "01020105522",
     "customerName": "omnia",
     "createdAt": "2026-05-05T08:17:59.145Z",
-    "updatedAt": "2026-05-13T15:05:35.648Z",
-    "wallet": 6
+    "updatedAt": "2026-05-14T09:21:05.994Z",
+    "wallet": 0
   },
   {
     "id": "cust_1778070256556_24zuwu4q",
@@ -33,7 +33,7 @@
     "phone": "01077770000",
     "customerName": "submit test",
     "createdAt": "2026-05-06T12:29:41.862Z",
-    "updatedAt": "2026-05-11T09:42:56.526Z"
+    "updatedAt": "2026-05-16T06:14:21.513Z"
   },
   {
     "id": "cust_1778070632954_885e48e1",
@@ -83,5 +83,12 @@
     "customerName": "sherif mohamed",
     "createdAt": "2026-05-11T14:41:41.959Z",
     "updatedAt": "2026-05-11T14:41:41.959Z"
+  },
+  {
+    "id": "cust_1778686752030_59yw3sdr",
+    "phone": "22342423",
+    "customerName": "2434234",
+    "createdAt": "2026-05-13T15:39:12.013Z",
+    "updatedAt": "2026-05-13T15:40:58.448Z"
   }
 ]

@@ -45,11 +45,19 @@ function readProducts() {
   try {
     const data = fs.readFileSync(PRODUCTS_FILE, 'utf-8')
     const parsed = JSON.parse(data)
-    return parsed.map((product: any) => {
+    let needsRepair = false
+    const repaired = parsed.map((product: any) => {
       const validStatus = product.stockStatus === 'low' || product.stockStatus === 'out' ? product.stockStatus : 'available'
       const qty = product.stockQuantity
+      // Self-heal: every product MUST have a non-empty id
+      let id = product.id
+      if (!id || typeof id !== 'string' || !id.trim()) {
+        id = generateId()
+        needsRepair = true
+      }
       return {
         ...product,
+        id,
         productCategory: product.productCategory || 'غير محدد',
         packagingType: product.packagingType || 'غير محدد',
         stockStatus: validStatus,
@@ -58,6 +66,14 @@ function readProducts() {
         stockUpdatedBy: product.stockUpdatedBy || null,
       }
     })
+    if (needsRepair) {
+      try {
+        fs.writeFileSync(PRODUCTS_FILE, JSON.stringify(repaired, null, 2))
+      } catch {
+        // Read-only FS (e.g. Vercel) — repair stays in-memory for this request
+      }
+    }
+    return repaired
   } catch {
     return []
   }

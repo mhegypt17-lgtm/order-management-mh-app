@@ -21,7 +21,7 @@ export default function NewOrderPage() {
   const [notice, setNotice] = useState<{ message: string; type: NoticeType; isActive: boolean } | null>(null)
 
   useEffect(() => {
-    fetch('/api/order-settings')
+    fetch('/api/order-settings', { cache: 'no-store' })
       .then((r) => r.json())
       .then((data) => {
         const n = data.options?.agentNotice

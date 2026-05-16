@@ -207,7 +207,7 @@ export default function BranchPage() {
                       {order.isPriority && (
                         <span title={order.priorityReason || 'أولوية عاجلة'} className="ml-1 inline-block px-1.5 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold animate-pulse">🚨 عاجل</span>
                       )}
-                      {order.isScheduled && <span title="طلب مجدول" className="ml-1">📅</span>}
+                      {order.isScheduled && <span title="حجز" className="ml-1">📅</span>}
                       {order.appOrderNo}
                     </td>
                     <td className="px-3 py-2 text-gray-700" dir="ltr">{order.orderTime || '-'}</td>

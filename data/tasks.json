@@ -43,13 +43,13 @@
     "description": "dm,mn,",
     "assignedTo": "رنا",
     "linkedOrderId": null,
-    "status": "جديدة",
+    "status": "مكتملة",
     "priority": "متوسطة",
     "dueDate": null,
     "createdBy": "خدمة العملاء",
     "id": "task_1778319775365_owlsqgfr",
     "createdAt": "2026-05-09T09:42:55.366Z",
-    "updatedAt": "2026-05-09T09:42:55.366Z"
+    "updatedAt": "2026-05-14T08:01:34.843Z"
   },
   {
     "title": "test",
@@ -117,5 +117,18 @@
     "id": "task_1778499614469_ipgb2lfs",
     "createdAt": "2026-05-11T11:40:14.469Z",
     "updatedAt": "2026-05-11T11:40:14.469Z"
+  },
+  {
+    "title": "rfdfd",
+    "description": "sfsdf",
+    "assignedTo": "مى",
+    "linkedOrderId": "ord_1778745519102_j4vz6wgt",
+    "status": "جديدة",
+    "priority": "عالية",
+    "dueDate": null,
+    "createdBy": "خدمة العملاء",
+    "id": "task_1778750807445_910l72nz",
+    "createdAt": "2026-05-14T09:26:47.445Z",
+    "updatedAt": "2026-05-14T09:26:47.445Z"
   }
 ]
