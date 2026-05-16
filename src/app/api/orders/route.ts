@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import {
   CustomerAddressRecord,
-  CustomerRecord,
   OrderItemRecord,
   OrderRecord,
   appendEditHistory,
@@ -14,10 +13,6 @@ import {
   readOrderDelivery,
   readOrders,
   readDeliveryZones,
-  writeAddresses,
-  writeCustomers,
-  writeOrderItems,
-  writeOrders,
 } from '@/lib/omsData'
 
 function generateTextId(prefix: string) {
@@ -145,29 +140,36 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const now = new Date().toISOString()
 
-    // 1. Upsert customer
+    // 1. Find or create customer (select-then-insert to preserve stable FK id)
     const normalizedPhone = normalizePhone(body.phone)
-    const customerId = generateTextId('cust')
-    const customer: CustomerRecord = {
-      id: customerId,
-      phone: normalizedPhone,
-      customerName: body.customerName,
-      createdAt: now,
-      updatedAt: now,
-    }
-
-    const { error: customerError } = await supabase
+    const { data: existingCustomer } = await supabase
       .from('customers')
-      .upsert({
-        phone: normalizedPhone,
-        customerName: body.customerName,
-        id: customerId,
-        createdAt: now,
-        updatedAt: now,
-      }, { onConflict: 'phone' })
+      .select('*')
+      .eq('phone', normalizedPhone)
+      .maybeSingle()
 
-    if (customerError) {
-      console.error('Error upserting customer:', customerError)
+    let customerId: string
+    if (existingCustomer) {
+      customerId = existingCustomer.id
+      // Update name in case it changed
+      await supabase
+        .from('customers')
+        .update({ customerName: body.customerName, updatedAt: now })
+        .eq('id', customerId)
+    } else {
+      customerId = generateTextId('cust')
+      const { error: customerError } = await supabase
+        .from('customers')
+        .insert({
+          id: customerId,
+          phone: normalizedPhone,
+          customerName: body.customerName,
+          createdAt: now,
+          updatedAt: now,
+        })
+      if (customerError) {
+        console.error('Error inserting customer:', customerError)
+      }
     }
 
     // 2. Insert address
