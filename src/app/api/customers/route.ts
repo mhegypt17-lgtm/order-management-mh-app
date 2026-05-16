@@ -21,8 +21,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ customer: null, addresses: [] }, { status: 200 })
     }
 
-    const customers = readCustomers()
-    const addresses = readAddresses()
+    const customers = await readCustomers()
+    const addresses = await readAddresses()
 
     let customer = null
 
@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
     if (!phone) return NextResponse.json({ error: 'phone مطلوب' }, { status: 400 })
     if (!customerName) return NextResponse.json({ error: 'اسم العميل مطلوب' }, { status: 400 })
 
-    const customers = readCustomers()
+    const customers = await readCustomers()
     const exists = customers.find((c) => normalizePhone(c.phone) === phone)
     if (exists) {
       return NextResponse.json({ error: 'يوجد عميل بنفس رقم الهاتف' }, { status: 409 })
@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
       updatedAt: now,
     }
     customers.push(customer)
-    writeCustomers(customers)
+    await writeCustomers(customers)
 
     return NextResponse.json({ customer }, { status: 201 })
   } catch {

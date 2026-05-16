@@ -3,7 +3,7 @@ import { readDailyBriefings, createDailyBriefing, updateDailyBriefing, deleteDai
 
 export async function GET(request: NextRequest) {
   try {
-    const briefings = readDailyBriefings()
+    const briefings = await readDailyBriefings()
     
     // Optionally filter by type
     const type = request.nextUrl.searchParams.get('type')
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     
-    const briefing = createDailyBriefing({
+    const briefing = await createDailyBriefing({
       authorName: body.authorName,
       authorRole: body.authorRole || 'cs',
       message: body.message,
@@ -59,7 +59,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Missing briefing id' }, { status: 400 })
     }
 
-    const updated = updateDailyBriefing(id, {
+    const updated = await updateDailyBriefing(id, {
       message: body.message,
       type: body.type,
       priority: body.priority,
@@ -86,7 +86,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Missing briefing id' }, { status: 400 })
     }
 
-    deleteDailyBriefing(id)
+    await deleteDailyBriefing(id)
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Error deleting briefing:', error)

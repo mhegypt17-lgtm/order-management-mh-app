@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import fs from 'fs'
-import path from 'path'
 import {
   OrderItemRecord,
   OrderRecord,
@@ -11,24 +9,13 @@ import {
   readDeliveryZones,
   readOrderItems,
   readOrders,
+  readProducts,
   writeOrderItems,
   writeOrders,
 } from '@/lib/omsData'
 
-const PRODUCTS_FILE = path.join(process.cwd(), 'data', 'products.json')
-
-function readProducts() {
-  try {
-    const raw = fs.readFileSync(PRODUCTS_FILE, 'utf-8')
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-function computeDeliveryFeeByArea(subtotal: number, area?: string) {
-  const zones = readDeliveryZones()
+async function computeDeliveryFeeByArea(subtotal: number, area?: string) {
+  const zones = await readDeliveryZones()
   const matchedZone = zones.find((z) => String(z.area || '').trim() === String(area || '').trim())
   if (!matchedZone) return subtotal > 1800 ? 0 : 95
   const freeValue = Number(matchedZone.freeDeliveryValue) || 0
@@ -49,16 +36,16 @@ export async function POST(
     const body = await request.json().catch(() => ({} as any))
     const createdBy = body.createdBy || 'unknown'
 
-    const orders = readOrders()
+    const orders = await readOrders()
     const source = orders.find((o) => o.id === params.id)
     if (!source) {
       return NextResponse.json({ error: 'Source order not found' }, { status: 404 })
     }
 
-    const allItems = readOrderItems()
+    const allItems = await readOrderItems()
     const sourceItems = allItems.filter((i) => i.orderId === source.id)
-    const products = readProducts()
-    const addresses = readAddresses()
+    const products = await readProducts()
+    const addresses = await readAddresses()
     const address = addresses.find((a) => a.id === source.deliveryAddressId) || null
 
     const now = new Date()
@@ -93,7 +80,7 @@ export async function POST(
     }
 
     const subtotal = newItems.reduce((sum, i) => sum + i.lineTotal, 0)
-    const deliveryFee = computeDeliveryFeeByArea(subtotal, address?.area)
+    const deliveryFee = await computeDeliveryFeeByArea(subtotal, address?.area)
     const orderTotal = subtotal + deliveryFee
     const appOrderNo = generateAppOrderNo(orderDate, source.orderType, orders)
 
@@ -124,8 +111,8 @@ export async function POST(
     }
 
     orders.push(newOrder)
-    writeOrders(orders)
-    writeOrderItems([...allItems, ...newItems])
+    await writeOrders(orders)
+    await writeOrderItems([...allItems, ...newItems])
 
     appendEditHistory({
       entityType: 'order',

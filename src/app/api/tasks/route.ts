@@ -3,7 +3,7 @@ import { readTasks, createTask } from '@/lib/omsData'
 
 export async function GET(request: NextRequest) {
   try {
-    const tasks = readTasks()
+    const tasks = await readTasks()
     
     // Filter by assignedTo if provided
     const assignedTo = request.nextUrl.searchParams.get('assignedTo')
@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     
-    const task = createTask({
+    const task = await createTask({
       title: body.title,
       description: body.description,
       assignedTo: body.assignedTo,

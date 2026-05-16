@@ -11,7 +11,7 @@ export const revalidate = 0
 
 export async function GET() {
   try {
-    const codes = readDiscountCodes().sort((a, b) =>
+    const codes = (await readDiscountCodes()).sort((a, b) =>
       (b.createdAt || '').localeCompare(a.createdAt || '')
     )
     return NextResponse.json(codes)
@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'النسبة لا تتجاوز 100%' }, { status: 400 })
     }
 
-    const codes = readDiscountCodes()
+    const codes = await readDiscountCodes()
     if (codes.some((c) => c.code.toUpperCase() === code)) {
       return NextResponse.json({ error: 'الكود موجود مسبقًا' }, { status: 409 })
     }
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
     }
 
     codes.push(record)
-    writeDiscountCodes(codes)
+    await writeDiscountCodes(codes)
     return NextResponse.json(record, { status: 201 })
   } catch {
     return NextResponse.json({ error: 'تعذر إنشاء الكود' }, { status: 500 })

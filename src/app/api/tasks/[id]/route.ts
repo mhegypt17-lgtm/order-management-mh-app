@@ -9,7 +9,7 @@ export async function PUT(
     const body = await request.json()
     const { id } = params
 
-    const updated = updateTask(id, body)
+    const updated = await updateTask(id, body)
     if (!updated) {
       return NextResponse.json({ error: 'Task not found' }, { status: 404 })
     }
@@ -27,14 +27,14 @@ export async function DELETE(
 ) {
   try {
     const { id } = params
-    const tasks = readTasks()
+    const tasks = await readTasks()
     const taskExists = tasks.some(t => t.id === id)
 
     if (!taskExists) {
       return NextResponse.json({ error: 'Task not found' }, { status: 404 })
     }
 
-    deleteTask(id)
+    await deleteTask(id)
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Error deleting task:', error)

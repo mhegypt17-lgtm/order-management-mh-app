@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const code = searchParams.get('code') || ''
     const grossTotal = Number(searchParams.get('gross') || 0) || 0
-    const result = evaluateDiscountCode(code, grossTotal)
+    const result = await evaluateDiscountCode(code, grossTotal)
     return NextResponse.json({
       ok: result.ok,
       reason: result.reason || null,

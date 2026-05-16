@@ -6,7 +6,7 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const rows = readEditHistory()
+    const rows = (await readEditHistory())
       .filter((r) => r.orderId === params.id)
       .sort((a, b) => (a.changedAt < b.changedAt ? 1 : -1))
 

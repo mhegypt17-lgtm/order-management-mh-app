@@ -1,7 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
-import fs from 'fs'
-import path from 'path'
-import { createTask, readTasks, readOrderSettings, DEFAULT_RETENTION_CONFIG, type TaskRecord, type RetentionConfig, type RetentionStageConfig } from '@/lib/omsData'
+import {
+  createTask,
+  readTasks,
+  readDailyBriefings,
+  readComplaints,
+  readOrders,
+  readCustomers,
+  readEditHistory,
+  readOrderSettings,
+  DEFAULT_RETENTION_CONFIG,
+  type TaskRecord,
+  type RetentionConfig,
+  type RetentionStageConfig,
+} from '@/lib/omsData'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 export type NotificationType =
@@ -28,20 +39,7 @@ export interface NotificationItem {
   priority?: 'low' | 'normal' | 'high' | 'urgent'
 }
 
-// ─── File readers ────────────────────────────────────────────────────────────
-const DATA_DIR = path.join(process.cwd(), 'data')
-
-function readJson<T>(file: string): T[] {
-  try {
-    const p = path.join(DATA_DIR, file)
-    if (!fs.existsSync(p)) return []
-    const raw = fs.readFileSync(p, 'utf-8')
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
+// ─── Data fetched from Supabase via @/lib/omsData ───────────────────────────
 
 interface TaskRec {
   id: string
@@ -133,7 +131,7 @@ export async function GET(req: NextRequest) {
     const items: NotificationItem[] = []
 
     // ── Tasks ─────────────────────────────────────────────────────────────
-    const tasks = readJson<TaskRec>('tasks.json')
+    const tasks = await readTasks()
     for (const t of tasks) {
       const created = new Date(t.createdAt).getTime()
       if (!isFinite(created) || created < cutoff) continue
@@ -156,7 +154,7 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Daily briefings ───────────────────────────────────────────────────
-    const briefings = readJson<BriefingRec>('daily_briefings.json')
+    const briefings = await readDailyBriefings()
     for (const b of briefings) {
       const created = new Date(b.createdAt).getTime()
       if (!isFinite(created) || created < cutoff) continue
@@ -175,7 +173,7 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Complaints ────────────────────────────────────────────────────────
-    const complaints = readJson<ComplaintRec>('complaints.json')
+    const complaints = await readComplaints()
     for (const c of complaints) {
       const created = new Date(c.createdAt).getTime()
       if (isFinite(created) && created >= cutoff && c.createdBy !== userName) {
@@ -209,8 +207,8 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Order & delivery activity (drives CS ↔ branch notifications) ─────
-    const orders = readJson<OrderRec>('orders.json')
-    const customers = readJson<CustomerRec>('customers.json')
+    const orders = await readOrders()
+    const customers = await readCustomers()
     const customerMap = new Map(customers.map((c) => [c.id, c]))
     const orderMap = new Map(orders.map((o) => [o.id, o]))
 
@@ -263,7 +261,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Status-change history → role-targeted notifications
-    const history = readJson<HistoryRec>('edit_history.json')
+    const history = await readEditHistory()
     for (const h of history) {
       if (h.action !== 'status_changed') continue
       const ts = new Date(h.changedAt).getTime()
@@ -335,7 +333,7 @@ export async function GET(req: NextRequest) {
     // ── Inactive customer follow-ups (CS / admin) ────────────────────────
     // Stages and per-stage action/agent are configured in admin settings (retention).
     if (role === 'cs' || role === 'admin') {
-      const settings = readOrderSettings()
+      const settings = await readOrderSettings()
       const retention: RetentionConfig = settings.retention || DEFAULT_RETENTION_CONFIG
       const nowMs = Date.now()
       // Build last-order map per customer (any non-cancelled order)
@@ -352,7 +350,7 @@ export async function GET(req: NextRequest) {
       // Existing open auto-followup tasks per customer (idempotency guard)
       const existingAutoTasks = new Map<string, TaskRecord>()
       try {
-        const allTasks = readTasks()
+        const allTasks = await readTasks()
         for (const t of allTasks) {
           if (t.source !== 'auto-followup') continue
           if (!t.linkedCustomerId) continue
@@ -394,7 +392,7 @@ export async function GET(req: NextRequest) {
         // If action === 'task' and no open auto task exists for this customer → create one
         if (stageCfg.action === 'task' && !existingAutoTasks.get(c.id)) {
           try {
-            const task = createTask({
+            const task = await createTask({
               title: `📞 متابعة عميل خامل (${days} يوم)`,
               description:
                 `العميل ${label} لم يطلب منذ ${days} يوم. يرجى التواصل والاطمئنان وعرض المنتجات المفضلة لديه.`,

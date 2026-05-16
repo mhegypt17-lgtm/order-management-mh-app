@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import fs from 'fs'
-import path from 'path'
 import {
   CustomerAddressRecord,
   OrderItemRecord,
@@ -13,12 +11,11 @@ import {
   readOrderDelivery,
   readOrders,
   readDeliveryZones,
+  readProducts,
   writeAddresses,
   writeOrderItems,
   writeOrders,
 } from '@/lib/omsData'
-
-const PRODUCTS_FILE = path.join(process.cwd(), 'data', 'products.json')
 
 type OrderUpdateItem = {
   productId: string
@@ -51,8 +48,8 @@ function findMatchedProduct(products: any[], productNameInput?: string) {
   )
 }
 
-function computeDeliveryFeeByArea(subtotal: number, area?: string) {
-  const zones = readDeliveryZones()
+async function computeDeliveryFeeByArea(subtotal: number, area?: string) {
+  const zones = await readDeliveryZones()
   const matchedZone = zones.find((z) => String(z.area || '').trim() === String(area || '').trim())
 
   if (!matchedZone) {
@@ -69,22 +66,14 @@ function computeDeliveryFeeByArea(subtotal: number, area?: string) {
   return customerFee
 }
 
-function readProducts() {
-  try {
-    const raw = fs.readFileSync(PRODUCTS_FILE, 'utf-8')
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-function enrichOrder(order: OrderRecord) {
-  const customers = readCustomers()
-  const addresses = readAddresses()
-  const orderItems = readOrderItems()
-  const orderDelivery = readOrderDelivery()
-  const products = readProducts()
+async function enrichOrder(order: OrderRecord) {
+  const [customers, addresses, orderItems, orderDelivery, products] = await Promise.all([
+    readCustomers(),
+    readAddresses(),
+    readOrderItems(),
+    readOrderDelivery(),
+    readProducts(),
+  ])
 
   const customer = customers.find((c: any) => c.id === order.customerId) || null
   const address = addresses.find((a) => a.id === order.deliveryAddressId) || null
@@ -126,14 +115,14 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const orders = readOrders()
+    const orders = await readOrders()
     const order = orders.find((o) => o.id === params.id)
 
     if (!order) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 })
     }
 
-    return NextResponse.json({ order: enrichOrder(order) }, { status: 200 })
+    return NextResponse.json({ order: await enrichOrder(order) }, { status: 200 })
   } catch {
     return NextResponse.json({ error: 'Failed to fetch order' }, { status: 500 })
   }
@@ -147,9 +136,11 @@ export async function PUT(
     const body = await request.json()
     const now = new Date().toISOString()
 
-    const orders = readOrders()
-    const orderItems = readOrderItems()
-    const addresses = readAddresses()
+    const [orders, orderItems, addresses] = await Promise.all([
+      readOrders(),
+      readOrderItems(),
+      readAddresses(),
+    ])
 
     const orderIndex = orders.findIndex((o) => o.id === params.id)
 
@@ -160,7 +151,7 @@ export async function PUT(
     // Lock: once branch marks the order as out for delivery or delivered,
     // customer service can no longer edit it. Admin can still edit.
     if (body.actorRole === 'cs') {
-      const delivery = readOrderDelivery().find((d) => d.orderId === params.id)
+      const delivery = (await readOrderDelivery()).find((d) => d.orderId === params.id)
       const lockedStatuses = ['في الطريق', 'تم التوصيل']
       if (delivery && lockedStatuses.includes(delivery.deliveryStatus)) {
         return NextResponse.json(
@@ -191,7 +182,7 @@ export async function PUT(
       deliveryAddress.area = body.deliveryArea || deliveryAddress.area || ''
     }
 
-    const products = readProducts()
+    const products = await readProducts()
     const items: OrderUpdateItem[] = Array.isArray(body.items) ? body.items : []
     const normalizedItems = items
       .map((i) => {
@@ -217,7 +208,7 @@ export async function PUT(
       })
 
     const subtotal = normalizedItems.reduce((sum, i) => sum + i.lineTotal, 0)
-    const deliveryFee = computeDeliveryFeeByArea(subtotal, body.deliveryArea || deliveryAddress?.area)
+    const deliveryFee = await computeDeliveryFeeByArea(subtotal, body.deliveryArea || deliveryAddress?.area)
     const orderTotal = subtotal + deliveryFee
 
     const existing = orders[orderIndex]
@@ -272,9 +263,9 @@ export async function PUT(
       createdAt: now,
     }))
 
-    writeAddresses(addresses)
-    writeOrders(orders)
-    writeOrderItems([...remainingItems, ...rewrittenItems])
+    await writeAddresses(addresses)
+    await writeOrders(orders)
+    await writeOrderItems([...remainingItems, ...rewrittenItems])
 
     appendEditHistory({
       entityType: 'order',
@@ -321,7 +312,7 @@ export async function PUT(
       })
     }
 
-    return NextResponse.json({ order: enrichOrder(orders[orderIndex]) }, { status: 200 })
+    return NextResponse.json({ order: await enrichOrder(orders[orderIndex]) }, { status: 200 })
   } catch {
     return NextResponse.json({ error: 'Failed to update order' }, { status: 500 })
   }

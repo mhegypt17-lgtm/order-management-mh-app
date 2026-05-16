@@ -42,7 +42,7 @@ function activeLabels(rows: LookupValueRecord[]) {
 
 export async function GET() {
   try {
-    const settings = readOrderSettings()
+    const settings = await readOrderSettings()
 
     return NextResponse.json(
       {
@@ -96,13 +96,13 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'At least one value is required' }, { status: 400 })
     }
 
-    const settings = readOrderSettings()
+    const settings = await readOrderSettings()
     const nextSettings: OrderSettingsRecord = {
       ...settings,
       [section]: normalizedItems,
     }
 
-    writeOrderSettings(nextSettings)
+    await writeOrderSettings(nextSettings)
 
     return NextResponse.json({ settings: nextSettings }, { status: 200 })
   } catch {
@@ -113,7 +113,7 @@ export async function PUT(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json()
-    const settings = readOrderSettings()
+    const settings = await readOrderSettings()
 
     const nextSettings: OrderSettingsRecord = { ...settings }
 
@@ -121,7 +121,7 @@ export async function PATCH(request: NextRequest) {
     if (body.slaHours !== undefined) {
       const parsedSla = Math.max(1, Number(body.slaHours) || 4)
       nextSettings.slaHours = parsedSla
-      writeOrderSettings(nextSettings)
+      await writeOrderSettings(nextSettings)
       return NextResponse.json({ slaHours: parsedSla }, { status: 200 })
     }
 
@@ -192,7 +192,7 @@ export async function PATCH(request: NextRequest) {
       nextSettings.retention = { stage1, stage2, stage3 } as any
     }
 
-    writeOrderSettings(nextSettings)
+    await writeOrderSettings(nextSettings)
 
     return NextResponse.json(
       {

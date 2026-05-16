@@ -1,0 +1,8 @@
+﻿src/app/layout.tsx(3,8): error TS2882: Cannot find module or type declarations for side-effect import of './globals.css'.
+src/app/orders/tasks/page.tsx(319,51): error TS2339: Property 'customerName' does not exist on type 'OrderRecord'.
+src/components/cs/DailyBriefings.tsx(175,7): error TS2322: Type '"announcement" | "alert" | "workingHours" | "general"' is not assignable to type '"general"'.
+  Type '"announcement"' is not assignable to type '"general"'.
+src/components/cs/DailyBriefings.tsx(176,7): error TS2322: Type '"low" | "medium" | "high"' is not assignable to type '"medium"'.
+  Type '"low"' is not assignable to type '"medium"'.
+src/lib/googleSheets.ts(17,17): error TS2554: Expected 2 arguments, but got 1.
+src/lib/googleSheets.ts(19,15): error TS2339: Property 'useServiceAccountAuth' does not exist on type 'GoogleSpreadsheet'.

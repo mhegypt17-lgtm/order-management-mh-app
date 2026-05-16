@@ -38,7 +38,7 @@ function normalizeItems(items: AdahiOrderInputItem[]): AdahiOrderItemRecord[] {
 
 export async function GET() {
   try {
-    const orders = readAdahiOrders().sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+    const orders = (await readAdahiOrders()).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
     return NextResponse.json({ orders }, { status: 200 })
   } catch {
     return NextResponse.json({ error: 'Failed to fetch adahi orders' }, { status: 500 })
@@ -71,9 +71,11 @@ export async function POST(request: NextRequest) {
     const remainingAmount = Math.max(0, subtotal - paidAmount)
     const collectionPercent = subtotal > 0 ? Math.min(100, Math.round((paidAmount / subtotal) * 100)) : 0
 
-    const customers = readCustomers()
-    const addresses = readAddresses()
-    const adahiOrders = readAdahiOrders()
+    const [customers, addresses, adahiOrders] = await Promise.all([
+      readCustomers(),
+      readAddresses(),
+      readAdahiOrders(),
+    ])
 
     let customer = customers.find((c) => normalizePhone(c.phone) === phone) as CustomerRecord | undefined
     if (!customer) {
@@ -146,9 +148,9 @@ export async function POST(request: NextRequest) {
 
     adahiOrders.push(order)
 
-    writeCustomers(customers)
-    writeAddresses(addresses)
-    writeAdahiOrders(adahiOrders)
+    await writeCustomers(customers)
+    await writeAddresses(addresses)
+    await writeAdahiOrders(adahiOrders)
 
     return NextResponse.json({ order }, { status: 201 })
   } catch {

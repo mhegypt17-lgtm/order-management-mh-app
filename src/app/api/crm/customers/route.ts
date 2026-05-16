@@ -17,10 +17,12 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const search = searchParams.get('search') || ''
 
-    const customers = readCustomers()
-    const addresses = readAddresses()
-    const orders = readOrders()
-    const settings = readOrderSettings()
+    const [customers, addresses, orders, settings] = await Promise.all([
+      readCustomers(),
+      readAddresses(),
+      readOrders(),
+      readOrderSettings(),
+    ])
     const loyalty = settings.loyalty || DEFAULT_LOYALTY_CONFIG
 
     const result = customers

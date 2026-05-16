@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import fs from 'fs'
-import path from 'path'
 import {
   OrderDeliveryRecord,
   appendEditHistory,
@@ -10,28 +8,19 @@ import {
   readOrderDelivery,
   readOrderItems,
   readOrders,
+  readProducts,
   writeOrderDelivery,
 } from '@/lib/omsData'
 
-const PRODUCTS_FILE = path.join(process.cwd(), 'data', 'products.json')
-
-function readProducts() {
-  try {
-    const raw = fs.readFileSync(PRODUCTS_FILE, 'utf-8')
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-function enrich(orderId: string) {
-  const orders = readOrders()
-  const customers = readCustomers()
-  const addresses = readAddresses()
-  const items = readOrderItems()
-  const products = readProducts()
-  const deliveryRows = readOrderDelivery()
+async function enrich(orderId: string) {
+  const [orders, customers, addresses, items, products, deliveryRows] = await Promise.all([
+    readOrders(),
+    readCustomers(),
+    readAddresses(),
+    readOrderItems(),
+    readProducts(),
+    readOrderDelivery(),
+  ])
 
   const order = orders.find((o) => o.id === orderId)
   if (!order) return null
@@ -63,7 +52,7 @@ function enrich(orderId: string) {
       updatedAt: order.updatedAt,
     }
     deliveryRows.push(delivery)
-    writeOrderDelivery(deliveryRows)
+    await writeOrderDelivery(deliveryRows)
   }
 
   return {
@@ -80,7 +69,7 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const order = enrich(params.id)
+    const order = await enrich(params.id)
     if (!order) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 })
     }
@@ -99,7 +88,7 @@ export async function PUT(
     const body = await request.json()
     const now = new Date().toISOString()
 
-    const rows = readOrderDelivery()
+    const rows = await readOrderDelivery()
     const index = rows.findIndex((r) => r.orderId === params.id)
 
     const existing: OrderDeliveryRecord =
@@ -136,7 +125,7 @@ export async function PUT(
       rows.push(updated)
     }
 
-    writeOrderDelivery(rows)
+    await writeOrderDelivery(rows)
 
     appendEditHistory({
       entityType: 'delivery',
@@ -157,7 +146,7 @@ export async function PUT(
       },
     })
 
-    const order = enrich(params.id)
+    const order = await enrich(params.id)
     return NextResponse.json({ order }, { status: 200 })
   } catch {
     return NextResponse.json({ error: 'Failed to update delivery data' }, { status: 500 })

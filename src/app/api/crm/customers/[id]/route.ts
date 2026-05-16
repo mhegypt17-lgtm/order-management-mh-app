@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import fs from 'fs'
-import path from 'path'
 import {
   readCustomers,
   writeCustomers,
@@ -8,6 +6,7 @@ import {
   readOrders,
   readOrderItems,
   readOrderSettings,
+  readProducts,
   resolveCustomerTier,
   DEFAULT_LOYALTY_CONFIG,
 } from '@/lib/omsData'
@@ -15,34 +14,23 @@ import {
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-const PRODUCTS_FILE = path.join(process.cwd(), 'data', 'products.json')
-
-function readProducts(): { id: string; productName: string; productCategory?: string; basePrice?: number }[] {
-  try {
-    const raw = fs.readFileSync(PRODUCTS_FILE, 'utf-8')
-    return JSON.parse(raw) || []
-  } catch {
-    return []
-  }
-}
-
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const { searchParams } = new URL(req.url)
     const role = searchParams.get('role') || 'cs' // 'cs' | 'admin'
 
     const customerId = params.id
-    const customers = readCustomers()
+    const customers = await readCustomers()
     const customer = customers.find((c) => c.id === customerId)
 
     if (!customer) {
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
     }
 
-    const allAddresses = readAddresses()
+    const allAddresses = await readAddresses()
     const addresses = allAddresses.filter((a) => a.customerId === customerId)
 
-    const allOrders = readOrders()
+    const allOrders = await readOrders()
     let customerOrders = allOrders
       .filter((o) => o.customerId === customerId)
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -56,8 +44,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       )
     }
 
-    const allOrderItems = readOrderItems()
-    const products = readProducts()
+    const allOrderItems = await readOrderItems()
+    const products = await readProducts()
 
     // Gather all-time order items for top-5 (use ALL history regardless of role)
     const allCustomerOrderIds = allOrders
@@ -133,7 +121,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const preferredChannel = Object.entries(methodCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || null
 
     // Customer tier (driven by configured loyalty rule)
-    const settings = readOrderSettings()
+    const settings = await readOrderSettings()
     const loyalty = settings.loyalty || DEFAULT_LOYALTY_CONFIG
     const tierConfig = resolveCustomerTier(loyalty, {
       completedOrderCount: loyaltyOrders.length,
@@ -261,7 +249,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const body = await req.json()
-    const customers = readCustomers()
+    const customers = await readCustomers()
     const idx = customers.findIndex((c) => c.id === params.id)
     if (idx < 0) return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
 
@@ -281,7 +269,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     next.updatedAt = new Date().toISOString()
 
     customers[idx] = next
-    writeCustomers(customers)
+    await writeCustomers(customers)
 
     return NextResponse.json({ customer: next })
   } catch (err) {

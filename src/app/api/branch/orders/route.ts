@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import fs from 'fs'
-import path from 'path'
 import {
   OrderDeliveryRecord,
   OrderRecord,
@@ -10,23 +8,12 @@ import {
   readOrderDelivery,
   readOrderItems,
   readOrders,
+  readProducts,
   writeOrderDelivery,
 } from '@/lib/omsData'
 
-const PRODUCTS_FILE = path.join(process.cwd(), 'data', 'products.json')
-
-function readProducts() {
-  try {
-    const raw = fs.readFileSync(PRODUCTS_FILE, 'utf-8')
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-function ensureDelivery(order: OrderRecord): OrderDeliveryRecord {
-  const deliveryRows = readOrderDelivery()
+async function ensureDelivery(order: OrderRecord): Promise<OrderDeliveryRecord> {
+  const deliveryRows = await readOrderDelivery()
   const existing = deliveryRows.find((d) => d.orderId === order.id)
 
   if (existing) return existing
@@ -44,15 +31,18 @@ function ensureDelivery(order: OrderRecord): OrderDeliveryRecord {
   }
 
   deliveryRows.push(fallback)
-  writeOrderDelivery(deliveryRows)
+  await writeOrderDelivery(deliveryRows)
   return fallback
 }
 
-function enrichOrderForBranch(order: OrderRecord) {
-  const customers = readCustomers()
-  const addresses = readAddresses()
-  const items = readOrderItems()
-  const products = readProducts()
+async function enrichOrderForBranch(order: OrderRecord) {
+  const [customers, addresses, items, products, delivery] = await Promise.all([
+    readCustomers(),
+    readAddresses(),
+    readOrderItems(),
+    readProducts(),
+    ensureDelivery(order),
+  ])
 
   const customer = customers.find((c) => c.id === order.customerId) || null
   const address = addresses.find((a) => a.id === order.deliveryAddressId) || null
@@ -72,7 +62,7 @@ function enrichOrderForBranch(order: OrderRecord) {
     customer,
     address,
     items: orderItems,
-    delivery: ensureDelivery(order),
+    delivery,
   }
 }
 
@@ -84,7 +74,8 @@ export async function GET(request: NextRequest) {
     const deliveryStatus = searchParams.get('deliveryStatus') || 'all'
     const view = searchParams.get('view') || '' // '', 'today', 'scheduled', 'upcoming'
 
-    let orders = readOrders().map(enrichOrderForBranch)
+    const rawOrders = await readOrders()
+    let orders = await Promise.all(rawOrders.map(enrichOrderForBranch))
 
     const _now = new Date()
     const today = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-${String(_now.getDate()).padStart(2, '0')}`

@@ -7,7 +7,7 @@ export const revalidate = 0
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const body = await req.json()
-    const codes = readDiscountCodes()
+    const codes = await readDiscountCodes()
     const idx = codes.findIndex((c) => c.id === params.id)
     if (idx < 0) return NextResponse.json({ error: 'الكود غير موجود' }, { status: 404 })
 
@@ -40,7 +40,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
     next.updatedAt = new Date().toISOString()
     codes[idx] = next
-    writeDiscountCodes(codes)
+    await writeDiscountCodes(codes)
     return NextResponse.json(next)
   } catch {
     return NextResponse.json({ error: 'تعذر تحديث الكود' }, { status: 500 })
@@ -49,12 +49,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const codes = readDiscountCodes()
+    const codes = await readDiscountCodes()
     const next = codes.filter((c) => c.id !== params.id)
     if (next.length === codes.length) {
       return NextResponse.json({ error: 'الكود غير موجود' }, { status: 404 })
     }
-    writeDiscountCodes(next)
+    await writeDiscountCodes(next)
     return NextResponse.json({ ok: true })
   } catch {
     return NextResponse.json({ error: 'تعذر حذف الكود' }, { status: 500 })

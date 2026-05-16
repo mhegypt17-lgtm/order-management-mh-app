@@ -6,7 +6,7 @@
       "isActive": true,
       "sortOrder": 1,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_39xotvkj",
@@ -14,7 +14,7 @@
       "isActive": true,
       "sortOrder": 2,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_2q5pniko",
@@ -22,7 +22,7 @@
       "isActive": true,
       "sortOrder": 3,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_k5tjntld",
@@ -30,7 +30,7 @@
       "isActive": true,
       "sortOrder": 4,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "tmp_1778746231632_nnflk",
@@ -38,7 +38,7 @@
       "isActive": true,
       "sortOrder": 5,
       "createdAt": "2026-05-14T08:10:33.124Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     }
   ],
   "orderMethods": [
@@ -48,7 +48,7 @@
       "isActive": true,
       "sortOrder": 1,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_y0rbr9g1",
@@ -56,7 +56,7 @@
       "isActive": true,
       "sortOrder": 2,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_xm6akaq9",
@@ -64,7 +64,7 @@
       "isActive": true,
       "sortOrder": 3,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_k4a3ey6d",
@@ -72,7 +72,7 @@
       "isActive": true,
       "sortOrder": 4,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_67scry0d",
@@ -80,7 +80,7 @@
       "isActive": true,
       "sortOrder": 5,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_xyj29qir",
@@ -88,7 +88,7 @@
       "isActive": true,
       "sortOrder": 6,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     }
   ],
   "customerSources": [
@@ -98,7 +98,7 @@
       "isActive": true,
       "sortOrder": 1,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_m6azahrv",
@@ -106,7 +106,7 @@
       "isActive": true,
       "sortOrder": 2,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_ufz8kusl",
@@ -114,7 +114,7 @@
       "isActive": true,
       "sortOrder": 3,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_e6whmk1i",
@@ -122,7 +122,7 @@
       "isActive": true,
       "sortOrder": 4,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_5jh6awvs",
@@ -130,7 +130,7 @@
       "isActive": true,
       "sortOrder": 5,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_bq6uqo6u",
@@ -138,7 +138,7 @@
       "isActive": true,
       "sortOrder": 6,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_350nh89k",
@@ -146,7 +146,7 @@
       "isActive": true,
       "sortOrder": 7,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_r8ibqp0j",
@@ -154,7 +154,7 @@
       "isActive": true,
       "sortOrder": 8,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_ftboxg41",
@@ -162,7 +162,7 @@
       "isActive": true,
       "sortOrder": 9,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_zzwtxkd6",
@@ -170,7 +170,7 @@
       "isActive": true,
       "sortOrder": 10,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_kicfvu7c",
@@ -178,7 +178,7 @@
       "isActive": true,
       "sortOrder": 11,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_gy911e23",
@@ -186,7 +186,7 @@
       "isActive": true,
       "sortOrder": 12,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     }
   ],
   "orderTypes": [
@@ -196,7 +196,7 @@
       "isActive": true,
       "sortOrder": 1,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_iaqp38wu",
@@ -204,7 +204,7 @@
       "isActive": true,
       "sortOrder": 2,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_g1lype7l",
@@ -212,7 +212,7 @@
       "isActive": true,
       "sortOrder": 3,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_lq812wt2",
@@ -220,7 +220,7 @@
       "isActive": true,
       "sortOrder": 4,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     }
   ],
   "paymentMethods": [
@@ -230,7 +230,7 @@
       "isActive": true,
       "sortOrder": 1,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_zsvb66ua",
@@ -238,7 +238,7 @@
       "isActive": true,
       "sortOrder": 2,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_dadybiaf",
@@ -246,7 +246,7 @@
       "isActive": true,
       "sortOrder": 3,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_muhjnl5v",
@@ -254,7 +254,7 @@
       "isActive": true,
       "sortOrder": 4,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     }
   ],
   "orderStatuses": [
@@ -264,7 +264,7 @@
       "isActive": true,
       "sortOrder": 1,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_8uhjpoh6",
@@ -272,7 +272,7 @@
       "isActive": true,
       "sortOrder": 2,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_3e4tdu47",
@@ -280,7 +280,7 @@
       "isActive": true,
       "sortOrder": 3,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_cct5h8ua",
@@ -288,7 +288,7 @@
       "isActive": true,
       "sortOrder": 4,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     }
   ],
   "complaintChannels": [
@@ -298,7 +298,7 @@
       "isActive": true,
       "sortOrder": 1,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_yv89ysbx",
@@ -306,7 +306,7 @@
       "isActive": true,
       "sortOrder": 2,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_o79as9l0",
@@ -314,7 +314,7 @@
       "isActive": true,
       "sortOrder": 3,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_h2qs0k2y",
@@ -322,7 +322,7 @@
       "isActive": true,
       "sortOrder": 4,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.380Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     }
   ],
   "complaintReasons": [
@@ -332,7 +332,7 @@
       "isActive": true,
       "sortOrder": 1,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.381Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_5nkf40x0",
@@ -340,7 +340,7 @@
       "isActive": true,
       "sortOrder": 2,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.381Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_ngv36mya",
@@ -348,7 +348,7 @@
       "isActive": true,
       "sortOrder": 3,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.381Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_jx0dh6eo",
@@ -356,7 +356,7 @@
       "isActive": true,
       "sortOrder": 4,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.381Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     },
     {
       "id": "lookup_1778683596707_a6q8xovr",
@@ -364,7 +364,7 @@
       "isActive": true,
       "sortOrder": 5,
       "createdAt": "2026-05-13T14:46:36.707Z",
-      "updatedAt": "2026-05-16T06:15:47.381Z"
+      "updatedAt": "2026-05-16T06:30:38.808Z"
     }
   ],
   "monthlyCompensationBudget": 5000,

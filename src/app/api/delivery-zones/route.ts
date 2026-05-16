@@ -3,7 +3,7 @@ import { DeliveryZoneRecord, readDeliveryZones, writeDeliveryZones } from '@/lib
 
 export async function GET() {
   try {
-    const zones = readDeliveryZones().sort((a, b) => a.zone - b.zone)
+    const zones = (await readDeliveryZones()).sort((a, b) => a.zone - b.zone)
     return NextResponse.json({ zones }, { status: 200 })
   } catch {
     return NextResponse.json({ error: 'Failed to fetch delivery zones' }, { status: 500 })
@@ -19,12 +19,12 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'No zones payload provided' }, { status: 400 })
     }
 
-    const existing = readDeliveryZones()
+    const existing = await readDeliveryZones()
     const existingByZone = new Map(existing.map((z) => [z.zone, z]))
     const now = new Date().toISOString()
 
-    const normalized: DeliveryZoneRecord[] = incoming
-      .map((z: any) => {
+    const normalized: DeliveryZoneRecord[] = (incoming
+      .map((z: any): DeliveryZoneRecord | null => {
         const zone = Number(z.zone)
         if (!Number.isFinite(zone) || zone < 1 || zone > 8) return null
 
@@ -41,14 +41,14 @@ export async function PUT(request: Request) {
           updatedAt: now,
         }
       })
-      .filter(Boolean)
-      .sort((a, b) => a.zone - b.zone) as DeliveryZoneRecord[]
+      .filter((z: DeliveryZoneRecord | null): z is DeliveryZoneRecord => z !== null) as DeliveryZoneRecord[])
+      .sort((a, b) => a.zone - b.zone)
 
     if (normalized.length === 0) {
       return NextResponse.json({ error: 'Invalid zones payload' }, { status: 400 })
     }
 
-    writeDeliveryZones(normalized)
+    await writeDeliveryZones(normalized)
     return NextResponse.json({ zones: normalized }, { status: 200 })
   } catch {
     return NextResponse.json({ error: 'Failed to update delivery zones' }, { status: 500 })

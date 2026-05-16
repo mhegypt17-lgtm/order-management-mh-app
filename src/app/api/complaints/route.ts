@@ -11,7 +11,7 @@ import {
 
 export async function GET(request: NextRequest) {
   try {
-    const complaints = readComplaints()
+    const complaints = await readComplaints()
     
     // Optional filters
     const status = request.nextUrl.searchParams.get('status')
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     
-    const complaint = createComplaint({
+    const complaint = await createComplaint({
       channel: body.channel,
       subject: body.subject,
       description: body.description,
@@ -90,7 +90,7 @@ export async function PUT(request: NextRequest) {
 
     // Handle comment addition
     if (action === 'add-comment') {
-      const updated = addComplaintComment(id, body.authorName, body.text)
+      const updated = await addComplaintComment(id, body.authorName, body.text)
       if (!updated) {
         return NextResponse.json({ error: 'Complaint not found' }, { status: 404 })
       }
@@ -98,7 +98,7 @@ export async function PUT(request: NextRequest) {
     }
 
     // Handle regular update
-    const updated = updateComplaint(id, {
+    const updated = await updateComplaint(id, {
       subject: body.subject,
       description: body.description,
       reason: body.reason,
@@ -129,7 +129,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Missing complaint id' }, { status: 400 })
     }
 
-    deleteComplaint(id)
+    await deleteComplaint(id)
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Error deleting complaint:', error)

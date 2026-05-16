@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import fs from 'fs'
-import path from 'path'
 import {
   CustomerAddressRecord,
   CustomerRecord,
@@ -16,6 +14,7 @@ import {
   readOrderDelivery,
   readOrders,
   readDeliveryZones,
+  readProducts,
   writeAddresses,
   writeCustomers,
   writeOrderItems,
@@ -24,8 +23,6 @@ import {
   readDiscountCodes,
   writeDiscountCodes,
 } from '@/lib/omsData'
-
-const PRODUCTS_FILE = path.join(process.cwd(), 'data', 'products.json')
 
 type OrderInputItem = {
   productId: string
@@ -58,8 +55,8 @@ function findMatchedProduct(products: any[], productNameInput?: string) {
   )
 }
 
-function computeDeliveryFeeByArea(subtotal: number, area?: string) {
-  const zones = readDeliveryZones()
+async function computeDeliveryFeeByArea(subtotal: number, area?: string) {
+  const zones = await readDeliveryZones()
   const matchedZone = zones.find((z) => String(z.area || '').trim() === String(area || '').trim())
 
   if (!matchedZone) {
@@ -76,22 +73,14 @@ function computeDeliveryFeeByArea(subtotal: number, area?: string) {
   return customerFee
 }
 
-function readProducts() {
-  try {
-    const raw = fs.readFileSync(PRODUCTS_FILE, 'utf-8')
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-function enrichOrder(order: OrderRecord) {
-  const customers = readCustomers()
-  const addresses = readAddresses()
-  const orderItems = readOrderItems()
-  const orderDelivery = readOrderDelivery()
-  const products = readProducts()
+async function enrichOrder(order: OrderRecord) {
+  const [customers, addresses, orderItems, orderDelivery, products] = await Promise.all([
+    readCustomers(),
+    readAddresses(),
+    readOrderItems(),
+    readOrderDelivery(),
+    readProducts(),
+  ])
 
   const customer = customers.find((c) => c.id === order.customerId) || null
   const address = addresses.find((a) => a.id === order.deliveryAddressId) || null
@@ -130,9 +119,8 @@ function enrichOrder(order: OrderRecord) {
 
 export async function GET() {
   try {
-    const orders = readOrders()
-      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
-      .map(enrichOrder)
+    const rawOrders = (await readOrders()).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+    const orders = await Promise.all(rawOrders.map(enrichOrder))
 
     return NextResponse.json({ orders }, { status: 200 })
   } catch {
@@ -146,10 +134,12 @@ export async function POST(request: NextRequest) {
 
     const now = new Date().toISOString()
 
-    const customers = readCustomers()
-    const addresses = readAddresses()
-    const orders = readOrders()
-    const orderItems = readOrderItems()
+    const [customers, addresses, orders, orderItems] = await Promise.all([
+      readCustomers(),
+      readAddresses(),
+      readOrders(),
+      readOrderItems(),
+    ])
 
     const normalizedPhone = normalizePhone(body.phone)
     let customer = customers.find((c) => normalizePhone(c.phone) === normalizedPhone) as CustomerRecord | undefined
@@ -189,7 +179,7 @@ export async function POST(request: NextRequest) {
       deliveryAddress.area = body.deliveryArea || deliveryAddress.area || ''
     }
 
-    const products = readProducts()
+    const products = await readProducts()
     const items: OrderInputItem[] = Array.isArray(body.items) ? body.items : []
     const normalizedItems = items
       .map((i) => {
@@ -215,7 +205,7 @@ export async function POST(request: NextRequest) {
       })
 
     const subtotal = normalizedItems.reduce((sum, i) => sum + i.lineTotal, 0)
-    const deliveryFee = computeDeliveryFeeByArea(subtotal, body.deliveryArea || deliveryAddress.area)
+    const deliveryFee = await computeDeliveryFeeByArea(subtotal, body.deliveryArea || deliveryAddress.area)
     const grossTotal = subtotal + deliveryFee
 
     // Discount code (validated server-side)
@@ -223,7 +213,7 @@ export async function POST(request: NextRequest) {
     let discountCodeUsed: string | null = null
     let discountCodeId: string | null = null
     if (body.discountCode) {
-      const evalResult = evaluateDiscountCode(String(body.discountCode), grossTotal)
+      const evalResult = await evaluateDiscountCode(String(body.discountCode), grossTotal)
       if (evalResult.ok && evalResult.code) {
         discountApplied = evalResult.discount
         discountCodeUsed = evalResult.code.code
@@ -294,17 +284,17 @@ export async function POST(request: NextRequest) {
       createdAt: now,
     }))
 
-    writeCustomers(customers)
-    writeAddresses(addresses)
-    writeOrders(orders)
-    writeOrderItems([...orderItems, ...newItems])
+    await writeCustomers(customers)
+    await writeAddresses(addresses)
+    await writeOrders(orders)
+    await writeOrderItems([...orderItems, ...newItems])
 
     if (discountCodeId) {
-      const allCodes = readDiscountCodes()
+      const allCodes = await readDiscountCodes()
       const ci = allCodes.findIndex((c) => c.id === discountCodeId)
       if (ci >= 0) {
         allCodes[ci] = { ...allCodes[ci], usedCount: (allCodes[ci].usedCount || 0) + 1, updatedAt: now }
-        writeDiscountCodes(allCodes)
+        await writeDiscountCodes(allCodes)
       }
     }
 
@@ -323,7 +313,7 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    return NextResponse.json({ order: enrichOrder(order) }, { status: 201 })
+    return NextResponse.json({ order: await enrichOrder(order) }, { status: 201 })
   } catch {
     return NextResponse.json({ error: 'Failed to create order' }, { status: 500 })
   }

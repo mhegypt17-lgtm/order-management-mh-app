@@ -10,13 +10,21 @@ import {
 
 export async function GET() {
   try {
+    const [customers, addresses, orders, orderItems, orderDelivery, editHistory] = await Promise.all([
+      readCustomers(),
+      readAddresses(),
+      readOrders(),
+      readOrderItems(),
+      readOrderDelivery(),
+      readEditHistory(),
+    ])
     const counts = {
-      customers: readCustomers().length,
-      addresses: readAddresses().length,
-      orders: readOrders().length,
-      orderItems: readOrderItems().length,
-      orderDelivery: readOrderDelivery().length,
-      editHistory: readEditHistory().length,
+      customers: customers.length,
+      addresses: addresses.length,
+      orders: orders.length,
+      orderItems: orderItems.length,
+      orderDelivery: orderDelivery.length,
+      editHistory: editHistory.length,
     }
 
     return NextResponse.json(
