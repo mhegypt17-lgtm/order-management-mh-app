@@ -1,4 +1,48 @@
-﻿import { supabase } from '@/lib/supabase'
+import fs from 'fs'
+import path from 'path'
+
+const DATA_DIR = path.join(process.cwd(), 'data')
+const CUSTOMERS_FILE = path.join(DATA_DIR, 'customers.json')
+const ADDRESSES_FILE = path.join(DATA_DIR, 'customer_addresses.json')
+const ORDERS_FILE = path.join(DATA_DIR, 'orders.json')
+const ORDER_ITEMS_FILE = path.join(DATA_DIR, 'order_items.json')
+const ORDER_DELIVERY_FILE = path.join(DATA_DIR, 'order_delivery.json')
+const EDIT_HISTORY_FILE = path.join(DATA_DIR, 'edit_history.json')
+const TASKS_FILE = path.join(DATA_DIR, 'tasks.json')
+const DELIVERY_ZONES_FILE = path.join(DATA_DIR, 'delivery_zones.json')
+const ADAHI_ORDERS_FILE = path.join(DATA_DIR, 'adahi_orders.json')
+const ORDER_SETTINGS_FILE = path.join(DATA_DIR, 'order_settings.json')
+const DAILY_BRIEFINGS_FILE = path.join(DATA_DIR, 'daily_briefings.json')
+const COMPLAINTS_FILE = path.join(DATA_DIR, 'complaints.json')
+
+function ensureDataDir() {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true })
+  }
+}
+
+function ensureFile(filePath: string) {
+  ensureDataDir()
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(filePath, '[]')
+  }
+}
+
+function readJsonFile<T>(filePath: string): T[] {
+  ensureFile(filePath)
+  try {
+    const raw = fs.readFileSync(filePath, 'utf-8')
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function writeJsonFile<T>(filePath: string, data: T[]) {
+  ensureFile(filePath)
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2))
+}
 
 export interface CustomerRecord {
   id: string
@@ -154,20 +198,6 @@ export interface LookupValueRecord {
   updatedAt: string
 }
 
-export interface ProductRecord {
-  id: string
-  productName: string
-  category: string
-  unit: string
-  unitPrice: number
-  buyingPrice?: number
-  imageUrl?: string
-  barcode?: string
-  isActive: boolean
-  createdAt: string
-  updatedAt: string
-}
-
 export interface AgentNoticeRecord {
   message: string
   type: 'info' | 'promo' | 'warning' | 'success'
@@ -227,7 +257,6 @@ export interface OrderSettingsRecord {
   complaintChannels: LookupValueRecord[]
   complaintReasons: LookupValueRecord[]
   monthlyCompensationBudget: number
-  slaHours: number
   agentNotice: AgentNoticeRecord
 }
 
@@ -276,7 +305,6 @@ function defaultOrderSettings(): OrderSettingsRecord {
     complaintChannels: defaultsToLookupRows(DEFAULT_COMPLAINT_CHANNELS),
     complaintReasons: defaultsToLookupRows(DEFAULT_COMPLAINT_REASONS),
     monthlyCompensationBudget: 5000,
-    slaHours: 4,
     agentNotice: {
       message: '',
       type: 'info',
@@ -326,7 +354,7 @@ function defaultDeliveryZones(): DeliveryZoneRecord[] {
 }
 
 export function generateId(prefix: string) {
-  return \\_\_\\
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
 }
 
 export function normalizePhone(phone: string) {
@@ -338,171 +366,133 @@ export function formatDateDDMMYY(dateISO: string) {
   const dd = String(date.getDate()).padStart(2, '0')
   const mm = String(date.getMonth() + 1).padStart(2, '0')
   const yy = String(date.getFullYear()).slice(-2)
-  return \\\\\
+  return `${dd}${mm}${yy}`
 }
 
 export function toOrderTypeSlug(orderType: string) {
   return orderType.toLowerCase()
 }
 
-export async function generateAppOrderNo(orderDate: string, orderType: string, orders: OrderRecord[]) {
+export function generateAppOrderNo(orderDate: string, orderType: string, orders: OrderRecord[]) {
   const dateKey = formatDateDDMMYY(orderDate)
   const typeSlug = toOrderTypeSlug(orderType)
   const countForDayType = orders.filter(
     (o) => formatDateDDMMYY(o.orderDate) === dateKey && o.orderType.toLowerCase() === typeSlug
   ).length
 
-  return \\\\\
+  return `${dateKey}${typeSlug}${countForDayType + 1}`
 }
 
-// Supabase Read Functions (now async)
-export async function readCustomers(): Promise<CustomerRecord[]> {
-  const { data, error } = await supabase.from('customers').select('*')
-  if (error) {
-    console.error('Error reading customers:', error)
-    return []
-  }
-  return data || []
+export function readCustomers() {
+  return readJsonFile<CustomerRecord>(CUSTOMERS_FILE)
 }
 
-export async function writeCustomers(data: CustomerRecord[]): Promise<void> {
-  // No-op: writes handled directly in API routes
+export function writeCustomers(data: CustomerRecord[]) {
+  writeJsonFile<CustomerRecord>(CUSTOMERS_FILE, data)
 }
 
-export async function readAddresses(): Promise<CustomerAddressRecord[]> {
-  const { data, error } = await supabase.from('customer_addresses').select('*')
-  if (error) {
-    console.error('Error reading addresses:', error)
-    return []
-  }
-  return data || []
+export function readAddresses() {
+  return readJsonFile<CustomerAddressRecord>(ADDRESSES_FILE)
 }
 
-export async function writeAddresses(data: CustomerAddressRecord[]): Promise<void> {
-  // No-op: writes handled directly in API routes
+export function writeAddresses(data: CustomerAddressRecord[]) {
+  writeJsonFile<CustomerAddressRecord>(ADDRESSES_FILE, data)
 }
 
-export async function readOrders(): Promise<OrderRecord[]> {
-  const { data, error } = await supabase.from('orders').select('*')
-  if (error) {
-    console.error('Error reading orders:', error)
-    return []
-  }
-  return data || []
+export function readOrders() {
+  return readJsonFile<OrderRecord>(ORDERS_FILE)
 }
 
-export async function writeOrders(data: OrderRecord[]): Promise<void> {
-  // No-op: writes handled directly in API routes
+export function writeOrders(data: OrderRecord[]) {
+  writeJsonFile<OrderRecord>(ORDERS_FILE, data)
 }
 
-export async function readOrderItems(): Promise<OrderItemRecord[]> {
-  const { data, error } = await supabase.from('order_items').select('*')
-  if (error) {
-    console.error('Error reading order items:', error)
-    return []
-  }
-  return data || []
+export function readOrderItems() {
+  return readJsonFile<OrderItemRecord>(ORDER_ITEMS_FILE)
 }
 
-export async function writeOrderItems(data: OrderItemRecord[]): Promise<void> {
-  // No-op: writes handled directly in API routes
+export function writeOrderItems(data: OrderItemRecord[]) {
+  writeJsonFile<OrderItemRecord>(ORDER_ITEMS_FILE, data)
 }
 
-export async function readOrderDelivery(): Promise<OrderDeliveryRecord[]> {
-  const { data, error } = await supabase.from('order_delivery').select('*')
-  if (error) {
-    console.error('Error reading order delivery:', error)
-    return []
-  }
-  return data || []
+export function readOrderDelivery() {
+  return readJsonFile<OrderDeliveryRecord>(ORDER_DELIVERY_FILE)
 }
 
-export async function writeOrderDelivery(data: OrderDeliveryRecord[]): Promise<void> {
-  // No-op: writes handled directly in API routes
+export function writeOrderDelivery(data: OrderDeliveryRecord[]) {
+  writeJsonFile<OrderDeliveryRecord>(ORDER_DELIVERY_FILE, data)
 }
 
-export async function readEditHistory(): Promise<EditHistoryRecord[]> {
-  const { data, error } = await supabase.from('edit_history').select('*')
-  if (error) {
-    console.error('Error reading edit history:', error)
-    return []
-  }
-  return data || []
+export function readEditHistory() {
+  return readJsonFile<EditHistoryRecord>(EDIT_HISTORY_FILE)
 }
 
-export async function writeEditHistory(data: EditHistoryRecord[]): Promise<void> {
-  // No-op: writes handled directly in API routes
+export function writeEditHistory(data: EditHistoryRecord[]) {
+  writeJsonFile<EditHistoryRecord>(EDIT_HISTORY_FILE, data)
 }
 
-export async function appendEditHistory(record: Omit<EditHistoryRecord, 'id' | 'changedAt'>): Promise<void> {
-  const newRecord = {
+export function appendEditHistory(record: Omit<EditHistoryRecord, 'id' | 'changedAt'>) {
+  const rows = readEditHistory()
+  rows.push({
     id: generateId('hist'),
     changedAt: new Date().toISOString(),
     ...record,
-  }
-  await supabase.from('edit_history').insert([newRecord])
+  })
+  writeEditHistory(rows)
 }
 
-export async function readTasks(): Promise<TaskRecord[]> {
-  const { data, error } = await supabase.from('tasks').select('*')
-  if (error) {
-    console.error('Error reading tasks:', error)
-    return []
-  }
-  return data || []
+export function readTasks() {
+  return readJsonFile<TaskRecord>(TASKS_FILE)
 }
 
-export async function writeTasks(data: TaskRecord[]): Promise<void> {
-  // No-op: writes handled directly in API routes
+export function writeTasks(data: TaskRecord[]) {
+  writeJsonFile<TaskRecord>(TASKS_FILE, data)
 }
 
-export async function createTask(task: Omit<TaskRecord, 'id' | 'createdAt' | 'updatedAt'>): Promise<TaskRecord> {
+export function createTask(task: Omit<TaskRecord, 'id' | 'createdAt' | 'updatedAt'>) {
+  const tasks = readTasks()
   const newTask: TaskRecord = {
     ...task,
     id: generateId('task'),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }
-  await supabase.from('tasks').insert([newTask])
+  tasks.push(newTask)
+  writeTasks(tasks)
   return newTask
 }
 
-export async function updateTask(id: string, updates: Partial<Omit<TaskRecord, 'id' | 'createdAt'>>): Promise<TaskRecord | null> {
-  const updated = {
-    ...updates,
-    updatedAt: new Date().toISOString(),
+export function updateTask(id: string, updates: Partial<Omit<TaskRecord, 'id' | 'createdAt'>>) {
+  const tasks = readTasks()
+  const index = tasks.findIndex(t => t.id === id)
+  if (index !== -1) {
+    tasks[index] = {
+      ...tasks[index],
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    }
+    writeTasks(tasks)
+    return tasks[index]
   }
-  const { data, error } = await supabase
-    .from('tasks')
-    .update(updated)
-    .eq('id', id)
-    .select()
-    .single()
-  
-  if (error) {
-    console.error('Error updating task:', error)
-    return null
-  }
-  return data || null
+  return null
 }
 
-export async function deleteTask(id: string): Promise<void> {
-  await supabase.from('tasks').delete().eq('id', id)
+export function deleteTask(id: string) {
+  const tasks = readTasks()
+  const filtered = tasks.filter(t => t.id !== id)
+  writeTasks(filtered)
 }
 
-export async function readDeliveryZones(): Promise<DeliveryZoneRecord[]> {
-  const { data, error } = await supabase.from('delivery_zones').select('*').order('zone', { ascending: true })
-  if (error) {
-    console.error('Error reading delivery zones:', error)
-    return defaultDeliveryZones()
-  }
-  
-  if (!data || data.length === 0) {
-    return defaultDeliveryZones()
+export function readDeliveryZones() {
+  const rows = readJsonFile<DeliveryZoneRecord>(DELIVERY_ZONES_FILE)
+  if (rows.length === 0) {
+    const defaults = defaultDeliveryZones()
+    writeJsonFile<DeliveryZoneRecord>(DELIVERY_ZONES_FILE, defaults)
+    return defaults
   }
 
   const now = new Date().toISOString()
-  const existingByZone = new Map((data as any[]).map((r) => [Number(r.zone), r]))
+  const existingByZone = new Map(rows.map((r) => [Number(r.zone), r]))
   const normalized = Array.from({ length: 8 }, (_, idx) => {
     const zone = idx + 1
     const existing = existingByZone.get(zone)
@@ -521,7 +511,7 @@ export async function readDeliveryZones(): Promise<DeliveryZoneRecord[]> {
     return {
       id: generateId('zone'),
       zone,
-      area: \منطقة \\,
+      area: `منطقة ${zone}`,
       averageDistanceKm: 0,
       deliveryCost: 0,
       customerDeliveryFee: 0,
@@ -531,53 +521,35 @@ export async function readDeliveryZones(): Promise<DeliveryZoneRecord[]> {
     }
   })
 
+  writeJsonFile<DeliveryZoneRecord>(DELIVERY_ZONES_FILE, normalized)
   return normalized
 }
 
-export async function writeDeliveryZones(data: DeliveryZoneRecord[]): Promise<void> {
-  // No-op: writes handled directly in API routes
+export function writeDeliveryZones(data: DeliveryZoneRecord[]) {
+  writeJsonFile<DeliveryZoneRecord>(DELIVERY_ZONES_FILE, data)
 }
 
-export async function readAdahiOrders(): Promise<AdahiOrderRecord[]> {
-  const { data, error } = await supabase.from('adahi_orders').select('*')
-  if (error) {
-    console.error('Error reading adahi orders:', error)
-    return []
-  }
-  return data || []
+export function readAdahiOrders() {
+  return readJsonFile<AdahiOrderRecord>(ADAHI_ORDERS_FILE)
 }
 
-export async function writeAdahiOrders(data: AdahiOrderRecord[]): Promise<void> {
-  // No-op: writes handled directly in API routes
+export function writeAdahiOrders(data: AdahiOrderRecord[]) {
+  writeJsonFile<AdahiOrderRecord>(ADAHI_ORDERS_FILE, data)
 }
 
-export async function readProducts(): Promise<ProductRecord[]> {
-  const { data, error } = await supabase.from('products').select('*')
-  if (error) {
-    console.error('Error reading products:', error)
-    return []
-  }
-  return data || []
-}
+export function readOrderSettings(): OrderSettingsRecord {
+  ensureDataDir()
 
-export async function writeProducts(data: ProductRecord[]): Promise<void> {
-  // No-op: writes handled directly in API routes
-}
-
-export async function readOrderSettings(): Promise<OrderSettingsRecord> {
-  const { data, error } = await supabase
-    .from('order_settings')
-    .select('*')
-    .eq('id', 'singleton')
-    .single()
-
-  if (error || !data) {
-    console.warn('Error reading order settings, using defaults:', error)
-    return defaultOrderSettings()
+  if (!fs.existsSync(ORDER_SETTINGS_FILE)) {
+    const defaults = defaultOrderSettings()
+    fs.writeFileSync(ORDER_SETTINGS_FILE, JSON.stringify(defaults, null, 2))
+    return defaults
   }
 
   try {
-    const parsed = data as Partial<OrderSettingsRecord>
+    const raw = fs.readFileSync(ORDER_SETTINGS_FILE, 'utf-8')
+    const parsed = JSON.parse(raw) as Partial<OrderSettingsRecord>
+
     const defaults = defaultOrderSettings()
     const normalized: OrderSettingsRecord = {
       orderReceivers: normalizeLookupRows(parsed.orderReceivers),
@@ -589,8 +561,8 @@ export async function readOrderSettings(): Promise<OrderSettingsRecord> {
       complaintChannels: normalizeLookupRows(parsed.complaintChannels),
       complaintReasons: normalizeLookupRows((parsed as any).complaintReasons),
       monthlyCompensationBudget: Number(parsed.monthlyCompensationBudget) || 5000,
-      slaHours: Math.max(1, Number(parsed.slaHours) || 4),
-      agentNotice: {
+        slaHours: Math.max(1, Number(parsed.slaHours) || 4),
+        agentNotice: {
         message: String((parsed.agentNotice as any)?.message || '').trim(),
         type: (['info', 'promo', 'warning', 'success'].includes((parsed.agentNotice as any)?.type)
           ? (parsed.agentNotice as any).type
@@ -609,25 +581,46 @@ export async function readOrderSettings(): Promise<OrderSettingsRecord> {
     if (normalized.complaintChannels.length === 0) normalized.complaintChannels = defaults.complaintChannels
     if (normalized.complaintReasons.length === 0) normalized.complaintReasons = defaults.complaintReasons
 
+    fs.writeFileSync(ORDER_SETTINGS_FILE, JSON.stringify(normalized, null, 2))
     return normalized
-  } catch (error) {
-    console.error('Error normalizing order settings:', error)
-    return defaultOrderSettings()
+  } catch {
+    const defaults = defaultOrderSettings()
+    fs.writeFileSync(ORDER_SETTINGS_FILE, JSON.stringify(defaults, null, 2))
+    return defaults
   }
 }
 
-export async function writeOrderSettings(data: OrderSettingsRecord): Promise<void> {
-  // No-op: writes handled directly in API routes
-}
-
-export async function readDailyBriefings(): Promise<DailyBriefingRecord[]> {
-  const { data, error } = await supabase.from('daily_briefings').select('*')
-  if (error) {
-    console.error('Error reading daily briefings:', error)
-    return []
+export function writeOrderSettings(data: OrderSettingsRecord) {
+  const normalized: OrderSettingsRecord = {
+    orderReceivers: normalizeLookupRows(data.orderReceivers),
+    orderMethods: normalizeLookupRows(data.orderMethods),
+    customerSources: normalizeLookupRows(data.customerSources),
+    orderTypes: normalizeLookupRows(data.orderTypes),
+    paymentMethods: normalizeLookupRows(data.paymentMethods),
+    orderStatuses: normalizeLookupRows(data.orderStatuses),
+    complaintChannels: normalizeLookupRows(data.complaintChannels),
+    complaintReasons: normalizeLookupRows((data as any).complaintReasons),
+    monthlyCompensationBudget: Number(data.monthlyCompensationBudget) || 5000,
+    slaHours: Math.max(1, Number(data.slaHours) || 4),
+    agentNotice: {
+      message: String(data.agentNotice?.message || '').trim(),
+      type: (['info', 'promo', 'warning', 'success'].includes(data.agentNotice?.type)
+        ? data.agentNotice.type
+        : 'info') as AgentNoticeRecord['type'],
+      isActive: Boolean(data.agentNotice?.isActive),
+      updatedAt: new Date().toISOString(),
+    },
   }
 
-  return (data || []).map((briefing) => ({
+  ensureDataDir()
+  fs.writeFileSync(ORDER_SETTINGS_FILE, JSON.stringify(normalized, null, 2))
+}
+
+export function readDailyBriefings() {
+  const raw = readJsonFile<DailyBriefingRecord>(DAILY_BRIEFINGS_FILE)
+  
+  // Normalize to ensure all fields exist
+  return raw.map((briefing) => ({
     ...briefing,
     priority: (['low', 'medium', 'high'].includes(briefing.priority)
       ? briefing.priority
@@ -636,172 +629,124 @@ export async function readDailyBriefings(): Promise<DailyBriefingRecord[]> {
   }))
 }
 
-export async function writeDailyBriefings(data: DailyBriefingRecord[]): Promise<void> {
-  // No-op: writes handled directly in API routes
+export function writeDailyBriefings(data: DailyBriefingRecord[]) {
+  writeJsonFile<DailyBriefingRecord>(DAILY_BRIEFINGS_FILE, data)
 }
 
-export async function createDailyBriefing(
+export function createDailyBriefing(
   briefing: Omit<DailyBriefingRecord, 'id' | 'createdAt' | 'updatedAt'>
-): Promise<DailyBriefingRecord> {
+): DailyBriefingRecord {
+  const briefings = readDailyBriefings()
   const newBriefing: DailyBriefingRecord = {
     ...briefing,
     id: generateId('brief'),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }
-  await supabase.from('daily_briefings').insert([newBriefing])
+  briefings.push(newBriefing)
+  writeDailyBriefings(briefings)
   return newBriefing
 }
 
-export async function updateDailyBriefing(
+export function updateDailyBriefing(
   id: string,
   updates: Partial<Omit<DailyBriefingRecord, 'id' | 'createdAt'>>
-): Promise<DailyBriefingRecord | null> {
-  const updated = {
-    ...updates,
-    updatedAt: new Date().toISOString(),
+): DailyBriefingRecord | null {
+  const briefings = readDailyBriefings()
+  const index = briefings.findIndex((b) => b.id === id)
+  if (index !== -1) {
+    briefings[index] = {
+      ...briefings[index],
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    }
+    writeDailyBriefings(briefings)
+    return briefings[index]
   }
-  const { data, error } = await supabase
-    .from('daily_briefings')
-    .update(updated)
-    .eq('id', id)
-    .select()
-    .single()
-
-  if (error) {
-    console.error('Error updating daily briefing:', error)
-    return null
-  }
-  return data || null
+  return null
 }
 
-export async function deleteDailyBriefing(id: string): Promise<void> {
-  await supabase.from('daily_briefings').delete().eq('id', id)
+export function deleteDailyBriefing(id: string) {
+  const briefings = readDailyBriefings()
+  const filtered = briefings.filter((b) => b.id !== id)
+  writeDailyBriefings(filtered)
 }
 
-export async function generateTicketNumber(): Promise<string> {
+function generateTicketNumber(): string {
   const now = new Date()
-  const dateKey = \\\\
-  const { data: complaints, error } = await supabase
-    .from('complaints')
-    .select('ticketNumber')
-    .like('ticketNumber', \\%\)
-  
-  if (error) {
-    console.error('Error generating ticket number:', error)
-  }
-  
-  const countForMonth = (complaints || []).length
-  return \\-\\
+  const dateKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`
+  const complaints = readJsonFile<ComplaintRecord>(COMPLAINTS_FILE)
+  const countForMonth = complaints.filter((c) => c.ticketNumber.startsWith(dateKey)).length
+  return `${dateKey}-${String(countForMonth + 1).padStart(4, '0')}`
 }
 
-export async function readComplaints(): Promise<ComplaintRecord[]> {
-  const { data, error } = await supabase.from('complaints').select('*')
-  if (error) {
-    console.error('Error reading complaints:', error)
-    return []
-  }
-  return data || []
+export function readComplaints() {
+  return readJsonFile<ComplaintRecord>(COMPLAINTS_FILE)
 }
 
-export async function writeComplaints(data: ComplaintRecord[]): Promise<void> {
-  // No-op: writes handled directly in API routes
+export function writeComplaints(data: ComplaintRecord[]) {
+  writeJsonFile<ComplaintRecord>(COMPLAINTS_FILE, data)
 }
 
-export async function createComplaint(
+export function createComplaint(
   complaint: Omit<ComplaintRecord, 'id' | 'ticketNumber' | 'createdAt' | 'updatedAt' | 'comments'>
-): Promise<ComplaintRecord> {
-  const ticketNumber = await generateTicketNumber()
+): ComplaintRecord {
+  const complaints = readComplaints()
   const newComplaint: ComplaintRecord = {
     ...complaint,
     id: generateId('comp'),
-    ticketNumber,
+    ticketNumber: generateTicketNumber(),
     comments: [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }
-  await supabase.from('complaints').insert([newComplaint])
+  complaints.push(newComplaint)
+  writeComplaints(complaints)
   return newComplaint
 }
 
-export async function updateComplaint(
+export function updateComplaint(
   id: string,
   updates: Partial<Omit<ComplaintRecord, 'id' | 'ticketNumber' | 'createdAt'>>
-): Promise<ComplaintRecord | null> {
-  const updated = {
-    ...updates,
-    updatedAt: new Date().toISOString(),
+): ComplaintRecord | null {
+  const complaints = readComplaints()
+  const index = complaints.findIndex((c) => c.id === id)
+  if (index !== -1) {
+    complaints[index] = {
+      ...complaints[index],
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    }
+    writeComplaints(complaints)
+    return complaints[index]
   }
-  const { data, error } = await supabase
-    .from('complaints')
-    .update(updated)
-    .eq('id', id)
-    .select()
-    .single()
-
-  if (error) {
-    console.error('Error updating complaint:', error)
-    return null
-  }
-  return data || null
+  return null
 }
 
-export async function addComplaintComment(
+export function addComplaintComment(
   complaintId: string,
   authorName: string,
   text: string
-): Promise<ComplaintRecord | null> {
-  const comment: ComplaintCommentRecord = {
-    id: generateId('comment'),
-    authorName,
-    text,
-    createdAt: new Date().toISOString(),
-  }
-
-  const { data: complaint, error: fetchError } = await supabase
-    .from('complaints')
-    .select('comments')
-    .eq('id', complaintId)
-    .single()
-
-  if (fetchError) {
-    console.error('Error fetching complaint:', fetchError)
-    return null
-  }
-
-  const updatedComments = [...(complaint?.comments || []), comment]
-  const { data, error } = await supabase
-    .from('complaints')
-    .update({ comments: updatedComments, updatedAt: new Date().toISOString() })
-    .eq('id', complaintId)
-    .select()
-    .single()
-
-  if (error) {
-    console.error('Error adding complaint comment:', error)
-    return null
-  }
-  return data || null
-}
-
-export async function deleteComplaint(id: string): Promise<void> {
-  await supabase.from('complaints').delete().eq('id', id)
-}
-
-export const DEFAULT_LOYALTY_CONFIG = {
-  tiers: [
-    { name: 'Bronze', minOrders: 0, discount: 0 },
-    { name: 'Silver', minOrders: 5, discount: 0.05 },
-    { name: 'Gold', minOrders: 10, discount: 0.1 },
-    { name: 'Platinum', minOrders: 20, discount: 0.15 },
-  ],
-}
-
-export function resolveCustomerTier(orderCount: number): string {
-  for (let i = DEFAULT_LOYALTY_CONFIG.tiers.length - 1; i >= 0; i--) {
-    if (orderCount >= DEFAULT_LOYALTY_CONFIG.tiers[i].minOrders) {
-      return DEFAULT_LOYALTY_CONFIG.tiers[i].name
+): ComplaintRecord | null {
+  const complaints = readComplaints()
+  const index = complaints.findIndex((c) => c.id === complaintId)
+  if (index !== -1) {
+    const comment: ComplaintCommentRecord = {
+      id: generateId('comment'),
+      authorName,
+      text,
+      createdAt: new Date().toISOString(),
     }
+    complaints[index].comments.push(comment)
+    complaints[index].updatedAt = new Date().toISOString()
+    writeComplaints(complaints)
+    return complaints[index]
   }
-  return 'Bronze'
+  return null
+}
+
+export function deleteComplaint(id: string) {
+  const complaints = readComplaints()
+  const filtered = complaints.filter((c) => c.id !== id)
+  writeComplaints(filtered)
 }
