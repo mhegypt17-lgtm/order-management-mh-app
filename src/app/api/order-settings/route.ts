@@ -7,9 +7,6 @@ import {
   writeOrderSettings,
 } from '@/lib/omsData'
 
-export const dynamic = 'force-dynamic'
-export const revalidate = 0
-
 type SectionKey = keyof OrderSettingsRecord
 
 function normalizeRows(rows: unknown): LookupValueRecord[] {
@@ -48,8 +45,6 @@ export async function GET() {
       {
         settings,
         slaHours: settings.slaHours,
-        loyalty: settings.loyalty,
-        retention: settings.retention,
         options: {
           orderReceivers: activeLabels(settings.orderReceivers),
           orderMethods: activeLabels(settings.orderMethods),
@@ -102,7 +97,7 @@ export async function PUT(request: NextRequest) {
       [section]: normalizedItems,
     }
 
-    await writeOrderSettings(nextSettings)
+    writeOrderSettings(nextSettings)
 
     return NextResponse.json({ settings: nextSettings }, { status: 200 })
   } catch {
@@ -145,53 +140,6 @@ export async function PATCH(request: NextRequest) {
       nextSettings.agentNotice = notice
     }
 
-    // Handle loyalty config update
-    if (body.loyalty !== undefined) {
-      const incoming = body.loyalty || {}
-      const mode = incoming.mode === 'revenue' ? 'revenue' : 'frequency'
-      const incomingTiers = Array.isArray(incoming.tiers) ? incoming.tiers : []
-      // Reuse existing tier metadata (color/icon) and only override name/threshold from input
-      const existing = nextSettings.loyalty?.tiers || []
-      const tiers = existing.map((def, idx) => {
-        const t = incomingTiers[idx] || {}
-        const threshold = Number(t.threshold)
-        return {
-          name: String(t.name || def.name).trim() || def.name,
-          threshold: Number.isFinite(threshold) && threshold >= 0 ? threshold : def.threshold,
-          color: String(t.color || def.color),
-          icon: String(t.icon || def.icon),
-        }
-      })
-      tiers.sort((a, b) => a.threshold - b.threshold)
-      nextSettings.loyalty = { mode, tiers }
-    }
-
-    // Handle retention config update
-    if (body.retention !== undefined) {
-      const r = body.retention || {}
-      const validAgents = ['رنا', 'مى', 'ميرنا', 'أمل', 'auto']
-      const validActions = ['reminder', 'task', 'off']
-      const normStage = (s: any, def: any) => {
-        const days = Number(s?.days)
-        return {
-          days: Number.isFinite(days) && days > 0 ? Math.floor(days) : def.days,
-          action: validActions.includes(s?.action) ? s.action : def.action,
-          assignedTo: validAgents.includes(s?.assignedTo) ? s.assignedTo : def.assignedTo,
-        }
-      }
-      const cur = nextSettings.retention || { stage1: { days: 30, action: 'reminder', assignedTo: 'auto' }, stage2: { days: 60, action: 'reminder', assignedTo: 'auto' }, stage3: { days: 90, action: 'task', assignedTo: 'auto' } }
-      const stage1 = normStage(r.stage1, cur.stage1)
-      const stage2 = normStage(r.stage2, cur.stage2)
-      const stage3 = normStage(r.stage3, cur.stage3)
-      if (stage2.days <= stage1.days) {
-        return NextResponse.json({ error: 'أيام المرحلة الثانية يجب أن تكون أكبر من الأولى' }, { status: 400 })
-      }
-      if (stage3.days <= stage2.days) {
-        return NextResponse.json({ error: 'أيام المرحلة الثالثة يجب أن تكون أكبر من الثانية' }, { status: 400 })
-      }
-      nextSettings.retention = { stage1, stage2, stage3 } as any
-    }
-
     await writeOrderSettings(nextSettings)
 
     return NextResponse.json(
@@ -199,8 +147,6 @@ export async function PATCH(request: NextRequest) {
         slaHours: nextSettings.slaHours,
         agentNotice: nextSettings.agentNotice,
         monthlyCompensationBudget: nextSettings.monthlyCompensationBudget,
-        loyalty: nextSettings.loyalty,
-        retention: nextSettings.retention,
       },
       { status: 200 }
     )

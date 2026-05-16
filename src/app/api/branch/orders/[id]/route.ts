@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { supabase } from '@/lib/supabase'
 import {
   OrderDeliveryRecord,
   appendEditHistory,
@@ -8,19 +9,29 @@ import {
   readOrderDelivery,
   readOrderItems,
   readOrders,
-  readProducts,
   writeOrderDelivery,
 } from '@/lib/omsData'
 
+async function readProducts() {
+  try {
+    const { data: products, error } = await supabase
+      .from('products')
+      .select('*')
+    
+    if (error) return []
+    return Array.isArray(products) ? products : []
+  } catch {
+    return []
+  }
+}
+
 async function enrich(orderId: string) {
-  const [orders, customers, addresses, items, products, deliveryRows] = await Promise.all([
-    readOrders(),
-    readCustomers(),
-    readAddresses(),
-    readOrderItems(),
-    readProducts(),
-    readOrderDelivery(),
-  ])
+  const orders = await readOrders()
+  const customers = await readCustomers()
+  const addresses = await readAddresses()
+  const items = await readOrderItems()
+  const products = await readProducts()
+  const deliveryRows = await readOrderDelivery()
 
   const order = orders.find((o) => o.id === orderId)
   if (!order) return null
@@ -43,7 +54,7 @@ async function enrich(orderId: string) {
     delivery = {
       id: generateId('del'),
       orderId: order.id,
-      deliveryStatus: 'قبول',
+      deliveryStatus: 'لم يخرج بعد',
       branchComments: '',
       productPhotos: [],
       invoicePhoto: '',
@@ -97,7 +108,7 @@ export async function PUT(
         : {
             id: generateId('del'),
             orderId: params.id,
-            deliveryStatus: 'قبول',
+            deliveryStatus: 'لم يخرج بعد',
             branchComments: '',
             productPhotos: [],
             invoicePhoto: '',
@@ -127,7 +138,7 @@ export async function PUT(
 
     await writeOrderDelivery(rows)
 
-    appendEditHistory({
+    await appendEditHistory({
       entityType: 'delivery',
       entityId: updated.id,
       orderId: params.id,

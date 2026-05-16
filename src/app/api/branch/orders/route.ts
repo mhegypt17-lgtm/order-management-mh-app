@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { supabase } from '@/lib/supabase'
 import {
   OrderDeliveryRecord,
   OrderRecord,
@@ -8,9 +9,21 @@ import {
   readOrderDelivery,
   readOrderItems,
   readOrders,
-  readProducts,
   writeOrderDelivery,
 } from '@/lib/omsData'
+
+async function readProducts() {
+  try {
+    const { data: products, error } = await supabase
+      .from('products')
+      .select('*')
+    
+    if (error) return []
+    return Array.isArray(products) ? products : []
+  } catch {
+    return []
+  }
+}
 
 async function ensureDelivery(order: OrderRecord): Promise<OrderDeliveryRecord> {
   const deliveryRows = await readOrderDelivery()
@@ -21,7 +34,7 @@ async function ensureDelivery(order: OrderRecord): Promise<OrderDeliveryRecord> 
   const fallback: OrderDeliveryRecord = {
     id: generateId('del'),
     orderId: order.id,
-    deliveryStatus: 'قبول',
+    deliveryStatus: 'لم يخرج بعد',
     branchComments: '',
     productPhotos: [],
     invoicePhoto: '',
@@ -36,13 +49,10 @@ async function ensureDelivery(order: OrderRecord): Promise<OrderDeliveryRecord> 
 }
 
 async function enrichOrderForBranch(order: OrderRecord) {
-  const [customers, addresses, items, products, delivery] = await Promise.all([
-    readCustomers(),
-    readAddresses(),
-    readOrderItems(),
-    readProducts(),
-    ensureDelivery(order),
-  ])
+  const customers = await readCustomers()
+  const addresses = await readAddresses()
+  const items = await readOrderItems()
+  const products = await readProducts()
 
   const customer = customers.find((c) => c.id === order.customerId) || null
   const address = addresses.find((a) => a.id === order.deliveryAddressId) || null
@@ -62,9 +72,9 @@ async function enrichOrderForBranch(order: OrderRecord) {
     customer,
     address,
     items: orderItems,
-    delivery,
+    delivery: await ensureDelivery(order),
   }
-}
+
 
 export async function GET(request: NextRequest) {
   try {
@@ -72,51 +82,26 @@ export async function GET(request: NextRequest) {
     const date = searchParams.get('date') || ''
     const month = searchParams.get('month') || ''
     const deliveryStatus = searchParams.get('deliveryStatus') || 'all'
-    const view = searchParams.get('view') || '' // '', 'today', 'scheduled', 'upcoming'
 
-    const rawOrders = await readOrders()
-    let orders = await Promise.all(rawOrders.map(enrichOrderForBranch))
+    let orders = await readOrders()
+    const enriched = await Promise.all(orders.map(enrichOrderForBranch))
+    let filtered = enriched
 
-    const _now = new Date()
-    const today = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-${String(_now.getDate()).padStart(2, '0')}`
-
-    if (view === 'upcoming') {
-      // Future-scheduled orders only
-      orders = orders.filter((o) => o.isScheduled && o.scheduledDate && o.scheduledDate > today)
-    } else if (view === 'scheduled') {
-      // All scheduled orders (past, today, future)
-      orders = orders.filter((o) => !!o.isScheduled)
-    } else if (view === 'today') {
-      // Effective date today (same-day orders + scheduled-for-today)
-      orders = orders.filter((o) => {
-        const effectiveDate = o.isScheduled && o.scheduledDate ? o.scheduledDate : o.orderDate
-        return effectiveDate === today
-      })
-    } else if (date) {
-      // Specific date: match effective date (don't hide future-scheduled here)
-      orders = orders.filter((o) => {
-        const effectiveDate = o.isScheduled && o.scheduledDate ? o.scheduledDate : o.orderDate
-        return effectiveDate === date
-      })
-    } else {
-      // Default: hide future-scheduled (they appear on their scheduled date)
-      orders = orders.filter((o) => {
-        if (!o.isScheduled || !o.scheduledDate) return true
-        return o.scheduledDate <= today
-      })
+    if (date) {
+      filtered = filtered.filter((o) => o.orderDate === date)
     }
 
     if (month) {
-      orders = orders.filter((o) => String(o.orderDate || '').startsWith(`${month}-`))
+      filtered = filtered.filter((o) => String(o.orderDate || '').startsWith(`${month}-`))
     }
 
     if (deliveryStatus !== 'all') {
-      orders = orders.filter((o) => o.delivery.deliveryStatus === deliveryStatus)
+      filtered = filtered.filter((o) => o.delivery.deliveryStatus === deliveryStatus)
     }
 
-    orders = orders.sort((a, b) => (a.orderTime < b.orderTime ? 1 : -1))
+    filtered = filtered.sort((a, b) => (a.orderTime < b.orderTime ? 1 : -1))
 
-    return NextResponse.json({ orders }, { status: 200 })
+    return NextResponse.json({ orders: filtered }, { status: 200 })
   } catch {
     return NextResponse.json({ error: 'Failed to fetch branch orders' }, { status: 500 })
   }

@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import fs from 'fs'
-import path from 'path'
-
-const NOTES_FILE = path.join(process.cwd(), 'data', 'customer_notes.json')
+import { supabase } from '@/lib/supabase'
 
 export interface CustomerNote {
   id: string
@@ -14,30 +11,22 @@ export interface CustomerNote {
   updatedAt: string
 }
 
-function readNotes(): CustomerNote[] {
-  try {
-    if (!fs.existsSync(NOTES_FILE)) {
-      fs.writeFileSync(NOTES_FILE, '[]')
-      return []
-    }
-    const raw = fs.readFileSync(NOTES_FILE, 'utf-8')
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-function writeNotes(notes: CustomerNote[]) {
-  fs.writeFileSync(NOTES_FILE, JSON.stringify(notes, null, 2))
-}
-
 // GET: list notes for a customer
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
-  const notes = readNotes()
-    .filter((n) => n.customerId === params.id)
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-  return NextResponse.json(notes)
+  try {
+    const { data: notes, error } = await supabase
+      .from('customer_notes')
+      .select('*')
+      .eq('customerId', params.id)
+      .order('createdAt', { ascending: false })
+    
+    if (error) {
+      return NextResponse.json([], { status: 200 })
+    }
+    return NextResponse.json(notes || [])
+  } catch {
+    return NextResponse.json([], { status: 200 })
+  }
 }
 
 // POST: add a new note
@@ -55,7 +44,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       return NextResponse.json({ error: 'Note too long (max 500 chars)' }, { status: 400 })
     }
 
-    const notes = readNotes()
     const now = new Date().toISOString()
     const newNote: CustomerNote = {
       id: `note_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -66,10 +54,21 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       createdAt: now,
       updatedAt: now,
     }
-    notes.push(newNote)
-    writeNotes(notes)
-    return NextResponse.json(newNote, { status: 201 })
-  } catch {
+
+    const { data: inserted, error } = await supabase
+      .from('customer_notes')
+      .insert([newNote])
+      .select()
+      .single()
+
+    if (error) {
+      console.error('Error inserting note:', error)
+      return NextResponse.json({ error: 'Server error' }, { status: 500 })
+    }
+
+    return NextResponse.json(inserted || newNote, { status: 201 })
+  } catch (error) {
+    console.error('Error creating note:', error)
     return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
-}
+}}

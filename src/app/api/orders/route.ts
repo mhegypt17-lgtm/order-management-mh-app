@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { supabase } from '@/lib/supabase'
 import {
   CustomerAddressRecord,
   CustomerRecord,
@@ -14,14 +15,10 @@ import {
   readOrderDelivery,
   readOrders,
   readDeliveryZones,
-  readProducts,
   writeAddresses,
   writeCustomers,
   writeOrderItems,
   writeOrders,
-  evaluateDiscountCode,
-  readDiscountCodes,
-  writeDiscountCodes,
 } from '@/lib/omsData'
 
 type OrderInputItem = {
@@ -55,6 +52,16 @@ function findMatchedProduct(products: any[], productNameInput?: string) {
   )
 }
 
+async function readProducts() {
+  try {
+    const { data, error } = await supabase.from('products').select('*')
+    if (error) return []
+    return Array.isArray(data) ? data : []
+  } catch {
+    return []
+  }
+}
+
 async function computeDeliveryFeeByArea(subtotal: number, area?: string) {
   const zones = await readDeliveryZones()
   const matchedZone = zones.find((z) => String(z.area || '').trim() === String(area || '').trim())
@@ -74,13 +81,11 @@ async function computeDeliveryFeeByArea(subtotal: number, area?: string) {
 }
 
 async function enrichOrder(order: OrderRecord) {
-  const [customers, addresses, orderItems, orderDelivery, products] = await Promise.all([
-    readCustomers(),
-    readAddresses(),
-    readOrderItems(),
-    readOrderDelivery(),
-    readProducts(),
-  ])
+  const customers = await readCustomers()
+  const addresses = await readAddresses()
+  const orderItems = await readOrderItems()
+  const orderDelivery = await readOrderDelivery()
+  const products = await readProducts()
 
   const customer = customers.find((c) => c.id === order.customerId) || null
   const address = addresses.find((a) => a.id === order.deliveryAddressId) || null
@@ -99,7 +104,7 @@ async function enrichOrder(order: OrderRecord) {
     {
       id: '',
       orderId: order.id,
-      deliveryStatus: 'قبول',
+      deliveryStatus: 'لم يخرج بعد',
       branchComments: '',
       productPhotos: [],
       invoicePhoto: '',
@@ -119,10 +124,14 @@ async function enrichOrder(order: OrderRecord) {
 
 export async function GET() {
   try {
-    const rawOrders = (await readOrders()).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
-    const orders = await Promise.all(rawOrders.map(enrichOrder))
-
-    return NextResponse.json({ orders }, { status: 200 })
+    const { data: orders, error } = await supabase.from('orders').select('*').order('createdAt', { ascending: false })
+    
+    if (error) {
+      return NextResponse.json({ error: 'Failed to fetch orders' }, { status: 500 })
+    }
+    
+    const enriched = await Promise.all((orders || []).map(enrichOrder))
+    return NextResponse.json({ orders: enriched }, { status: 200 })
   } catch {
     return NextResponse.json({ error: 'Failed to fetch orders' }, { status: 500 })
   }
@@ -131,60 +140,59 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-
     const now = new Date().toISOString()
 
-    const [customers, addresses, orders, orderItems] = await Promise.all([
-      readCustomers(),
-      readAddresses(),
-      readOrders(),
-      readOrderItems(),
-    ])
-
+    // 1. Upsert customer
     const normalizedPhone = normalizePhone(body.phone)
-    let customer = customers.find((c) => normalizePhone(c.phone) === normalizedPhone) as CustomerRecord | undefined
+    const customerId = generateId('cust')
+    const customer: CustomerRecord = {
+      id: customerId,
+      phone: normalizedPhone,
+      customerName: body.customerName,
+      createdAt: now,
+      updatedAt: now,
+    }
 
-    if (!customer) {
-      customer = {
-        id: generateId('cust'),
+    const { error: customerError } = await supabase
+      .from('customers')
+      .upsert({
         phone: normalizedPhone,
         customerName: body.customerName,
+        id: customerId,
         createdAt: now,
         updatedAt: now,
-      }
-      customers.push(customer)
-    } else {
-      customer.customerName = body.customerName
-      customer.updatedAt = now
+      }, { onConflict: 'phone' })
+
+    if (customerError) {
+      console.error('Error upserting customer:', customerError)
     }
 
-    let deliveryAddress: CustomerAddressRecord | undefined
-
-    if (body.deliveryAddressId && body.deliveryAddressId !== '__new') {
-      deliveryAddress = addresses.find((a) => a.id === body.deliveryAddressId)
+    // 2. Insert address
+    const addressId = generateId('addr')
+    const deliveryAddress: CustomerAddressRecord = {
+      id: addressId,
+      customerId: customerId,
+      addressLabel: body.addressLabel || 'Home',
+      area: body.deliveryArea || '',
+      streetAddress: body.streetAddress,
+      googleMapsLink: body.googleMapsLink || '',
+      createdAt: now,
     }
 
-    if (!deliveryAddress) {
-      deliveryAddress = {
-        id: generateId('addr'),
-        customerId: customer.id,
-        addressLabel: body.addressLabel || 'Home',
-        area: body.deliveryArea || '',
-        streetAddress: body.streetAddress,
-        googleMapsLink: body.googleMapsLink || '',
-        createdAt: now,
-      }
-      addresses.push(deliveryAddress)
-    } else {
-      deliveryAddress.area = body.deliveryArea || deliveryAddress.area || ''
+    const { error: addressError } = await supabase
+      .from('customer_addresses')
+      .insert([deliveryAddress])
+
+    if (addressError) {
+      console.error('Error inserting address:', addressError)
     }
 
+    // Get products and normalize items
     const products = await readProducts()
     const items: OrderInputItem[] = Array.isArray(body.items) ? body.items : []
     const normalizedItems = items
       .map((i) => {
         const matchedProduct = findMatchedProduct(products, i.productNameInput)
-
         return {
           ...i,
           productId: i.productId || matchedProduct?.id || '',
@@ -206,36 +214,16 @@ export async function POST(request: NextRequest) {
 
     const subtotal = normalizedItems.reduce((sum, i) => sum + i.lineTotal, 0)
     const deliveryFee = await computeDeliveryFeeByArea(subtotal, body.deliveryArea || deliveryAddress.area)
-    const grossTotal = subtotal + deliveryFee
+    const orderTotal = subtotal + deliveryFee
 
-    // Discount code (validated server-side)
-    let discountApplied = 0
-    let discountCodeUsed: string | null = null
-    let discountCodeId: string | null = null
-    if (body.discountCode) {
-      const evalResult = await evaluateDiscountCode(String(body.discountCode), grossTotal)
-      if (evalResult.ok && evalResult.code) {
-        discountApplied = evalResult.discount
-        discountCodeUsed = evalResult.code.code
-        discountCodeId = evalResult.code.id
-      }
-    }
-    const afterDiscount = Math.max(0, grossTotal - discountApplied)
+    // Get existing orders for appOrderNo generation
+    const { data: existingOrders = [] } = await supabase.from('orders').select('*')
+    const appOrderNo = await generateAppOrderNo(body.orderDate, body.orderType, existingOrders as OrderRecord[])
 
-    // Wallet credit (capped by remaining payable)
-    const requestedWallet = Math.max(0, Number(body.walletApplied) || 0)
-    const customerWallet = Math.max(0, Number(customer.wallet) || 0)
-    const walletApplied = Math.min(requestedWallet, customerWallet, afterDiscount)
-    const orderTotal = afterDiscount - walletApplied
-    if (walletApplied > 0) {
-      customer.wallet = customerWallet - walletApplied
-      customer.updatedAt = now
-    }
-
-    const appOrderNo = generateAppOrderNo(body.orderDate, body.orderType, orders)
-
+    // 3. Insert order
+    const orderId = generateId('ord')
     const order: OrderRecord = {
-      id: generateId('ord'),
+      id: orderId,
       appOrderNo,
       orderDate: body.orderDate,
       orderTime: body.orderTime,
@@ -247,34 +235,34 @@ export async function POST(request: NextRequest) {
       orderStatus: body.orderStatus,
       cancellationReason: body.orderStatus === 'لاغي' ? body.cancellationReason || null : null,
       paymentMethod: body.paymentMethod,
-      customerId: customer.id,
-      deliveryAddressId: deliveryAddress.id,
+      customerId: customerId,
+      deliveryAddressId: addressId,
       notes: body.notes || '',
       followUp: Boolean(body.followUp),
       followUpNotes: body.followUpNotes || '',
-      isScheduled: Boolean(body.isScheduled),
-      scheduledDate: body.isScheduled ? (body.scheduledDate || null) : null,
-      scheduledTimeSlot: body.isScheduled ? (body.scheduledTimeSlot || null) : null,
-      scheduledSpecificTime: body.isScheduled && body.scheduledTimeSlot === 'ساعة محددة'
-        ? (body.scheduledSpecificTime || null) : null,
-      isPriority: Boolean(body.isPriority),
-      priorityReason: body.isPriority ? (body.priorityReason || null) : null,
       subtotal,
       deliveryFee,
-      walletApplied,
-      discountCode: discountCodeUsed,
-      discountApplied,
       orderTotal,
       createdBy: body.createdBy || 'unknown',
       createdAt: now,
       updatedAt: now,
     }
 
-    orders.push(order)
+    const { data: createdOrder, error: orderError } = await supabase
+      .from('orders')
+      .insert([order])
+      .select()
+      .single()
 
+    if (orderError) {
+      console.error('Error inserting order:', orderError)
+      return NextResponse.json({ error: 'Failed to create order' }, { status: 500 })
+    }
+
+    // 4. Insert order items
     const newItems: OrderItemRecord[] = normalizedItems.map((i) => ({
       id: generateId('item'),
-      orderId: order.id,
+      orderId: orderId,
       productId: i.productId,
       quantity: i.quantity,
       weightGrams: i.weightGrams,
@@ -284,37 +272,55 @@ export async function POST(request: NextRequest) {
       createdAt: now,
     }))
 
-    await writeCustomers(customers)
-    await writeAddresses(addresses)
-    await writeOrders(orders)
-    await writeOrderItems([...orderItems, ...newItems])
+    if (newItems.length > 0) {
+      const { error: itemsError } = await supabase
+        .from('order_items')
+        .insert(newItems)
 
-    if (discountCodeId) {
-      const allCodes = await readDiscountCodes()
-      const ci = allCodes.findIndex((c) => c.id === discountCodeId)
-      if (ci >= 0) {
-        allCodes[ci] = { ...allCodes[ci], usedCount: (allCodes[ci].usedCount || 0) + 1, updatedAt: now }
-        await writeDiscountCodes(allCodes)
+      if (itemsError) {
+        console.error('Error inserting order items:', itemsError)
       }
     }
 
-    appendEditHistory({
+    // 5. Insert delivery record
+    const { error: deliveryError } = await supabase
+      .from('order_delivery')
+      .insert([{
+        id: generateId('del'),
+        orderId: orderId,
+        deliveryStatus: 'لم يخرج بعد',
+        branchComments: '',
+        productPhotos: [],
+        invoicePhoto: '',
+        deliveredAt: null,
+        updatedBy: '',
+        updatedAt: now,
+      }])
+
+    if (deliveryError) {
+      console.error('Error inserting delivery:', deliveryError)
+    }
+
+    // Log edit history
+    await appendEditHistory({
       entityType: 'order',
-      entityId: order.id,
-      orderId: order.id,
+      entityId: orderId,
+      orderId: orderId,
       action: 'created',
       changedBy: body.createdBy || 'unknown',
-      summary: `تم إنشاء الطلب ${order.appOrderNo}`,
+      summary: `تم إنشاء الطلب ${appOrderNo}`,
       details: {
-        orderNo: order.appOrderNo,
+        orderNo: appOrderNo,
         orderTotal,
         itemCount: newItems.length,
-        isPriority: Boolean(body.isPriority),
       },
     })
 
-    return NextResponse.json({ order: await enrichOrder(order) }, { status: 201 })
-  } catch {
+    // Return enriched order
+    const enrichedOrder = await enrichOrder(createdOrder || order)
+    return NextResponse.json({ order: enrichedOrder }, { status: 201 })
+  } catch (error) {
+    console.error('Error creating order:', error)
     return NextResponse.json({ error: 'Failed to create order' }, { status: 500 })
   }
 }

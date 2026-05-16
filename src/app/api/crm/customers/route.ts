@@ -4,26 +4,16 @@ import {
   readAddresses,
   readOrders,
   readOrderItems,
-  readOrderSettings,
-  resolveCustomerTier,
-  DEFAULT_LOYALTY_CONFIG,
 } from '@/lib/omsData'
-
-export const dynamic = 'force-dynamic'
-export const revalidate = 0
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
     const search = searchParams.get('search') || ''
 
-    const [customers, addresses, orders, settings] = await Promise.all([
-      readCustomers(),
-      readAddresses(),
-      readOrders(),
-      readOrderSettings(),
-    ])
-    const loyalty = settings.loyalty || DEFAULT_LOYALTY_CONFIG
+    const customers = await readCustomers()
+    const addresses = await readAddresses()
+    const orders = await readOrders()
 
     const result = customers
       .filter((c) => {
@@ -40,11 +30,6 @@ export async function GET(req: NextRequest) {
 
         const completedOrders = custOrders.filter((o) => o.orderStatus === 'تم')
         const totalRevenue = completedOrders.reduce((sum, o) => sum + (o.orderTotal || 0), 0)
-
-        // Loyalty counts: any non-cancelled order counts toward tier (more intuitive than waiting for delivery)
-        const loyaltyOrders = custOrders.filter((o) => o.orderStatus !== 'لاغي')
-        const loyaltyRevenue = loyaltyOrders.reduce((sum, o) => sum + (o.orderTotal || 0), 0)
-
         const lastOrder = custOrders
           .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]
 
@@ -52,18 +37,16 @@ export async function GET(req: NextRequest) {
           ? Math.floor((Date.now() - new Date(lastOrder.createdAt).getTime()) / (1000 * 60 * 60 * 24))
           : null
 
-        // Customer tier based on configured loyalty rule (frequency or revenue)
-        const tierConfig = resolveCustomerTier(loyalty, {
-          completedOrderCount: loyaltyOrders.length,
-          totalRevenue: loyaltyRevenue,
-        })
-        const tier = tierConfig.name
+        // Customer tier based on completed orders count
+        let tier: 'برونزي' | 'فضي' | 'ذهبي' | 'بلاتيني' = 'برونزي'
+        if (completedOrders.length >= 20) tier = 'بلاتيني'
+        else if (completedOrders.length >= 10) tier = 'ذهبي'
+        else if (completedOrders.length >= 5) tier = 'فضي'
 
         return {
           id: c.id,
           customerName: c.customerName,
           phone: c.phone,
-          wallet: Number(c.wallet) || 0,
           createdAt: c.createdAt,
           addressCount: custAddresses.length,
           totalOrders: custOrders.length,
@@ -72,9 +55,6 @@ export async function GET(req: NextRequest) {
           lastOrderDate: lastOrder?.orderDate || null,
           daysSinceLastOrder,
           tier,
-          tierIcon: tierConfig.icon,
-          tierColor: tierConfig.color,
-          loyaltyMode: loyalty.mode,
         }
       })
       .sort((a, b) => (b.lastOrderDate || '').localeCompare(a.lastOrderDate || ''))

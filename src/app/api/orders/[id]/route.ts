@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { supabase } from '@/lib/supabase'
 import {
   CustomerAddressRecord,
   OrderItemRecord,
@@ -11,7 +12,6 @@ import {
   readOrderDelivery,
   readOrders,
   readDeliveryZones,
-  readProducts,
   writeAddresses,
   writeOrderItems,
   writeOrders,
@@ -48,6 +48,19 @@ function findMatchedProduct(products: any[], productNameInput?: string) {
   )
 }
 
+async function readProducts() {
+  try {
+    const { data: products, error } = await supabase
+      .from('products')
+      .select('*')
+    
+    if (error) return []
+    return Array.isArray(products) ? products : []
+  } catch {
+    return []
+  }
+}
+
 async function computeDeliveryFeeByArea(subtotal: number, area?: string) {
   const zones = await readDeliveryZones()
   const matchedZone = zones.find((z) => String(z.area || '').trim() === String(area || '').trim())
@@ -67,13 +80,11 @@ async function computeDeliveryFeeByArea(subtotal: number, area?: string) {
 }
 
 async function enrichOrder(order: OrderRecord) {
-  const [customers, addresses, orderItems, orderDelivery, products] = await Promise.all([
-    readCustomers(),
-    readAddresses(),
-    readOrderItems(),
-    readOrderDelivery(),
-    readProducts(),
-  ])
+  const customers = await readCustomers()
+  const addresses = await readAddresses()
+  const orderItems = await readOrderItems()
+  const orderDelivery = await readOrderDelivery()
+  const products = await readProducts()
 
   const customer = customers.find((c: any) => c.id === order.customerId) || null
   const address = addresses.find((a) => a.id === order.deliveryAddressId) || null
@@ -92,7 +103,7 @@ async function enrichOrder(order: OrderRecord) {
     {
       id: '',
       orderId: order.id,
-      deliveryStatus: 'قبول',
+      deliveryStatus: 'لم يخرج بعد',
       branchComments: '',
       productPhotos: [],
       invoicePhoto: '',
@@ -136,29 +147,14 @@ export async function PUT(
     const body = await request.json()
     const now = new Date().toISOString()
 
-    const [orders, orderItems, addresses] = await Promise.all([
-      readOrders(),
-      readOrderItems(),
-      readAddresses(),
-    ])
+    const orders = await readOrders()
+    const orderItems = await readOrderItems()
+    const addresses = await readAddresses()
 
     const orderIndex = orders.findIndex((o) => o.id === params.id)
 
     if (orderIndex === -1) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 })
-    }
-
-    // Lock: once branch marks the order as out for delivery or delivered,
-    // customer service can no longer edit it. Admin can still edit.
-    if (body.actorRole === 'cs') {
-      const delivery = (await readOrderDelivery()).find((d) => d.orderId === params.id)
-      const lockedStatuses = ['في الطريق', 'تم التوصيل']
-      if (delivery && lockedStatuses.includes(delivery.deliveryStatus)) {
-        return NextResponse.json(
-          { error: 'Order is locked: out for delivery or delivered. Customer service cannot edit.' },
-          { status: 403 }
-        )
-      }
     }
 
     let deliveryAddress: CustomerAddressRecord | undefined
@@ -182,7 +178,7 @@ export async function PUT(
       deliveryAddress.area = body.deliveryArea || deliveryAddress.area || ''
     }
 
-    const products = await readProducts()
+    const products = readProducts()
     const items: OrderUpdateItem[] = Array.isArray(body.items) ? body.items : []
     const normalizedItems = items
       .map((i) => {
@@ -237,13 +233,6 @@ export async function PUT(
       notes: body.notes || '',
       followUp: Boolean(body.followUp),
       followUpNotes: body.followUpNotes || '',
-      isScheduled: Boolean(body.isScheduled),
-      scheduledDate: body.isScheduled ? (body.scheduledDate || null) : null,
-      scheduledTimeSlot: body.isScheduled ? (body.scheduledTimeSlot || null) : null,
-      scheduledSpecificTime: body.isScheduled && body.scheduledTimeSlot === 'ساعة محددة'
-        ? (body.scheduledSpecificTime || null) : null,
-      isPriority: Boolean(body.isPriority),
-      priorityReason: body.isPriority ? (body.priorityReason || null) : null,
       subtotal,
       deliveryFee,
       orderTotal,
@@ -267,7 +256,7 @@ export async function PUT(
     await writeOrders(orders)
     await writeOrderItems([...remainingItems, ...rewrittenItems])
 
-    appendEditHistory({
+    await appendEditHistory({
       entityType: 'order',
       entityId: params.id,
       orderId: params.id,
@@ -280,37 +269,6 @@ export async function PUT(
         orderTotal,
       },
     })
-
-    if (existing.orderStatus !== body.orderStatus) {
-      appendEditHistory({
-        entityType: 'order',
-        entityId: params.id,
-        orderId: params.id,
-        action: 'status_changed',
-        changedBy: body.createdBy || 'unknown',
-        summary: `تم تغيير حالة الطلب ${orders[orderIndex].appOrderNo} من ${existing.orderStatus} إلى ${body.orderStatus}`,
-        details: {
-          fromStatus: existing.orderStatus,
-          toStatus: body.orderStatus,
-        },
-      })
-    }
-
-    // Priority just turned on → log so branch can be alerted
-    if (!existing.isPriority && body.isPriority) {
-      appendEditHistory({
-        entityType: 'order',
-        entityId: params.id,
-        orderId: params.id,
-        action: 'updated',
-        changedBy: body.createdBy || 'unknown',
-        summary: `🚨 تم رفع الطلب ${orders[orderIndex].appOrderNo} كأولوية عاجلة`,
-        details: {
-          priorityFlag: true,
-          priorityReason: body.priorityReason || '',
-        },
-      })
-    }
 
     return NextResponse.json({ order: await enrichOrder(orders[orderIndex]) }, { status: 200 })
   } catch {

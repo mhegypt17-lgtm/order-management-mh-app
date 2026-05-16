@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import fs from 'fs'
-import path from 'path'
-
-const NOTES_FILE = path.join(process.cwd(), 'data', 'customer_notes.json')
+import { supabase } from '@/lib/supabase'
 
 interface CustomerNote {
   id: string
@@ -12,21 +9,6 @@ interface CustomerNote {
   role: 'cs' | 'admin'
   createdAt: string
   updatedAt: string
-}
-
-function readNotes(): CustomerNote[] {
-  try {
-    if (!fs.existsSync(NOTES_FILE)) return []
-    const raw = fs.readFileSync(NOTES_FILE, 'utf-8')
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-function writeNotes(notes: CustomerNote[]) {
-  fs.writeFileSync(NOTES_FILE, JSON.stringify(notes, null, 2))
 }
 
 // PATCH: edit a note
@@ -47,22 +29,34 @@ export async function PATCH(
       return NextResponse.json({ error: 'Note too long (max 500 chars)' }, { status: 400 })
     }
 
-    const notes = readNotes()
-    const idx = notes.findIndex(
-      (n) => n.id === params.noteId && n.customerId === params.id
-    )
-    if (idx === -1) {
+    const { data: note, error: fetchError } = await supabase
+      .from('customer_notes')
+      .select('*')
+      .eq('id', params.noteId)
+      .eq('customerId', params.id)
+      .single()
+
+    if (fetchError || !note) {
       return NextResponse.json({ error: 'Note not found' }, { status: 404 })
     }
-    notes[idx] = {
-      ...notes[idx],
-      note: noteText,
-      author: author || notes[idx].author,
-      role,
-      updatedAt: new Date().toISOString(),
+
+    const { data: updated, error } = await supabase
+      .from('customer_notes')
+      .update({
+        note: noteText,
+        author: author || note.author,
+        role,
+        updatedAt: new Date().toISOString(),
+      })
+      .eq('id', params.noteId)
+      .select()
+      .single()
+
+    if (error) {
+      return NextResponse.json({ error: 'Server error' }, { status: 500 })
     }
-    writeNotes(notes)
-    return NextResponse.json(notes[idx])
+
+    return NextResponse.json(updated)
   } catch {
     return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
@@ -74,16 +68,29 @@ export async function DELETE(
   { params }: { params: { id: string; noteId: string } }
 ) {
   try {
-    const notes = readNotes()
-    const filtered = notes.filter(
-      (n) => !(n.id === params.noteId && n.customerId === params.id)
-    )
-    if (filtered.length === notes.length) {
+    const { error: fetchError } = await supabase
+      .from('customer_notes')
+      .select('id')
+      .eq('id', params.noteId)
+      .eq('customerId', params.id)
+      .single()
+
+    if (fetchError) {
       return NextResponse.json({ error: 'Note not found' }, { status: 404 })
     }
-    writeNotes(filtered)
+
+    const { error } = await supabase
+      .from('customer_notes')
+      .delete()
+      .eq('id', params.noteId)
+      .eq('customerId', params.id)
+
+    if (error) {
+      return NextResponse.json({ error: 'Server error' }, { status: 500 })
+    }
+
     return NextResponse.json({ ok: true })
   } catch {
     return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
-}
+}}
