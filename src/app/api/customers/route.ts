@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { supabase } from '@/lib/supabase'
 import {
+  generateId,
   normalizePhone,
   readAddresses,
   readCustomers,
 } from '@/lib/omsData'
+
+// Prevent edge-caching of API responses (avoids stale 405s on POST).
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 export async function GET(request: NextRequest) {
   try {
@@ -54,5 +60,71 @@ export async function GET(request: NextRequest) {
     )
   } catch {
     return NextResponse.json({ error: 'Failed to lookup customer' }, { status: 500 })
+  }
+}
+
+// Create a new customer (used by the CRM "+ إضافة" modal).
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json().catch(() => ({} as any))
+
+    const phone = normalizePhone(String(body?.phone || ''))
+    const customerName = String(body?.customerName || '').trim()
+
+    if (!phone) {
+      return NextResponse.json({ error: 'رقم الهاتف مطلوب' }, { status: 400 })
+    }
+    if (!customerName) {
+      return NextResponse.json({ error: 'اسم العميل مطلوب' }, { status: 400 })
+    }
+
+    // Reject duplicate phone.
+    const existing = await readCustomers()
+    const duplicate = existing.find((c) => normalizePhone(c.phone) === phone)
+    if (duplicate) {
+      return NextResponse.json(
+        { error: 'عميل آخر بنفس رقم الهاتف موجود بالفعل', customer: duplicate },
+        { status: 409 }
+      )
+    }
+
+    const walletRaw = body?.wallet
+    let wallet = 0
+    if (walletRaw !== undefined && walletRaw !== null && walletRaw !== '') {
+      const w = Number(walletRaw)
+      if (!Number.isFinite(w)) {
+        return NextResponse.json({ error: 'قيمة المحفظة غير صحيحة' }, { status: 400 })
+      }
+      wallet = w
+    }
+
+    const now = new Date().toISOString()
+    const newCustomer = {
+      id: generateId('cust'),
+      phone,
+      customerName,
+      wallet,
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    const { data, error } = await supabase
+      .from('customers')
+      .insert([newCustomer])
+      .select()
+      .single()
+
+    if (error) {
+      console.error('Error creating customer:', error)
+      return NextResponse.json(
+        { error: 'تعذر إنشاء العميل', details: error.message },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json({ customer: data || newCustomer }, { status: 201 })
+  } catch (err) {
+    console.error('POST /api/customers error:', err)
+    return NextResponse.json({ error: 'تعذر إنشاء العميل' }, { status: 500 })
   }
 }
