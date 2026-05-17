@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { DeliveryZoneRecord, readDeliveryZones } from '@/lib/omsData'
 
+// Prevent Vercel from edge-caching this route (especially the 405 that gets
+// served for non-GET methods if the route is treated as static).
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 export async function GET() {
   try {
     const zones = (await readDeliveryZones()).sort((a, b) => a.zone - b.zone)
