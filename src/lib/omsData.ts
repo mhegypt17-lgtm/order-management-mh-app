@@ -402,7 +402,12 @@ export async function generateAppOrderNo(orderDate: string, orderType: string, o
 // ─── Customers ────────────────────────────────────────────────────────────────
 
 export async function readCustomers(): Promise<CustomerRecord[]> {
-  const { data, error } = await supabase.from('customers').select('*')
+  // Supabase/PostgREST defaults to 1000 rows; bump explicitly so growing
+  // tables don't silently drop rows from enrichment lookups.
+  const { data, error } = await supabase
+    .from('customers')
+    .select('*')
+    .range(0, 99999)
   if (error) {
     console.error('Error reading customers:', error)
     return []
@@ -417,7 +422,10 @@ export async function writeCustomers(_data: CustomerRecord[]): Promise<void> {
 // ─── Addresses ────────────────────────────────────────────────────────────────
 
 export async function readAddresses(): Promise<CustomerAddressRecord[]> {
-  const { data, error } = await supabase.from('customer_addresses').select('*')
+  const { data, error } = await supabase
+    .from('customer_addresses')
+    .select('*')
+    .range(0, 99999)
   if (error) {
     console.error('Error reading addresses:', error)
     return []
@@ -432,7 +440,11 @@ export async function writeAddresses(_data: CustomerAddressRecord[]): Promise<vo
 // ─── Orders ───────────────────────────────────────────────────────────────────
 
 export async function readOrders(): Promise<OrderRecord[]> {
-  const { data, error } = await supabase.from('orders').select('*')
+  const { data, error } = await supabase
+    .from('orders')
+    .select('*')
+    .order('createdAt', { ascending: false })
+    .range(0, 99999)
   if (error) {
     console.error('Error reading orders:', error)
     return []
@@ -447,7 +459,13 @@ export async function writeOrders(_data: OrderRecord[]): Promise<void> {
 // ─── Order Items ──────────────────────────────────────────────────────────────
 
 export async function readOrderItems(): Promise<OrderItemRecord[]> {
-  const { data, error } = await supabase.from('order_items').select('*')
+  // CRITICAL: without an explicit range, Supabase caps at 1000 rows and
+  // newer order items silently disappear from enriched order responses,
+  // making the edit form show an empty product row + subtotal 0.
+  const { data, error } = await supabase
+    .from('order_items')
+    .select('*')
+    .range(0, 99999)
   if (error) {
     console.error('Error reading order items:', error)
     return []
@@ -462,7 +480,10 @@ export async function writeOrderItems(_data: OrderItemRecord[]): Promise<void> {
 // ─── Order Delivery ───────────────────────────────────────────────────────────
 
 export async function readOrderDelivery(): Promise<OrderDeliveryRecord[]> {
-  const { data, error } = await supabase.from('order_delivery').select('*')
+  const { data, error } = await supabase
+    .from('order_delivery')
+    .select('*')
+    .range(0, 99999)
   if (error) {
     console.error('Error reading order delivery:', error)
     return []
@@ -477,7 +498,10 @@ export async function writeOrderDelivery(_data: OrderDeliveryRecord[]): Promise<
 // ─── Edit History ─────────────────────────────────────────────────────────────
 
 export async function readEditHistory(): Promise<EditHistoryRecord[]> {
-  const { data, error } = await supabase.from('edit_history').select('*')
+  const { data, error } = await supabase
+    .from('edit_history')
+    .select('*')
+    .range(0, 99999)
   if (error) {
     console.error('Error reading edit history:', error)
     return []
