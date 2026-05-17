@@ -20,8 +20,23 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'No zones payload provided' }, { status: 400 })
     }
 
-    const existing = await readDeliveryZones()
-    const existingByZone = new Map(existing.map((z) => [z.zone, z]))
+    // Read existing rows straight from Supabase so we get real DB ids
+    // (and can tell apart inserts vs updates).
+    const { data: dbRows, error: fetchError } = await supabase
+      .from('delivery_zones')
+      .select('*')
+
+    if (fetchError) {
+      console.error('Error fetching delivery zones:', fetchError)
+      return NextResponse.json(
+        { error: 'Failed to load existing delivery zones' },
+        { status: 500 }
+      )
+    }
+
+    const existingByZone = new Map(
+      (dbRows || []).map((r: any) => [Number(r.zone), r as DeliveryZoneRecord])
+    )
     const now = new Date().toISOString()
 
     const normalized: DeliveryZoneRecord[] = incoming
@@ -49,18 +64,41 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'Invalid zones payload' }, { status: 400 })
     }
 
-    // Upsert each zone directly into Supabase
+    // Update existing rows by id, insert new ones. Avoids relying on a
+    // unique constraint on the `zone` column (which the table doesn't have).
+    const errors: string[] = []
     for (const z of normalized) {
-      const { error: upsertErr } = await supabase
-        .from('delivery_zones')
-        .upsert(z, { onConflict: 'zone' })
-      if (upsertErr) {
-        console.error('Error upserting zone:', z.zone, upsertErr)
+      const exists = existingByZone.has(z.zone)
+      if (exists) {
+        const { error: updateErr } = await supabase
+          .from('delivery_zones')
+          .update(z)
+          .eq('id', z.id)
+        if (updateErr) {
+          console.error('Error updating zone:', z.zone, updateErr)
+          errors.push(`Zone ${z.zone}: ${updateErr.message}`)
+        }
+      } else {
+        const { error: insertErr } = await supabase
+          .from('delivery_zones')
+          .insert([z])
+        if (insertErr) {
+          console.error('Error inserting zone:', z.zone, insertErr)
+          errors.push(`Zone ${z.zone}: ${insertErr.message}`)
+        }
       }
     }
 
+    if (errors.length > 0) {
+      return NextResponse.json(
+        { error: 'Failed to update delivery zones', details: errors },
+        { status: 500 }
+      )
+    }
+
     return NextResponse.json({ zones: normalized }, { status: 200 })
-  } catch {
+  } catch (error) {
+    console.error('Error in delivery-zones PUT:', error)
     return NextResponse.json({ error: 'Failed to update delivery zones' }, { status: 500 })
   }
 }
