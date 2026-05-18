@@ -106,6 +106,7 @@ export interface DeliveryZoneRecord {
   id: string
   zone: number
   area: string
+  subArea: string
   averageDistanceKm: number
   deliveryCost: number
   customerDeliveryFee: number
@@ -356,18 +357,8 @@ export function normalizeLookupRows(rows: unknown): LookupValueRecord[] {
 }
 
 function defaultDeliveryZones(): DeliveryZoneRecord[] {
-  const now = new Date().toISOString()
-  return Array.from({ length: 8 }, (_, idx) => ({
-    id: generateId('zone'),
-    zone: idx + 1,
-    area: `منطقة ${idx + 1}`,
-    averageDistanceKm: 0,
-    deliveryCost: 0,
-    customerDeliveryFee: 0,
-    freeDeliveryValue: 0,
-    createdAt: now,
-    updatedAt: now,
-  }))
+  // Empty by default — admin seeds the table via CSV import or the admin UI.
+  return []
 }
 
 export function generateId(prefix: string) {
@@ -583,7 +574,13 @@ export async function deleteTask(id: string): Promise<void> {
 // ─── Delivery Zones ───────────────────────────────────────────────────────────
 
 export async function readDeliveryZones(): Promise<DeliveryZoneRecord[]> {
-  const { data, error } = await supabase.from('delivery_zones').select('*').order('zone', { ascending: true })
+  // Returns every row (zone, area, subArea). No longer forces 8 fixed zones.
+  const { data, error } = await supabase
+    .from('delivery_zones')
+    .select('*')
+    .order('zone', { ascending: true })
+    .order('averageDistanceKm', { ascending: true })
+    .range(0, 99999)
   if (error) {
     console.error('Error reading delivery zones:', error)
     return defaultDeliveryZones()
@@ -593,33 +590,16 @@ export async function readDeliveryZones(): Promise<DeliveryZoneRecord[]> {
     return defaultDeliveryZones()
   }
 
-  const now = new Date().toISOString()
-  const existingByZone = new Map((data as DeliveryZoneRecord[]).map((r) => [Number(r.zone), r]))
-  return Array.from({ length: 8 }, (_, idx) => {
-    const zone = idx + 1
-    const existing = existingByZone.get(zone)
-    if (existing) {
-      return {
-        ...existing,
-        zone,
-        averageDistanceKm: Number(existing.averageDistanceKm) || 0,
-        deliveryCost: Number(existing.deliveryCost) || 0,
-        customerDeliveryFee: Number(existing.customerDeliveryFee) || 0,
-        freeDeliveryValue: Number(existing.freeDeliveryValue) || 0,
-      }
-    }
-    return {
-      id: generateId('zone'),
-      zone,
-      area: `منطقة ${zone}`,
-      averageDistanceKm: 0,
-      deliveryCost: 0,
-      customerDeliveryFee: 0,
-      freeDeliveryValue: 0,
-      createdAt: now,
-      updatedAt: now,
-    }
-  })
+  return (data as DeliveryZoneRecord[]).map((r) => ({
+    ...r,
+    zone: Number(r.zone) || 0,
+    area: String(r.area || '').trim(),
+    subArea: String((r as any).subArea || '').trim(),
+    averageDistanceKm: Number(r.averageDistanceKm) || 0,
+    deliveryCost: Number(r.deliveryCost) || 0,
+    customerDeliveryFee: Number(r.customerDeliveryFee) || 0,
+    freeDeliveryValue: Number(r.freeDeliveryValue) || 0,
+  }))
 }
 
 export async function writeDeliveryZones(_data: DeliveryZoneRecord[]): Promise<void> {

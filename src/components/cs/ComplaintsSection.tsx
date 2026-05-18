@@ -439,9 +439,9 @@ export default function ComplaintsSection() {
   return (
     <div className="space-y-6" dir="rtl">
       {/* Quick Search Section */}
-      <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-200 rounded-xl p-4 sm:p-6 shadow-md">
+      <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-200 rounded-xl p-6 shadow-md">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">🔍 البحث السريع عن طلب</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">رقم هاتف العميل</label>
             <input
@@ -512,9 +512,9 @@ export default function ComplaintsSection() {
       </div>
 
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">🎫 إدارة الشكاوى</h1>
+          <h1 className="text-3xl font-bold text-gray-900">🎫 إدارة الشكاوى</h1>
           <p className="text-sm text-gray-500 mt-1">تتبع وإدارة شكاوى العملاء والطلبات</p>
         </div>
         <button
@@ -523,7 +523,7 @@ export default function ComplaintsSection() {
             setSelectedComplaint(null)
             setSelectedOrder(null)
           }}
-          className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white px-5 py-3 rounded-lg transition font-medium shadow-lg min-h-[44px]"
+          className="bg-red-600 hover:bg-red-700 text-white px-5 py-3 rounded-lg transition font-medium shadow-lg"
         >
           {showForm ? '✕ إلغاء' : '🎫 فتح شكوى جديدة'}
         </button>
@@ -691,7 +691,7 @@ export default function ComplaintsSection() {
       )}
 
       {/* Search & Filter */}
-      <div className="flex flex-col sm:flex-row gap-3">
+      <div className="flex gap-4 flex-col sm:flex-row">
         <input
           type="text"
           value={searchQuery}
@@ -699,12 +699,12 @@ export default function ComplaintsSection() {
           placeholder="ابحث عن رقم التذكرة أو الموضوع..."
           className="flex-1 border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:border-red-600"
         />
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2">
           {(['all', 'open', 'in-progress', 'closed'] as const).map((status) => (
             <button
               key={status}
               onClick={() => setFilterStatus(status)}
-              className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg transition font-medium min-h-[44px] ${
+              className={`px-4 py-2 rounded-lg transition font-medium ${
                 filterStatus === status
                   ? `${STATUS_COLORS[status === 'all' ? 'open' : status]} border`
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
@@ -771,15 +771,15 @@ export default function ComplaintsSection() {
                   : `${PRIORITY_COLORS[complaint.priority]} border-opacity-50`
               }`}
             >
-              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start gap-3 mb-2 flex-wrap">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 mb-2">
                     <span className="text-2xl">{isExceededSla(complaint) ? '🚨' : '🎫'}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-bold text-lg text-gray-900 break-words">{complaint.ticketNumber}</p>
-                      <p className="text-sm text-gray-600 break-words">{complaint.subject}</p>
+                    <div>
+                      <p className="font-bold text-lg text-gray-900">{complaint.ticketNumber}</p>
+                      <p className="text-sm text-gray-600">{complaint.subject}</p>
                     </div>
-                    <div className="w-full sm:w-auto sm:mr-auto flex flex-wrap gap-2">
+                    <div className="mr-auto flex gap-2">
                       <select
                         value={complaint.status}
                         onChange={(e) => {
@@ -827,7 +827,7 @@ export default function ComplaintsSection() {
                 </div>
 
                 {complaint.compensationAmount > 0 && (
-                  <div className="text-right bg-green-50 border border-green-200 rounded px-3 py-2 w-full sm:w-auto sm:min-w-[120px]">
+                  <div className="text-right bg-green-50 border border-green-200 rounded px-3 py-2 min-w-[120px]">
                     <p className="text-xs text-green-700 font-medium">تعويض</p>
                     <p className="text-lg font-bold text-green-900">{complaint.compensationAmount} ج.م</p>
                   </div>

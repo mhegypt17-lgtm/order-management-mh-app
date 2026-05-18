@@ -390,7 +390,7 @@ export default function AdahiOrderView({ role }: { role: Role }) {
             </div>
 
             <FieldInput label="تسمية العنوان" value={addressLabel} onChange={setAddressLabel} />
-            <FieldSelect label="المنطقة" value={deliveryArea} onChange={setDeliveryArea} options={deliveryZones.map((z) => z.area)} />
+            <FieldSelect label="المنطقة" value={deliveryArea} onChange={setDeliveryArea} options={Array.from(new Set(deliveryZones.map((z) => z.area).filter(Boolean)))} />
             <FieldInput label="العنوان" value={streetAddress} onChange={setStreetAddress} />
             <FieldInput label="رابط Google Maps" value={googleMapsLink} onChange={setGoogleMapsLink} dir="ltr" />
           </div>
