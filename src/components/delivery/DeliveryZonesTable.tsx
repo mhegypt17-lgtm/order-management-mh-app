@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 
 type DeliveryZone = {
@@ -116,6 +116,48 @@ export default function DeliveryZonesTable({ editable, hideDeliveryCost = false 
       filterZone !== 'all' ? Number(filterZone) : allZoneNumbers[allZoneNumbers.length - 1] || 1
     setZones((prev) => [...prev, newRow(nextZone)])
   }
+
+  // Add a sub-area row pre-filled with the same (zone, area) as an existing row.
+  const addSubAreaToGroup = (zone: number, area: string) => {
+    setZones((prev) => [
+      ...prev,
+      { ...newRow(zone), area },
+    ])
+  }
+
+  // Copy the three fee columns from a source row onto every other row sharing
+  // the same (zone, area). Distance stays per-sub-area.
+  const applyFeesToGroup = (sourceIdx: number) => {
+    setZones((prev) => {
+      const source = prev[sourceIdx]
+      if (!source) return prev
+      return prev.map((z, i) => {
+        if (i === sourceIdx) return z
+        if (z.zone !== source.zone || z.area !== source.area) return z
+        return {
+          ...z,
+          deliveryCost: source.deliveryCost,
+          customerDeliveryFee: source.customerDeliveryFee,
+          freeDeliveryValue: source.freeDeliveryValue,
+        }
+      })
+    })
+    toast.success(`تم تطبيق الرسوم على كل مناطق "${zones[sourceIdx]?.area || ''}"`)
+  }
+
+  // Build grouped structure for rendering: [{ zone, area, items: [...] }]
+  const groups = useMemo(() => {
+    const out: { zone: number; area: string; items: { z: DeliveryZone; idx: number }[] }[] = []
+    let current: typeof out[number] | null = null
+    for (const item of filtered) {
+      if (!current || current.zone !== item.z.zone || current.area !== item.z.area) {
+        current = { zone: item.z.zone, area: item.z.area, items: [] }
+        out.push(current)
+      }
+      current.items.push(item)
+    }
+    return out
+  }, [filtered])
 
   const saveZones = async () => {
     if (!editable) return
@@ -250,117 +292,168 @@ export default function DeliveryZonesTable({ editable, hideDeliveryCost = false 
             </tr>
           </thead>
           <tbody>
-            {filtered.map(({ z, idx }) => (
-              <tr key={z.id || `new-${idx}`} className="border-b border-gray-100">
-                <td className="px-3 py-2 text-center font-semibold" dir="ltr">
-                  {editable ? (
-                    <input
-                      type="number"
-                      value={z.zone}
-                      onChange={(e) => updateRow(idx, { zone: Number(e.target.value) })}
-                      className="w-16 px-2 py-1 border border-gray-300 rounded text-center"
-                    />
-                  ) : (
-                    z.zone
-                  )}
-                </td>
-                <td className="px-3 py-2">
-                  {editable ? (
-                    <input
-                      type="text"
-                      value={z.area}
-                      onChange={(e) => updateRow(idx, { area: e.target.value })}
-                      className="w-full px-2 py-1 border border-gray-300 rounded"
-                      dir="rtl"
-                      list="delivery-area-options"
-                    />
-                  ) : (
-                    <span>{z.area}</span>
-                  )}
-                </td>
-                <td className="px-3 py-2">
-                  {editable ? (
-                    <input
-                      type="text"
-                      value={z.subArea}
-                      onChange={(e) => updateRow(idx, { subArea: e.target.value })}
-                      className="w-full px-2 py-1 border border-gray-300 rounded"
-                      dir="rtl"
-                    />
-                  ) : (
-                    <span>{z.subArea}</span>
-                  )}
-                </td>
-                <td className="px-3 py-2 text-center" dir="ltr">
-                  {editable ? (
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={z.averageDistanceKm}
-                      onChange={(e) =>
-                        updateRow(idx, { averageDistanceKm: Number(e.target.value) })
-                      }
-                      className="w-24 px-2 py-1 border border-gray-300 rounded text-center"
-                    />
-                  ) : (
-                    z.averageDistanceKm
-                  )}
-                </td>
-                {!hideDeliveryCost && (
-                  <td className="px-3 py-2 text-center" dir="ltr">
-                    {editable ? (
-                      <input
-                        type="number"
-                        value={z.deliveryCost}
-                        onChange={(e) => updateRow(idx, { deliveryCost: Number(e.target.value) })}
-                        className="w-28 px-2 py-1 border border-gray-300 rounded text-center"
-                      />
-                    ) : (
-                      Number(z.deliveryCost || 0).toLocaleString()
-                    )}
-                  </td>
-                )}
-                <td className="px-3 py-2 text-center" dir="ltr">
-                  {editable ? (
-                    <input
-                      type="number"
-                      value={z.customerDeliveryFee}
-                      onChange={(e) =>
-                        updateRow(idx, { customerDeliveryFee: Number(e.target.value) })
-                      }
-                      className="w-28 px-2 py-1 border border-gray-300 rounded text-center"
-                    />
-                  ) : (
-                    Number(z.customerDeliveryFee || 0).toLocaleString()
-                  )}
-                </td>
-                <td className="px-3 py-2 text-center" dir="ltr">
-                  {editable ? (
-                    <input
-                      type="number"
-                      value={z.freeDeliveryValue}
-                      onChange={(e) =>
-                        updateRow(idx, { freeDeliveryValue: Number(e.target.value) })
-                      }
-                      className="w-28 px-2 py-1 border border-gray-300 rounded text-center"
-                    />
-                  ) : (
-                    Number(z.freeDeliveryValue || 0).toLocaleString()
-                  )}
-                </td>
-                {editable && (
-                  <td className="px-3 py-2 text-center">
-                    <button
-                      onClick={() => deleteRow(idx)}
-                      className="px-2 py-1 rounded bg-red-100 hover:bg-red-200 text-red-700 text-xs font-semibold"
+            {groups.map((group) => (
+              <Fragment key={`${group.zone}::${group.area}`}>
+                {group.items.map(({ z, idx }, rowIdxInGroup) => {
+                  const isFirstOfGroup = rowIdxInGroup === 0
+                  const isLastOfGroup = rowIdxInGroup === group.items.length - 1
+                  return (
+                    <tr
+                      key={z.id || `new-${idx}`}
+                      className={`border-b ${isLastOfGroup ? 'border-gray-300' : 'border-gray-100'} hover:bg-gray-50`}
                     >
-                      حذف
-                    </button>
-                  </td>
+                      <td className="px-3 py-2 text-center font-semibold align-top" dir="ltr">
+                        {editable ? (
+                          <input
+                            type="number"
+                            value={z.zone}
+                            onChange={(e) => updateRow(idx, { zone: Number(e.target.value) })}
+                            className="w-16 px-2 py-1 border border-gray-300 rounded text-center"
+                          />
+                        ) : (
+                          z.zone
+                        )}
+                      </td>
+                      <td className="px-3 py-2 align-top border-r-4 border-r-red-100">
+                        {isFirstOfGroup ? (
+                          editable ? (
+                            <input
+                              type="text"
+                              value={z.area}
+                              onChange={(e) => {
+                                // Editing area on the header row renames the
+                                // area for every row in this group.
+                                const newArea = e.target.value
+                                setZones((prev) =>
+                                  prev.map((row) =>
+                                    row.zone === group.zone && row.area === group.area
+                                      ? { ...row, area: newArea }
+                                      : row
+                                  )
+                                )
+                              }}
+                              className="w-full px-2 py-1 border border-gray-300 rounded font-semibold"
+                              dir="rtl"
+                              list="delivery-area-options"
+                            />
+                          ) : (
+                            <span className="font-semibold">{z.area}</span>
+                          )
+                        ) : (
+                          <span className="text-gray-300 text-xs" dir="rtl">↳</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        {editable ? (
+                          <input
+                            type="text"
+                            value={z.subArea}
+                            onChange={(e) => updateRow(idx, { subArea: e.target.value })}
+                            className="w-full px-2 py-1 border border-gray-300 rounded"
+                            dir="rtl"
+                          />
+                        ) : (
+                          <span>{z.subArea}</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-center align-top" dir="ltr">
+                        {editable ? (
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={z.averageDistanceKm}
+                            onChange={(e) =>
+                              updateRow(idx, { averageDistanceKm: Number(e.target.value) })
+                            }
+                            className="w-24 px-2 py-1 border border-gray-300 rounded text-center"
+                          />
+                        ) : (
+                          z.averageDistanceKm
+                        )}
+                      </td>
+                      {!hideDeliveryCost && (
+                        <td className="px-3 py-2 text-center align-top" dir="ltr">
+                          {editable ? (
+                            <input
+                              type="number"
+                              value={z.deliveryCost}
+                              onChange={(e) =>
+                                updateRow(idx, { deliveryCost: Number(e.target.value) })
+                              }
+                              className="w-28 px-2 py-1 border border-gray-300 rounded text-center"
+                            />
+                          ) : (
+                            Number(z.deliveryCost || 0).toLocaleString()
+                          )}
+                        </td>
+                      )}
+                      <td className="px-3 py-2 text-center align-top" dir="ltr">
+                        {editable ? (
+                          <input
+                            type="number"
+                            value={z.customerDeliveryFee}
+                            onChange={(e) =>
+                              updateRow(idx, { customerDeliveryFee: Number(e.target.value) })
+                            }
+                            className="w-28 px-2 py-1 border border-gray-300 rounded text-center"
+                          />
+                        ) : (
+                          Number(z.customerDeliveryFee || 0).toLocaleString()
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-center align-top" dir="ltr">
+                        {editable ? (
+                          <input
+                            type="number"
+                            value={z.freeDeliveryValue}
+                            onChange={(e) =>
+                              updateRow(idx, { freeDeliveryValue: Number(e.target.value) })
+                            }
+                            className="w-28 px-2 py-1 border border-gray-300 rounded text-center"
+                          />
+                        ) : (
+                          Number(z.freeDeliveryValue || 0).toLocaleString()
+                        )}
+                      </td>
+                      {editable && (
+                        <td className="px-3 py-2 text-center align-top">
+                          <div className="flex flex-col gap-1 items-stretch">
+                            <button
+                              onClick={() => deleteRow(idx)}
+                              className="px-2 py-1 rounded bg-red-100 hover:bg-red-200 text-red-700 text-xs font-semibold"
+                            >
+                              حذف
+                            </button>
+                            {isFirstOfGroup && group.items.length > 1 && (
+                              <button
+                                onClick={() => applyFeesToGroup(idx)}
+                                className="px-2 py-1 rounded bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs font-semibold whitespace-nowrap"
+                                title="نسخ الرسوم لكل المناطق الفرعية في نفس الـ Area"
+                              >
+                                تطبيق الرسوم
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  )
+                })}
+                {editable && (
+                  <tr className="bg-gray-50 border-b border-gray-300">
+                    <td colSpan={hideDeliveryCost ? 7 : 8} className="px-3 py-1 text-right">
+                      <button
+                        onClick={() => addSubAreaToGroup(group.zone, group.area)}
+                        className="text-xs px-3 py-1 rounded bg-green-50 hover:bg-green-100 text-green-700 font-semibold border border-green-200"
+                      >
+                        ＋ إضافة منطقة فرعية تحت "{group.area}"
+                      </button>
+                    </td>
+                  </tr>
                 )}
-              </tr>
+              </Fragment>
             ))}
-            {filtered.length === 0 && (
+            {groups.length === 0 && (
               <tr>
                 <td colSpan={editable ? 8 : 7} className="px-3 py-8 text-center text-gray-400">
                   لا توجد بيانات
