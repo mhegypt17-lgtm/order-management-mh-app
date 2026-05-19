@@ -24,6 +24,9 @@ async function readProducts() {
   }
 }
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 async function enrich(orderId: string) {
   const orders = await readOrders()
   const customers = await readCustomers()

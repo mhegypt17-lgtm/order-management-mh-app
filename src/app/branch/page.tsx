@@ -86,7 +86,7 @@ export default function BranchPage() {
       if (toDate) params.to = toDate
       const query = new URLSearchParams(params)
 
-      const res = await fetch(`/api/branch/orders?${query.toString()}`)
+      const res = await fetch(`/api/branch/orders?${query.toString()}`, { cache: 'no-store' })
       const data = await res.json()
       setOrders(data.orders || [])
     } finally {

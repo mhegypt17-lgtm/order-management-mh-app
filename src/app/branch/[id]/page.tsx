@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
-import PhotoCapture from '@/components/branch/PhotoCapture'
 
 type OrderDetail = {
   id: string
@@ -13,14 +12,11 @@ type OrderDetail = {
   orderTime: string
   paymentMethod: string
   notes: string
-  orderStatus: string
-  isPriority?: boolean
-  priorityReason?: string | null
   customer: { customerName: string; phone: string } | null
   address: { streetAddress: string; googleMapsLink: string } | null
   items: Array<{ id: string; productName: string; quantity: number; specialInstructions: string }>
   delivery: {
-    deliveryStatus: 'قبول' | 'جاهز' | 'في الطريق' | 'تم التوصيل' | 'لم يخرج بعد'
+    deliveryStatus: 'لم يخرج بعد' | 'جاهز' | 'في الطريق' | 'تم التوصيل'
     branchComments: string
     productPhotos: string[]
     invoicePhoto: string
@@ -28,24 +24,7 @@ type OrderDetail = {
   }
 }
 
-const STATUS_OPTIONS: Array<OrderDetail['delivery']['deliveryStatus']> = ['قبول', 'جاهز', 'في الطريق', 'تم التوصيل']
-
-const orderStatusBadgeClass = (status: string): string => {
-  switch (status) {
-    case 'ساري':
-      return 'bg-yellow-100 text-yellow-800'
-    case 'مقبول':
-      return 'bg-teal-100 text-teal-800'
-    case 'تم':
-      return 'bg-green-100 text-green-800'
-    case 'لاغي':
-      return 'bg-red-100 text-red-800'
-    case 'مؤجل':
-      return 'bg-orange-100 text-orange-800'
-    default:
-      return 'bg-blue-100 text-blue-800'
-  }
-}
+const STATUS_OPTIONS: Array<OrderDetail['delivery']['deliveryStatus']> = ['لم يخرج بعد', 'جاهز', 'في الطريق', 'تم التوصيل']
 
 export default function BranchOrderDetailPage() {
   const params = useParams<{ id: string }>()
@@ -56,15 +35,13 @@ export default function BranchOrderDetailPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [order, setOrder] = useState<OrderDetail | null>(null)
 
-  const [deliveryStatus, setDeliveryStatus] = useState<OrderDetail['delivery']['deliveryStatus']>('قبول')
-  const [orderStatus, setOrderStatus] = useState<string>('ساري')
+  const [deliveryStatus, setDeliveryStatus] = useState<OrderDetail['delivery']['deliveryStatus']>('لم يخرج بعد')
   const [branchComments, setBranchComments] = useState('')
   const [productPhotos, setProductPhotos] = useState<string[]>([])
   const [invoicePhoto, setInvoicePhoto] = useState('')
 
   const statusClass = useMemo(() => {
     return {
-      'قبول': 'bg-purple-100 text-purple-800',
       'لم يخرج بعد': 'bg-gray-100 text-gray-700',
       جاهز: 'bg-yellow-100 text-yellow-800',
       'في الطريق': 'bg-blue-100 text-blue-800',
@@ -76,13 +53,12 @@ export default function BranchOrderDetailPage() {
     const load = async () => {
       setIsLoading(true)
       try {
-        const res = await fetch(`/api/branch/orders/${params.id}`)
+        const res = await fetch(`/api/branch/orders/${params.id}`, { cache: 'no-store' })
         if (!res.ok) throw new Error('Failed to load')
         const data = await res.json()
         const loaded = data.order as OrderDetail
         setOrder(loaded)
         setDeliveryStatus(loaded.delivery.deliveryStatus)
-        setOrderStatus(loaded.orderStatus || 'ساري')
         setBranchComments(loaded.delivery.branchComments || '')
         setProductPhotos(loaded.delivery.productPhotos || [])
         setInvoicePhoto(loaded.delivery.invoicePhoto || '')
@@ -95,6 +71,27 @@ export default function BranchOrderDetailPage() {
 
     load()
   }, [params.id])
+
+  const fileToDataUrl = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result || ''))
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
+
+  const handleAddProductPhotos = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    const list = Array.from(files).slice(0, 5)
+    const urls = await Promise.all(list.map(fileToDataUrl))
+    setProductPhotos((prev) => [...prev, ...urls].slice(0, 10))
+  }
+
+  const handleInvoicePhoto = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    const url = await fileToDataUrl(files[0])
+    setInvoicePhoto(url)
+  }
 
   const handleStatusChange = async (newStatus: OrderDetail['delivery']['deliveryStatus']) => {
     setDeliveryStatus(newStatus)
@@ -118,7 +115,7 @@ export default function BranchOrderDetailPage() {
       toast.success('✅ تم تحديث حالة التوصيل')
     } catch {
       toast.error('خطأ في تحديث الحالة')
-      setDeliveryStatus(order?.delivery.deliveryStatus || 'قبول')
+      setDeliveryStatus(order?.delivery.deliveryStatus || 'لم يخرج بعد')
     } finally {
       setIsSaving(false)
     }
@@ -160,30 +157,11 @@ export default function BranchOrderDetailPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900" dir="ltr">
-            {order.isPriority && <span className="mr-2 px-2 py-0.5 rounded bg-red-600 text-white text-base align-middle animate-pulse">🚨 عاجل</span>}
-            🏍️ {order.appOrderNo}
-          </h1>
+          <h1 className="text-3xl font-bold text-gray-900" dir="ltr">🚚 {order.appOrderNo}</h1>
           <p className="text-gray-600 mt-1">تفاصيل الطلب للفرع</p>
         </div>
-        <div className="flex items-center gap-2">
-          <span className={`px-3 py-1 rounded-full text-sm font-semibold ${orderStatusBadgeClass(orderStatus)}`}>{orderStatus}</span>
-          <span className={`px-3 py-1 rounded-full text-sm font-semibold ${statusClass}`}>{deliveryStatus}</span>
-        </div>
+        <span className={`px-3 py-1 rounded-full text-sm font-semibold ${statusClass}`}>{deliveryStatus}</span>
       </div>
-
-      {order.isPriority && (
-        <div className="rounded-lg border-2 border-red-500 bg-red-50 px-4 py-3 flex items-start gap-3 animate-pulse" dir="rtl">
-          <span className="text-2xl">🚨</span>
-          <div className="text-sm text-gray-900 flex-1">
-            <p className="font-bold mb-1 text-red-800">طلب أولوية عاجلة</p>
-            {order.priorityReason && (
-              <p className="text-red-900">السبب: <strong>{order.priorityReason}</strong></p>
-            )}
-            <p className="text-xs text-red-700 mt-1">يرجى التعامل الفوري مع هذا الطلب.</p>
-          </div>
-        </div>
-      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <section className="bg-white rounded-lg border border-gray-200 p-4 space-y-2">
@@ -224,17 +202,6 @@ export default function BranchOrderDetailPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1 text-right">
-              حالة الطلب
-              <span className="text-xs text-gray-400 mr-1">(تحددها خدمة العملاء)</span>
-            </label>
-            <div className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-right">
-              <span className={`px-2 py-0.5 rounded-full text-sm font-semibold ${orderStatusBadgeClass(orderStatus)}`}>
-                {orderStatus}
-              </span>
-            </div>
-          </div>
-          <div>
             <label className="block text-sm font-medium text-gray-700 mb-1 text-right">حالة التوصيل</label>
             <div className="flex items-center gap-2">
               <select
@@ -272,23 +239,23 @@ export default function BranchOrderDetailPage() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <PhotoCapture
-            label="صور المنتجات (متعددة)"
-            multiple
-            max={10}
-            photos={productPhotos}
-            onChange={setProductPhotos}
-          />
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1 text-right">صور المنتجات (متعددة)</label>
+            <input type="file" accept="image/*" multiple onChange={(e) => handleAddProductPhotos(e.target.files)} className="w-full" />
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              {productPhotos.map((photo, idx) => (
+                <img key={idx} src={photo} alt={`product-${idx}`} className="w-full h-20 object-cover rounded border border-gray-200" />
+              ))}
+            </div>
+          </div>
 
           <div>
-            <PhotoCapture
-              label="صورة الفاتورة (مفردة)"
-              max={1}
-              photos={invoicePhoto ? [invoicePhoto] : []}
-              onChange={(arr) => setInvoicePhoto(arr[0] || '')}
-            />
+            <label className="block text-sm font-medium text-gray-700 mb-1 text-right">صورة الفاتورة (مفردة)</label>
+            <input type="file" accept="image/*" onChange={(e) => handleInvoicePhoto(e.target.files)} className="w-full" />
             <div className="mt-2">
-              {invoicePhoto ? null : (
+              {invoicePhoto ? (
+                <img src={invoicePhoto} alt="invoice" className="w-full h-28 object-cover rounded border border-gray-200" />
+              ) : (
                 <div className="w-full h-28 border border-dashed border-gray-300 rounded flex items-center justify-center text-sm text-gray-500">
                   لا توجد صورة فاتورة
                 </div>

@@ -11,6 +11,9 @@ import {
   readOrders,
 } from '@/lib/omsData'
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 async function readProducts() {
   try {
     const { data: products, error } = await supabase
