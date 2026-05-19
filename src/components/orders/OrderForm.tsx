@@ -22,6 +22,7 @@ type CustomerAddress = {
   id: string
   addressLabel: string
   area?: string
+  subArea?: string
   streetAddress: string
   googleMapsLink: string
 }
@@ -29,6 +30,7 @@ type CustomerAddress = {
 type DeliveryZone = {
   zone: number
   area: string
+  subArea?: string
   customerDeliveryFee: number
   freeDeliveryValue: number
 }
@@ -76,6 +78,7 @@ type OrderFormModel = {
   deliveryAddressId: string
   addressLabel: string
   deliveryArea: string
+  deliverySubArea: string
   streetAddress: string
   googleMapsLink: string
   paymentMethod: string
@@ -121,6 +124,7 @@ function getDefaultOrderModel(): OrderFormModel {
     deliveryAddressId: '__new',
     addressLabel: 'Home',
     deliveryArea: '',
+    deliverySubArea: '',
     streetAddress: '',
     googleMapsLink: '',
     paymentMethod: 'Cash',
@@ -252,6 +256,7 @@ export default function OrderForm({ mode, orderId }: Props) {
             deliveryAddressId: order.address?.id || '__new',
             addressLabel: order.address?.addressLabel || 'Home',
             deliveryArea: order.address?.area || '',
+            deliverySubArea: order.address?.subArea || '',
             streetAddress: order.address?.streetAddress || '',
             googleMapsLink: order.address?.googleMapsLink || '',
             paymentMethod: order.paymentMethod,
@@ -305,10 +310,27 @@ export default function OrderForm({ mode, orderId }: Props) {
     () => items.reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0), 0),
     [items]
   )
-  const selectedZone = useMemo(
-    () => deliveryZones.find((z) => String(z.area || '').trim() === String(form.deliveryArea || '').trim()) || null,
-    [deliveryZones, form.deliveryArea]
-  )
+  const selectedZone = useMemo(() => {
+    const area = String(form.deliveryArea || '').trim()
+    const sub = String(form.deliverySubArea || '').trim()
+    const matches = deliveryZones.filter((z) => String(z.area || '').trim() === area)
+    if (matches.length === 0) return null
+    return (sub && matches.find((z) => String(z.subArea || '').trim() === sub)) || matches[0]
+  }, [deliveryZones, form.deliveryArea, form.deliverySubArea])
+
+  // Sub-areas available under the currently selected area
+  const subAreaOptions = useMemo(() => {
+    const area = String(form.deliveryArea || '').trim()
+    if (!area) return [] as string[]
+    return Array.from(
+      new Set(
+        deliveryZones
+          .filter((z) => String(z.area || '').trim() === area)
+          .map((z) => String(z.subArea || '').trim())
+          .filter(Boolean)
+      )
+    )
+  }, [deliveryZones, form.deliveryArea])
   const freeDeliveryValue = Number(selectedZone?.freeDeliveryValue || 0)
   const baseCustomerDeliveryFee = Number(selectedZone?.customerDeliveryFee || 0)
   const deliveryFee = selectedZone
@@ -345,6 +367,7 @@ export default function OrderForm({ mode, orderId }: Props) {
           customerType: 'جديد',
           deliveryAddressId: '__new',
           deliveryArea: '',
+          deliverySubArea: '',
           streetAddress: '',
           googleMapsLink: '',
         }))
@@ -363,6 +386,7 @@ export default function OrderForm({ mode, orderId }: Props) {
         deliveryAddressId: firstAddress?.id || '__new',
         addressLabel: firstAddress?.addressLabel || 'Home',
         deliveryArea: firstAddress?.area || '',
+        deliverySubArea: firstAddress?.subArea || '',
         streetAddress: firstAddress?.streetAddress || '',
         googleMapsLink: firstAddress?.googleMapsLink || '',
       }))
@@ -417,6 +441,7 @@ export default function OrderForm({ mode, orderId }: Props) {
     if (!selected) {
       updateForm('deliveryAddressId', '__new')
       updateForm('deliveryArea', '')
+      updateForm('deliverySubArea', '')
       updateForm('streetAddress', '')
       updateForm('googleMapsLink', '')
       updateForm('addressLabel', 'Home')
@@ -428,6 +453,7 @@ export default function OrderForm({ mode, orderId }: Props) {
       deliveryAddressId: selected.id,
       addressLabel: selected.addressLabel || 'Home',
       deliveryArea: selected.area || '',
+      deliverySubArea: (selected as any).subArea || '',
       streetAddress: selected.streetAddress,
       googleMapsLink: selected.googleMapsLink || '',
     }))
@@ -469,6 +495,7 @@ export default function OrderForm({ mode, orderId }: Props) {
       const payload = {
         ...form,
         deliveryArea: resolvedDeliveryArea,
+        deliverySubArea: form.deliverySubArea || '',
         items: validItems,
         createdBy: user?.id || 'unknown',
       }
@@ -576,9 +603,28 @@ export default function OrderForm({ mode, orderId }: Props) {
           <FieldSelect
             label="المنطقة"
             value={form.deliveryArea}
-            onChange={(v) => updateForm('deliveryArea', v)}
+            onChange={(v) => {
+              // Switching area clears the sub-area so an incompatible value
+              // can't linger and cause the wrong fee to be charged.
+              updateForm('deliveryArea', v)
+              updateForm('deliverySubArea', '')
+            }}
             options={Array.from(new Set(deliveryZones.map((z) => z.area).filter(Boolean)))}
           />
+          {subAreaOptions.length > 0 ? (
+            <FieldSelect
+              label="المنطقة الفرعية"
+              value={form.deliverySubArea}
+              onChange={(v) => updateForm('deliverySubArea', v)}
+              options={['', ...subAreaOptions]}
+            />
+          ) : (
+            <FieldInput
+              label="المنطقة الفرعية (اختياري)"
+              value={form.deliverySubArea}
+              onChange={(v) => updateForm('deliverySubArea', v)}
+            />
+          )}
           <FieldInput label="العنوان" value={form.streetAddress} onChange={(v) => updateForm('streetAddress', v)} />
           <FieldInput label="رابط Google Maps" value={form.googleMapsLink} onChange={(v) => updateForm('googleMapsLink', v)} dir="ltr" />
         </div>

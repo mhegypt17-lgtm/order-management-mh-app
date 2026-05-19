@@ -58,22 +58,9 @@ async function readProducts() {
   }
 }
 
-async function computeDeliveryFeeByArea(subtotal: number, area?: string) {
-  const zones = await readDeliveryZones()
-  const matchedZone = zones.find((z) => String(z.area || '').trim() === String(area || '').trim())
-
-  if (!matchedZone) {
-    return subtotal > 1800 ? 0 : 95
-  }
-
-  const freeValue = Number(matchedZone.freeDeliveryValue) || 0
-  const customerFee = Number(matchedZone.customerDeliveryFee) || 0
-
-  if (freeValue > 0 && subtotal >= freeValue) {
-    return 0
-  }
-
-  return customerFee
+async function computeDeliveryFeeByArea(subtotal: number, area?: string, subArea?: string) {
+  const { computeDeliveryFee } = await import('@/lib/omsData')
+  return computeDeliveryFee(subtotal, area, subArea)
 }
 
 async function enrichOrder(order: OrderRecord) {
@@ -166,6 +153,7 @@ export async function PUT(
         customerId: orders[orderIndex].customerId,
         addressLabel: body.addressLabel || 'Home',
         area: body.deliveryArea || '',
+        subArea: body.deliverySubArea || '',
         streetAddress: body.streetAddress,
         googleMapsLink: body.googleMapsLink || '',
         createdAt: now,
@@ -174,10 +162,15 @@ export async function PUT(
       await supabase.from('customer_addresses').insert([deliveryAddress])
     } else if (deliveryAddress) {
       const updatedArea = body.deliveryArea || deliveryAddress.area || ''
+      const updatedSubArea =
+        body.deliverySubArea !== undefined
+          ? String(body.deliverySubArea || '')
+          : deliveryAddress.subArea || ''
       deliveryAddress.area = updatedArea
+      deliveryAddress.subArea = updatedSubArea
       await supabase
         .from('customer_addresses')
-        .update({ area: updatedArea })
+        .update({ area: updatedArea, subArea: updatedSubArea })
         .eq('id', deliveryAddress.id)
     }
 
@@ -206,7 +199,11 @@ export async function PUT(
       })
 
     const subtotal = normalizedItems.reduce((sum, i) => sum + i.lineTotal, 0)
-    const deliveryFee = await computeDeliveryFeeByArea(subtotal, body.deliveryArea || deliveryAddress?.area)
+    const deliveryFee = await computeDeliveryFeeByArea(
+      subtotal,
+      body.deliveryArea || deliveryAddress?.area,
+      body.deliverySubArea || deliveryAddress?.subArea
+    )
     const orderTotal = subtotal + deliveryFee
 
     const existing = orders[orderIndex]

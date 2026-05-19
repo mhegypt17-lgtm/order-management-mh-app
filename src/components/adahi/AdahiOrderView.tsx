@@ -10,6 +10,7 @@ type CustomerAddress = {
   id: string
   addressLabel: string
   area?: string
+  subArea?: string
   streetAddress: string
   googleMapsLink: string
 }
@@ -17,6 +18,7 @@ type CustomerAddress = {
 type DeliveryZone = {
   zone: number
   area: string
+  subArea?: string
 }
 
 type AdahiItem = {
@@ -80,6 +82,7 @@ export default function AdahiOrderView({ role }: { role: Role }) {
   const [deliveryAddressId, setDeliveryAddressId] = useState('__new')
   const [addressLabel, setAddressLabel] = useState('Home')
   const [deliveryArea, setDeliveryArea] = useState('')
+  const [deliverySubArea, setDeliverySubArea] = useState('')
   const [streetAddress, setStreetAddress] = useState('')
   const [googleMapsLink, setGoogleMapsLink] = useState('')
 
@@ -114,7 +117,11 @@ export default function AdahiOrderView({ role }: { role: Role }) {
         setOrders(Array.isArray(ordersData.orders) ? ordersData.orders : [])
 
         const zones = Array.isArray(zonesData.zones)
-          ? zonesData.zones.map((z: any) => ({ zone: Number(z.zone), area: String(z.area || '') }))
+          ? zonesData.zones.map((z: any) => ({
+              zone: Number(z.zone),
+              area: String(z.area || ''),
+              subArea: String(z.subArea || ''),
+            }))
           : []
 
         setDeliveryZones(zones)
@@ -191,6 +198,7 @@ export default function AdahiOrderView({ role }: { role: Role }) {
         setDeliveryAddressId(firstAddress.id)
         setAddressLabel(firstAddress.addressLabel || 'Home')
         setDeliveryArea(firstAddress.area || deliveryArea)
+        setDeliverySubArea(firstAddress.subArea || '')
         setStreetAddress(firstAddress.streetAddress || '')
         setGoogleMapsLink(firstAddress.googleMapsLink || '')
       }
@@ -217,6 +225,7 @@ export default function AdahiOrderView({ role }: { role: Role }) {
 
     setAddressLabel(selected.addressLabel || 'Home')
     setDeliveryArea(selected.area || deliveryArea)
+    setDeliverySubArea(selected.subArea || '')
     setStreetAddress(selected.streetAddress || '')
     setGoogleMapsLink(selected.googleMapsLink || '')
   }
@@ -237,6 +246,7 @@ export default function AdahiOrderView({ role }: { role: Role }) {
     setDeliveryAddressId('__new')
     setAddressLabel('Home')
     setDeliveryArea(deliveryZones[0]?.area || '')
+    setDeliverySubArea('')
     setStreetAddress('')
     setGoogleMapsLink('')
     setOrderDate(nowDate())
@@ -279,6 +289,7 @@ export default function AdahiOrderView({ role }: { role: Role }) {
         deliveryAddressId,
         addressLabel,
         deliveryArea: area,
+        subArea: deliverySubArea,
         streetAddress,
         googleMapsLink,
         items: validItems,
@@ -390,7 +401,39 @@ export default function AdahiOrderView({ role }: { role: Role }) {
             </div>
 
             <FieldInput label="تسمية العنوان" value={addressLabel} onChange={setAddressLabel} />
-            <FieldSelect label="المنطقة" value={deliveryArea} onChange={setDeliveryArea} options={Array.from(new Set(deliveryZones.map((z) => z.area).filter(Boolean)))} />
+            <FieldSelect
+              label="المنطقة"
+              value={deliveryArea}
+              onChange={(v) => {
+                setDeliveryArea(v)
+                setDeliverySubArea('')
+              }}
+              options={Array.from(new Set(deliveryZones.map((z) => z.area).filter(Boolean)))}
+            />
+            {(() => {
+              const subs = Array.from(
+                new Set(
+                  deliveryZones
+                    .filter((z) => String(z.area || '').trim() === String(deliveryArea || '').trim())
+                    .map((z) => String(z.subArea || '').trim())
+                    .filter(Boolean)
+                )
+              )
+              return subs.length > 0 ? (
+                <FieldSelect
+                  label="المنطقة الفرعية"
+                  value={deliverySubArea}
+                  onChange={setDeliverySubArea}
+                  options={['', ...subs]}
+                />
+              ) : (
+                <FieldInput
+                  label="المنطقة الفرعية (اختياري)"
+                  value={deliverySubArea}
+                  onChange={setDeliverySubArea}
+                />
+              )
+            })()}
             <FieldInput label="العنوان" value={streetAddress} onChange={setStreetAddress} />
             <FieldInput label="رابط Google Maps" value={googleMapsLink} onChange={setGoogleMapsLink} dir="ltr" />
           </div>

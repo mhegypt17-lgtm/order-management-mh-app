@@ -13,14 +13,9 @@ import {
 } from '@/lib/omsData'
 import { supabase } from '@/lib/supabase'
 
-async function computeDeliveryFeeByArea(subtotal: number, area?: string) {
-  const zones = await readDeliveryZones()
-  const matchedZone = zones.find((z) => String(z.area || '').trim() === String(area || '').trim())
-  if (!matchedZone) return subtotal > 1800 ? 0 : 95
-  const freeValue = Number(matchedZone.freeDeliveryValue) || 0
-  const customerFee = Number(matchedZone.customerDeliveryFee) || 0
-  if (freeValue > 0 && subtotal >= freeValue) return 0
-  return customerFee
+async function computeDeliveryFeeByArea(subtotal: number, area?: string, subArea?: string) {
+  const { computeDeliveryFee } = await import('@/lib/omsData')
+  return computeDeliveryFee(subtotal, area, subArea)
 }
 
 /**
@@ -79,7 +74,7 @@ export async function POST(
     }
 
     const subtotal = newItems.reduce((sum, i) => sum + i.lineTotal, 0)
-    const deliveryFee = await computeDeliveryFeeByArea(subtotal, address?.area)
+    const deliveryFee = await computeDeliveryFeeByArea(subtotal, address?.area, (address as any)?.subArea)
     const orderTotal = subtotal + deliveryFee
     const appOrderNo = await generateAppOrderNo(orderDate, source.orderType, orders)
 

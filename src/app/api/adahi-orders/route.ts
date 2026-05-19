@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
     const customerName = String(body.customerName || '').trim()
     const streetAddress = String(body.streetAddress || '').trim()
     const deliveryArea = String(body.deliveryArea || '').trim()
+    const subArea = String(body.subArea || body.deliverySubArea || '').trim()
 
     if (!phone) return NextResponse.json({ error: 'Phone is required' }, { status: 400 })
     if (!customerName) return NextResponse.json({ error: 'Customer name is required' }, { status: 400 })
@@ -109,6 +110,7 @@ export async function POST(request: NextRequest) {
           .update({
             addressLabel,
             area: deliveryArea,
+            subArea,
             streetAddress,
             googleMapsLink: String(body.googleMapsLink || '').trim(),
           })
@@ -121,6 +123,7 @@ export async function POST(request: NextRequest) {
           customerId,
           addressLabel,
           area: deliveryArea,
+          subArea,
           streetAddress,
           googleMapsLink: String(body.googleMapsLink || '').trim(),
           createdAt: now,
@@ -134,6 +137,7 @@ export async function POST(request: NextRequest) {
         customerId,
         addressLabel,
         area: deliveryArea,
+        subArea,
         streetAddress,
         googleMapsLink: String(body.googleMapsLink || '').trim(),
         createdAt: now,
@@ -154,6 +158,7 @@ export async function POST(request: NextRequest) {
       deliveryAddressId: addressId,
       addressLabel,
       deliveryArea,
+      subArea,
       streetAddress,
       googleMapsLink: String(body.googleMapsLink || '').trim(),
       items,

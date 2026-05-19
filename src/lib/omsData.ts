@@ -13,6 +13,7 @@ export interface CustomerAddressRecord {
   customerId: string
   addressLabel: string
   area?: string
+  subArea?: string
   streetAddress: string
   googleMapsLink: string
   createdAt: string
@@ -136,6 +137,7 @@ export interface AdahiOrderRecord {
   deliveryAddressId: string
   addressLabel: string
   deliveryArea: string
+  subArea?: string
   streetAddress: string
   googleMapsLink: string
   items: AdahiOrderItemRecord[]
@@ -604,6 +606,38 @@ export async function readDeliveryZones(): Promise<DeliveryZoneRecord[]> {
 
 export async function writeDeliveryZones(_data: DeliveryZoneRecord[]): Promise<void> {
   // No-op: writes handled directly in API routes
+}
+
+// Match a delivery zone by area + (optional) subArea. Used by every API route
+// that computes delivery fee — single source of truth so the fee always lines
+// up with what the admin sees in the Delivery Zones table.
+//   - Exact (area + subArea) match wins.
+//   - If no subArea given (or no exact row), fall back to the first row for the
+//     area (so old orders without subArea still resolve to a fee).
+//   - If area itself isn't found, fall back to the legacy default
+//     (subtotal > 1800 ? 0 : 95) for backwards compatibility.
+export async function computeDeliveryFee(
+  subtotal: number,
+  area?: string,
+  subArea?: string
+): Promise<number> {
+  const a = String(area || '').trim()
+  const sa = String(subArea || '').trim()
+
+  const zones = await readDeliveryZones()
+  const areaMatches = zones.filter((z) => String(z.area || '').trim() === a)
+  if (areaMatches.length === 0) {
+    return subtotal > 1800 ? 0 : 95
+  }
+
+  const matchedZone =
+    (sa && areaMatches.find((z) => String(z.subArea || '').trim() === sa)) ||
+    areaMatches[0]
+
+  const freeThreshold = Number(matchedZone.freeDeliveryValue) || 0
+  const customerFee = Number(matchedZone.customerDeliveryFee) || 0
+  if (freeThreshold > 0 && subtotal >= freeThreshold) return 0
+  return customerFee
 }
 
 // ─── Adahi Orders ─────────────────────────────────────────────────────────────
