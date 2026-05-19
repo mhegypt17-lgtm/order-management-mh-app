@@ -884,11 +884,14 @@ export default function CRMView({ role }: CRMViewProps) {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ملاحظات</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  ملاحظات <span className="text-xs text-gray-500 font-normal">(يمكنك إضافة أرقام موبايل أخرى وأرقام واتساب هنا)</span>
+                </label>
                 <textarea
                   value={newNotes}
                   onChange={(e) => setNewNotes(e.target.value)}
                   rows={2}
+                  placeholder="مثال: موبايل آخر 01XXXXXXXXX، واتساب 01XXXXXXXXX"
                   className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
                 />
               </div>
