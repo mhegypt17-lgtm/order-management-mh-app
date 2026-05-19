@@ -88,12 +88,25 @@ interface Insights {
 }
 
 interface CustomerProfile {
-  customer: { id: string; customerName: string; phone: string; createdAt: string }
+  customer: {
+    id: string
+    customerName: string
+    phone: string
+    email?: string
+    notes?: string
+    wallet?: number
+    createdAt: string
+  }
   addresses: Address[]
   orders: Order[]
   stats: Stats
   top5Products: TopProduct[]
   insights: Insights
+}
+
+interface DeliveryZoneOpt {
+  area: string
+  subArea?: string
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -132,11 +145,79 @@ export default function CRMView({ role }: CRMViewProps) {
   const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'products' | 'insights'>('overview')
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+  const [zones, setZones] = useState<DeliveryZoneOpt[]>([])
+
+  // Add-customer modal state
   const [showAdd, setShowAdd] = useState(false)
   const [newName, setNewName] = useState('')
   const [newPhone, setNewPhone] = useState('')
+  const [newEmail, setNewEmail] = useState('')
+  const [newNotes, setNewNotes] = useState('')
   const [newWallet, setNewWallet] = useState('')
+  const [newAddrLabel, setNewAddrLabel] = useState('Home')
+  const [newAddrArea, setNewAddrArea] = useState('')
+  const [newAddrSubArea, setNewAddrSubArea] = useState('')
+  const [newAddrStreet, setNewAddrStreet] = useState('')
+  const [newAddrMaps, setNewAddrMaps] = useState('')
   const [creating, setCreating] = useState(false)
+
+  // Edit-customer modal state
+  const [showEdit, setShowEdit] = useState(false)
+  const [editName, setEditName] = useState('')
+  const [editPhone, setEditPhone] = useState('')
+  const [editEmail, setEditEmail] = useState('')
+  const [editNotes, setEditNotes] = useState('')
+  const [editWallet, setEditWallet] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  // Delete confirm state
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  // Load delivery zones (areas + sub-areas) once for the area pickers.
+  useEffect(() => {
+    const loadZones = async () => {
+      try {
+        const res = await fetch('/api/delivery-zones')
+        if (!res.ok) return
+        const data = await res.json()
+        const rows = Array.isArray(data) ? data : data?.zones || []
+        setZones(
+          rows.map((z: any) => ({
+            area: String(z.area || '').trim(),
+            subArea: String(z.subArea || '').trim(),
+          }))
+        )
+      } catch {
+        // non-fatal
+      }
+    }
+    loadZones()
+  }, [])
+
+  const areaOptions = Array.from(new Set(zones.map((z) => z.area).filter(Boolean)))
+  const subOptionsFor = (area: string) =>
+    Array.from(
+      new Set(
+        zones
+          .filter((z) => z.area === area)
+          .map((z) => z.subArea || '')
+          .filter(Boolean)
+      )
+    )
+
+  const resetAddForm = () => {
+    setNewName('')
+    setNewPhone('')
+    setNewEmail('')
+    setNewNotes('')
+    setNewWallet('')
+    setNewAddrLabel('Home')
+    setNewAddrArea('')
+    setNewAddrSubArea('')
+    setNewAddrStreet('')
+    setNewAddrMaps('')
+  }
 
   const handleCreateCustomer = async () => {
     const name = newName.trim()
@@ -151,7 +232,14 @@ export default function CRMView({ role }: CRMViewProps) {
         body: JSON.stringify({
           customerName: name,
           phone,
+          email: newEmail.trim(),
+          notes: newNotes.trim(),
           wallet: newWallet ? Number(newWallet) : 0,
+          addressLabel: newAddrLabel.trim() || 'Home',
+          area: newAddrArea.trim(),
+          subArea: newAddrSubArea.trim(),
+          streetAddress: newAddrStreet.trim(),
+          googleMapsLink: newAddrMaps.trim(),
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -161,9 +249,7 @@ export default function CRMView({ role }: CRMViewProps) {
       }
       toast.success('✅ تم إنشاء العميل')
       setShowAdd(false)
-      setNewName('')
-      setNewPhone('')
-      setNewWallet('')
+      resetAddForm()
       setReloadKey((k) => k + 1)
       if (data?.customer?.id) {
         setSelectedId(data.customer.id)
@@ -173,6 +259,79 @@ export default function CRMView({ role }: CRMViewProps) {
       toast.error('تعذر إنشاء العميل')
     } finally {
       setCreating(false)
+    }
+  }
+
+  const openEditModal = () => {
+    if (!profile) return
+    setEditName(profile.customer.customerName || '')
+    setEditPhone(profile.customer.phone || '')
+    setEditEmail(profile.customer.email || '')
+    setEditNotes(profile.customer.notes || '')
+    setEditWallet(
+      profile.customer.wallet !== undefined && profile.customer.wallet !== null
+        ? String(profile.customer.wallet)
+        : ''
+    )
+    setShowEdit(true)
+  }
+
+  const handleSaveEdit = async () => {
+    if (!profile) return
+    const name = editName.trim()
+    const phone = editPhone.trim()
+    if (!name) return toast.error('اسم العميل مطلوب')
+    if (!phone) return toast.error('رقم الهاتف مطلوب')
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/crm/customers/${profile.customer.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerName: name,
+          phone,
+          email: editEmail.trim(),
+          notes: editNotes.trim(),
+          wallet: editWallet === '' ? undefined : Number(editWallet),
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(data?.error || 'تعذر حفظ التعديلات')
+        return
+      }
+      toast.success('✅ تم الحفظ')
+      setShowEdit(false)
+      setReloadKey((k) => k + 1)
+      loadProfile(profile.customer.id)
+    } catch {
+      toast.error('تعذر حفظ التعديلات')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDeleteCustomer = async () => {
+    if (!profile) return
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/crm/customers/${profile.customer.id}?role=${role}`, {
+        method: 'DELETE',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(data?.error || 'تعذر حذف العميل')
+        return
+      }
+      toast.success('✅ تم حذف العميل')
+      setConfirmDelete(false)
+      setSelectedId(null)
+      setProfile(null)
+      setReloadKey((k) => k + 1)
+    } catch {
+      toast.error('تعذر حذف العميل')
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -308,16 +467,42 @@ export default function CRMView({ role }: CRMViewProps) {
                     </span>
                   </div>
                   <p className="text-gray-500 text-sm">{profile.customer.phone}</p>
+                  {profile.customer.email && (
+                    <p className="text-gray-500 text-sm">📧 {profile.customer.email}</p>
+                  )}
                   {profile.insights.customerSource && (
                     <p className="text-xs text-gray-400 mt-0.5">المصدر: {profile.insights.customerSource}</p>
                   )}
+                  {profile.customer.notes && (
+                    <p className="text-xs text-gray-600 mt-2 bg-yellow-50 border border-yellow-200 rounded px-2 py-1 whitespace-pre-wrap">
+                      📝 {profile.customer.notes}
+                    </p>
+                  )}
                 </div>
 
-                {profile.insights.activityAlert && (
-                  <div className={`px-3 py-2 rounded-lg text-sm font-medium ${profile.insights.daysSinceLastOrder && profile.insights.daysSinceLastOrder > 90 ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>
-                    ⚠️ {profile.insights.activityAlert}
-                  </div>
-                )}
+                <div className="flex items-start gap-2 flex-wrap">
+                  {profile.insights.activityAlert && (
+                    <div className={`px-3 py-2 rounded-lg text-sm font-medium ${profile.insights.daysSinceLastOrder && profile.insights.daysSinceLastOrder > 90 ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>
+                      ⚠️ {profile.insights.activityAlert}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={openEditModal}
+                    className="text-xs bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-2 rounded"
+                  >
+                    ✏️ تعديل
+                  </button>
+                  {role === 'admin' && (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDelete(true)}
+                      className="text-xs bg-red-600 hover:bg-red-700 text-white font-bold px-3 py-2 rounded"
+                    >
+                      🗑️ حذف
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Quick stats row */}
@@ -653,39 +838,135 @@ export default function CRMView({ role }: CRMViewProps) {
       {/* ── Add Customer Modal ─────────────────────────────────────────── */}
       {showAdd && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => !creating && setShowAdd(false)}>
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()} dir="rtl">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()} dir="rtl">
             <h3 className="text-lg font-bold text-gray-900 mb-4">إضافة عميل جديد</h3>
-            <div className="space-y-3">
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">اسم العميل *</label>
+                  <input
+                    type="text"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">رقم الهاتف *</label>
+                  <input
+                    type="tel"
+                    value={newPhone}
+                    onChange={(e) => setNewPhone(e.target.value)}
+                    placeholder="01XXXXXXXXX"
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">البريد الإلكتروني</label>
+                  <input
+                    type="email"
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">رصيد المحفظة</label>
+                  <input
+                    type="number"
+                    value={newWallet}
+                    onChange={(e) => setNewWallet(e.target.value)}
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+                  />
+                </div>
+              </div>
+
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">اسم العميل *</label>
-                <input
-                  type="text"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
+                <label className="block text-sm font-medium text-gray-700 mb-1">ملاحظات</label>
+                <textarea
+                  value={newNotes}
+                  onChange={(e) => setNewNotes(e.target.value)}
+                  rows={2}
                   className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
-                  autoFocus
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">رقم الهاتف *</label>
-                <input
-                  type="tel"
-                  value={newPhone}
-                  onChange={(e) => setNewPhone(e.target.value)}
-                  placeholder="01XXXXXXXXX"
-                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">رصيد المحفظة (اختياري)</label>
-                <input
-                  type="number"
-                  value={newWallet}
-                  onChange={(e) => setNewWallet(e.target.value)}
-                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
-                />
+
+              <div className="border-t border-gray-200 pt-3">
+                <h4 className="text-sm font-bold text-gray-800 mb-2">📍 عنوان افتراضي (اختياري)</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">تسمية العنوان</label>
+                    <input
+                      type="text"
+                      value={newAddrLabel}
+                      onChange={(e) => setNewAddrLabel(e.target.value)}
+                      placeholder="Home / Work"
+                      className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">المنطقة</label>
+                    <select
+                      value={newAddrArea}
+                      onChange={(e) => {
+                        setNewAddrArea(e.target.value)
+                        setNewAddrSubArea('')
+                      }}
+                      className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                    >
+                      <option value="">— اختر —</option>
+                      {areaOptions.map((a) => (
+                        <option key={a} value={a}>{a}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">المنطقة الفرعية</label>
+                    {subOptionsFor(newAddrArea).length > 0 ? (
+                      <select
+                        value={newAddrSubArea}
+                        onChange={(e) => setNewAddrSubArea(e.target.value)}
+                        className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                      >
+                        <option value="">— اختر —</option>
+                        {subOptionsFor(newAddrArea).map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={newAddrSubArea}
+                        onChange={(e) => setNewAddrSubArea(e.target.value)}
+                        className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                      />
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">رابط الخريطة</label>
+                    <input
+                      type="url"
+                      value={newAddrMaps}
+                      onChange={(e) => setNewAddrMaps(e.target.value)}
+                      placeholder="https://maps.google.com/..."
+                      className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">العنوان التفصيلي</label>
+                    <input
+                      type="text"
+                      value={newAddrStreet}
+                      onChange={(e) => setNewAddrStreet(e.target.value)}
+                      className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
+
             <div className="flex justify-end gap-2 mt-5">
               <button
                 type="button"
@@ -702,6 +983,111 @@ export default function CRMView({ role }: CRMViewProps) {
                 className="px-4 py-2 text-sm rounded bg-red-600 hover:bg-red-700 text-white font-bold disabled:opacity-60"
               >
                 {creating ? '⏳ جاري الحفظ...' : 'حفظ'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Edit Customer Modal ────────────────────────────────────────── */}
+      {showEdit && profile && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => !saving && setShowEdit(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()} dir="rtl">
+            <h3 className="text-lg font-bold text-gray-900 mb-4">تعديل بيانات العميل</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">اسم العميل *</label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">رقم الهاتف *</label>
+                <input
+                  type="tel"
+                  value={editPhone}
+                  onChange={(e) => setEditPhone(e.target.value)}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">البريد الإلكتروني</label>
+                <input
+                  type="email"
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">رصيد المحفظة</label>
+                <input
+                  type="number"
+                  value={editWallet}
+                  onChange={(e) => setEditWallet(e.target.value)}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">ملاحظات</label>
+                <textarea
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  rows={3}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button
+                type="button"
+                onClick={() => setShowEdit(false)}
+                disabled={saving}
+                className="px-4 py-2 text-sm rounded bg-gray-100 hover:bg-gray-200 text-gray-700"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEdit}
+                disabled={saving}
+                className="px-4 py-2 text-sm rounded bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:opacity-60"
+              >
+                {saving ? '⏳ جاري الحفظ...' : 'حفظ'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Customer Confirm ────────────────────────────────────── */}
+      {confirmDelete && profile && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => !deleting && setConfirmDelete(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()} dir="rtl">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">حذف العميل</h3>
+            <p className="text-sm text-gray-700 mb-4">
+              سيتم حذف العميل <span className="font-bold">{profile.customer.customerName}</span> وكل عناوينه.
+              لا يمكن حذف عميل لديه طلبات؛ يجب حذف الطلبات أولاً.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(false)}
+                disabled={deleting}
+                className="px-4 py-2 text-sm rounded bg-gray-100 hover:bg-gray-200 text-gray-700"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteCustomer}
+                disabled={deleting}
+                className="px-4 py-2 text-sm rounded bg-red-600 hover:bg-red-700 text-white font-bold disabled:opacity-60"
+              >
+                {deleting ? '⏳ جاري الحذف...' : 'تأكيد الحذف'}
               </button>
             </div>
           </div>

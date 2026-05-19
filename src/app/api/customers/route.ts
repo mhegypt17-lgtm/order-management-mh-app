@@ -98,11 +98,16 @@ export async function POST(request: NextRequest) {
       wallet = w
     }
 
+    const email = String(body?.email || '').trim()
+    const notes = String(body?.notes || '').trim()
+
     const now = new Date().toISOString()
     const newCustomer = {
       id: generateId('cust'),
       phone,
       customerName,
+      email,
+      notes,
       wallet,
       createdAt: now,
       updatedAt: now,
@@ -120,6 +125,33 @@ export async function POST(request: NextRequest) {
         { error: 'تعذر إنشاء العميل', details: error.message },
         { status: 500 }
       )
+    }
+
+    // Optionally create a default address if any address field was provided.
+    const streetAddress = String(body?.streetAddress || '').trim()
+    const addressLabel = String(body?.addressLabel || '').trim()
+    const area = String(body?.area || '').trim()
+    const subArea = String(body?.subArea || '').trim()
+    const googleMapsLink = String(body?.googleMapsLink || '').trim()
+
+    if (streetAddress || area || subArea || addressLabel) {
+      const { error: addrError } = await supabase
+        .from('customer_addresses')
+        .insert([
+          {
+            id: generateId('addr'),
+            customerId: newCustomer.id,
+            addressLabel: addressLabel || 'Home',
+            area,
+            subArea,
+            streetAddress,
+            googleMapsLink,
+            createdAt: now,
+          },
+        ])
+      if (addrError) {
+        console.error('Error creating default address:', addrError)
+      }
     }
 
     return NextResponse.json({ customer: data || newCustomer }, { status: 201 })

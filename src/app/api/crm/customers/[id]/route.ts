@@ -245,7 +245,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
 }
 
-// Update customer name and/or wallet. Never deletes a record.
+// Update customer profile fields (name, phone, email, notes, wallet).
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const body = await req.json()
@@ -254,10 +254,34 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (idx < 0) return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
 
     const current = customers[idx]
-    const next = { ...current }
+    const next: any = { ...current }
+    const updates: any = {}
 
     if (typeof body.customerName === 'string' && body.customerName.trim()) {
       next.customerName = body.customerName.trim()
+      updates.customerName = next.customerName
+    }
+    if (typeof body.phone === 'string' && body.phone.trim()) {
+      const { normalizePhone } = await import('@/lib/omsData')
+      const newPhone = normalizePhone(body.phone)
+      if (!newPhone) {
+        return NextResponse.json({ error: 'رقم الهاتف غير صحيح' }, { status: 400 })
+      }
+      // Block phone collision with a different customer.
+      const dup = customers.find((c) => c.id !== params.id && normalizePhone(c.phone) === newPhone)
+      if (dup) {
+        return NextResponse.json({ error: 'رقم الهاتف مستخدم لعميل آخر' }, { status: 409 })
+      }
+      next.phone = newPhone
+      updates.phone = newPhone
+    }
+    if (typeof body.email === 'string') {
+      next.email = body.email.trim()
+      updates.email = next.email
+    }
+    if (typeof body.notes === 'string') {
+      next.notes = body.notes.trim()
+      updates.notes = next.notes
     }
     if (body.wallet !== undefined && body.wallet !== null && body.wallet !== '') {
       const w = Number(body.wallet)
@@ -265,17 +289,80 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         return NextResponse.json({ error: 'قيمة المحفظة غير صحيحة' }, { status: 400 })
       }
       next.wallet = w
+      updates.wallet = w
     }
     next.updatedAt = new Date().toISOString()
+    updates.updatedAt = next.updatedAt
 
-    await supabase
+    const { error } = await supabase
       .from('customers')
-      .update({ customerName: next.customerName, updatedAt: next.updatedAt, ...(next.wallet !== undefined ? { wallet: next.wallet } : {}) })
+      .update(updates)
       .eq('id', params.id)
+
+    if (error) {
+      console.error('Supabase update error:', error)
+      return NextResponse.json({ error: 'تعذر تحديث بيانات العميل', details: error.message }, { status: 500 })
+    }
 
     return NextResponse.json({ customer: next })
   } catch (err) {
     console.error('CRM customer update error:', err)
     return NextResponse.json({ error: 'تعذر تحديث بيانات العميل' }, { status: 500 })
   }
+}
+
+// Delete a customer (admin only). Refuses if the customer has any orders or
+// adahi orders so the user can review/move them before deletion.
+export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const { searchParams } = new URL(req.url)
+    const role = searchParams.get('role') || 'cs'
+    if (role !== 'admin') {
+      return NextResponse.json({ error: 'مسموح للإدارة فقط' }, { status: 403 })
+    }
+
+    const customerId = params.id
+
+    // Block delete if the customer has orders to avoid losing history.
+    const { count: ordersCount, error: ordersErr } = await supabase
+      .from('orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('customerId', customerId)
+    if (ordersErr) {
+      console.error('Order count error:', ordersErr)
+      return NextResponse.json({ error: 'تعذر التحقق من الطلبات' }, { status: 500 })
+    }
+    const { count: adahiCount, error: adahiErr } = await supabase
+      .from('adahi_orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('customerId', customerId)
+    if (adahiErr) {
+      console.error('Adahi count error:', adahiErr)
+    }
+
+    if ((ordersCount || 0) > 0 || (adahiCount || 0) > 0) {
+      return NextResponse.json(
+        {
+          error: 'لا يمكن حذف العميل لوجود طلبات مرتبطة',
+          ordersCount: ordersCount || 0,
+          adahiCount: adahiCount || 0,
+        },
+        { status: 409 }
+      )
+    }
+
+    // Clean up addresses first (no FK back to customer assumed).
+    await supabase.from('customer_addresses').delete().eq('customerId', customerId)
+    const { error: delErr } = await supabase.from('customers').delete().eq('id', customerId)
+    if (delErr) {
+      console.error('Customer delete error:', delErr)
+      return NextResponse.json({ error: 'تعذر حذف العميل', details: delErr.message }, { status: 500 })
+    }
+
+    return NextResponse.json({ ok: true })
+  } catch (err) {
+    console.error('CRM customer delete error:', err)
+    return NextResponse.json({ error: 'تعذر حذف العميل' }, { status: 500 })
+  }
+}
 }

@@ -4,6 +4,9 @@ export interface CustomerRecord {
   id: string
   phone: string
   customerName: string
+  email?: string
+  notes?: string
+  wallet?: number
   createdAt: string
   updatedAt: string
 }
