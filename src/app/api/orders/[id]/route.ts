@@ -141,6 +141,24 @@ export async function PUT(
       return NextResponse.json({ error: 'Order not found' }, { status: 404 })
     }
 
+    // 🔒 Lock edits once branch starts delivery (unless admin)
+    const requesterRole = String(body.role || new URL(request.url).searchParams.get('role') || '').toLowerCase()
+    if (requesterRole !== 'admin') {
+      const deliveryRows = await readOrderDelivery()
+      const currentDelivery = deliveryRows.find((d) => d.orderId === params.id)
+      const lockingStatuses = ['في الطريق', 'تم التوصيل']
+      if (currentDelivery && lockingStatuses.includes(currentDelivery.deliveryStatus)) {
+        return NextResponse.json(
+          {
+            error: 'الطلب مقفل — الفرع بدأ التوصيل ولا يمكن التعديل',
+            deliveryStatus: currentDelivery.deliveryStatus,
+            locked: true,
+          },
+          { status: 423 }
+        )
+      }
+    }
+
     let deliveryAddress: CustomerAddressRecord | undefined
 
     if (body.deliveryAddressId && body.deliveryAddressId !== '__new') {

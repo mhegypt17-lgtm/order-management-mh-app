@@ -462,6 +462,10 @@ export default function OrderForm({ mode, orderId }: Props) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
+    if (isLocked) {
+      return toast.error('🔒 الطلب مقفل — الفرع بدأ التوصيل ولا يمكن التعديل')
+    }
+
     const resolvedDeliveryArea = form.deliveryArea.trim() || String(deliveryZones[0]?.area || '').trim()
 
     if (!form.phone.trim()) return toast.error('رقم الهاتف مطلوب')
@@ -498,6 +502,7 @@ export default function OrderForm({ mode, orderId }: Props) {
         deliverySubArea: form.deliverySubArea || '',
         items: validItems,
         createdBy: user?.id || 'unknown',
+        role: user?.role || '',
       }
 
       const url = mode === 'create' ? '/api/orders' : `/api/orders/${orderId}`
@@ -508,6 +513,12 @@ export default function OrderForm({ mode, orderId }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
+
+      if (response.status === 423) {
+        const err = await response.json().catch(() => ({}))
+        toast.error(err?.error || '🔒 الطلب مقفل ولا يمكن التعديل')
+        return
+      }
 
       if (!response.ok) throw new Error('Save failed')
 
@@ -526,8 +537,20 @@ export default function OrderForm({ mode, orderId }: Props) {
     return <div className="p-8 text-center text-gray-500">⏳ جاري تحميل النموذج...</div>
   }
 
+  const isLocked =
+    mode === 'edit' &&
+    !!deliveryData &&
+    (deliveryData.deliveryStatus === 'في الطريق' || deliveryData.deliveryStatus === 'تم التوصيل') &&
+    user?.role !== 'admin'
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {isLocked && (
+        <div className="bg-amber-50 border border-amber-300 rounded-lg p-4 text-amber-900">
+          <p className="font-bold">🔒 هذا الطلب مقفل للتعديل</p>
+          <p className="text-sm mt-1">لأن الفرع بدأ التوصيل (الحالة: <span className="font-semibold">{deliveryData?.deliveryStatus}</span>). يمكن للأدمن فقط إجراء تعديلات.</p>
+        </div>
+      )}
       <details open className="bg-white rounded-lg border border-gray-200 p-4">
         <summary className="font-bold text-gray-900 cursor-pointer">1) بيانات الطلب</summary>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
@@ -875,10 +898,11 @@ export default function OrderForm({ mode, orderId }: Props) {
       <div className="flex gap-3">
         <button
           type="submit"
-          disabled={isSaving}
-          className="px-5 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:bg-red-300 text-white font-semibold"
+          disabled={isSaving || isLocked}
+          title={isLocked ? 'الطلب مقفل بسبب حالة التوصيل' : undefined}
+          className="px-5 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:bg-red-300 disabled:cursor-not-allowed text-white font-semibold"
         >
-          {isSaving ? '... جاري الحفظ' : mode === 'create' ? 'حفظ الطلب' : 'تحديث الطلب'}
+          {isSaving ? '... جاري الحفظ' : isLocked ? '🔒 مقفل' : mode === 'create' ? 'حفظ الطلب' : 'تحديث الطلب'}
         </button>
         <button type="button" onClick={() => router.push('/orders')} className="px-5 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold">
           رجوع
