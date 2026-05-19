@@ -88,6 +88,8 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const date = searchParams.get('date') || ''
     const month = searchParams.get('month') || ''
+    const from = searchParams.get('from') || ''
+    const to = searchParams.get('to') || ''
     const deliveryStatus = searchParams.get('deliveryStatus') || 'all'
 
     let orders = await readOrders()
@@ -100,6 +102,13 @@ export async function GET(request: NextRequest) {
 
     if (month) {
       filtered = filtered.filter((o) => String(o.orderDate || '').startsWith(`${month}-`))
+    }
+
+    if (from) {
+      filtered = filtered.filter((o) => String(o.orderDate || '') >= from)
+    }
+    if (to) {
+      filtered = filtered.filter((o) => String(o.orderDate || '') <= to)
     }
 
     if (deliveryStatus !== 'all') {
