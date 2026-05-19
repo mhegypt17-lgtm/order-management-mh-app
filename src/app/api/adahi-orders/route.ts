@@ -91,47 +91,42 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // 2. Find or create address
+    // 2. Find or create address (dedupe by addressLabel — never duplicate "Home" for same customer)
     let addressId: string
     let addressLabel: string
+    const incomingLabel = String(body.addressLabel || 'Home').trim() || 'Home'
+    const normalizedLabel = incomingLabel.toLowerCase()
 
-    if (body.deliveryAddressId && body.deliveryAddressId !== '__new') {
-      const { data: existingAddr } = await supabase
+    const { data: customerAddrs } = await supabase
+      .from('customer_addresses')
+      .select('*')
+      .eq('customerId', customerId)
+
+    const matchById =
+      body.deliveryAddressId && body.deliveryAddressId !== '__new'
+        ? (customerAddrs || []).find((a: any) => a.id === body.deliveryAddressId)
+        : null
+    const matchByLabel = (customerAddrs || []).find(
+      (a: any) => String(a.addressLabel || '').trim().toLowerCase() === normalizedLabel
+    )
+    const reuseAddr = matchById || matchByLabel || null
+
+    if (reuseAddr) {
+      addressId = reuseAddr.id
+      addressLabel = incomingLabel
+      await supabase
         .from('customer_addresses')
-        .select('id, addressLabel')
-        .eq('id', body.deliveryAddressId)
-        .maybeSingle()
-
-      if (existingAddr) {
-        addressId = existingAddr.id
-        addressLabel = String(body.addressLabel || existingAddr.addressLabel || 'Home').trim() || 'Home'
-        await supabase
-          .from('customer_addresses')
-          .update({
-            addressLabel,
-            area: deliveryArea,
-            subArea,
-            streetAddress,
-            googleMapsLink: String(body.googleMapsLink || '').trim(),
-          })
-          .eq('id', addressId)
-      } else {
-        addressId = generateId('addr')
-        addressLabel = String(body.addressLabel || 'Home').trim() || 'Home'
-        await supabase.from('customer_addresses').insert({
-          id: addressId,
-          customerId,
+        .update({
           addressLabel,
           area: deliveryArea,
           subArea,
           streetAddress,
           googleMapsLink: String(body.googleMapsLink || '').trim(),
-          createdAt: now,
         })
-      }
+        .eq('id', addressId)
     } else {
       addressId = generateId('addr')
-      addressLabel = String(body.addressLabel || 'Home').trim() || 'Home'
+      addressLabel = incomingLabel
       await supabase.from('customer_addresses').insert({
         id: addressId,
         customerId,

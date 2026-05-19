@@ -147,6 +147,21 @@ export async function PUT(
       deliveryAddress = addresses.find((a) => a.id === body.deliveryAddressId)
     }
 
+    // Dedupe by (customerId, addressLabel) — never create a second "Home" for the same customer.
+    if (!deliveryAddress && body.streetAddress) {
+      const customerId = orders[orderIndex].customerId
+      const incomingLabel = (body.addressLabel || 'Home').toString().trim()
+      const normalizedLabel = incomingLabel.toLowerCase()
+      const sameLabel = addresses.find(
+        (a) =>
+          a.customerId === customerId &&
+          String(a.addressLabel || '').trim().toLowerCase() === normalizedLabel
+      )
+      if (sameLabel) {
+        deliveryAddress = sameLabel
+      }
+    }
+
     if (!deliveryAddress && body.streetAddress) {
       deliveryAddress = {
         id: generateId('addr'),
@@ -161,16 +176,34 @@ export async function PUT(
       // Insert new address into Supabase
       await supabase.from('customer_addresses').insert([deliveryAddress])
     } else if (deliveryAddress) {
+      const updatedLabel = (body.addressLabel || deliveryAddress.addressLabel || 'Home').toString().trim()
       const updatedArea = body.deliveryArea || deliveryAddress.area || ''
       const updatedSubArea =
         body.deliverySubArea !== undefined
           ? String(body.deliverySubArea || '')
           : deliveryAddress.subArea || ''
+      const updatedStreet =
+        body.streetAddress !== undefined && body.streetAddress !== ''
+          ? String(body.streetAddress)
+          : deliveryAddress.streetAddress
+      const updatedMaps =
+        body.googleMapsLink !== undefined
+          ? String(body.googleMapsLink || '')
+          : deliveryAddress.googleMapsLink || ''
+      deliveryAddress.addressLabel = updatedLabel
       deliveryAddress.area = updatedArea
       deliveryAddress.subArea = updatedSubArea
+      deliveryAddress.streetAddress = updatedStreet
+      deliveryAddress.googleMapsLink = updatedMaps
       await supabase
         .from('customer_addresses')
-        .update({ area: updatedArea, subArea: updatedSubArea })
+        .update({
+          addressLabel: updatedLabel,
+          area: updatedArea,
+          subArea: updatedSubArea,
+          streetAddress: updatedStreet,
+          googleMapsLink: updatedMaps,
+        })
         .eq('id', deliveryAddress.id)
     }
 

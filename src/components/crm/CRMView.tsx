@@ -131,6 +131,50 @@ export default function CRMView({ role }: CRMViewProps) {
   const [profileLoading, setProfileLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'products' | 'insights'>('overview')
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
+  const [showAdd, setShowAdd] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newPhone, setNewPhone] = useState('')
+  const [newWallet, setNewWallet] = useState('')
+  const [creating, setCreating] = useState(false)
+
+  const handleCreateCustomer = async () => {
+    const name = newName.trim()
+    const phone = newPhone.trim()
+    if (!name) return toast.error('اسم العميل مطلوب')
+    if (!phone) return toast.error('رقم الهاتف مطلوب')
+    setCreating(true)
+    try {
+      const res = await fetch('/api/customers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerName: name,
+          phone,
+          wallet: newWallet ? Number(newWallet) : 0,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(data?.error || 'تعذر إنشاء العميل')
+        return
+      }
+      toast.success('✅ تم إنشاء العميل')
+      setShowAdd(false)
+      setNewName('')
+      setNewPhone('')
+      setNewWallet('')
+      setReloadKey((k) => k + 1)
+      if (data?.customer?.id) {
+        setSelectedId(data.customer.id)
+        loadProfile(data.customer.id)
+      }
+    } catch {
+      toast.error('تعذر إنشاء العميل')
+    } finally {
+      setCreating(false)
+    }
+  }
 
   // Load customer list
   useEffect(() => {
@@ -149,7 +193,7 @@ export default function CRMView({ role }: CRMViewProps) {
     }
     const debounce = setTimeout(fetchCustomers, 300)
     return () => clearTimeout(debounce)
-  }, [search])
+  }, [search, reloadKey])
 
   // Load customer profile
   const loadProfile = useCallback(async (id: string) => {
@@ -182,7 +226,17 @@ export default function CRMView({ role }: CRMViewProps) {
       {/* ── Sidebar: Customer List ─────────────────────────────────────────── */}
       <div className="w-72 flex-shrink-0 border-l border-gray-200 bg-white flex flex-col">
         <div className="p-3 border-b border-gray-200">
-          <h2 className="text-base font-bold text-gray-800 mb-2">👥 قاعدة العملاء</h2>
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-base font-bold text-gray-800">👥 قاعدة العملاء</h2>
+            <button
+              type="button"
+              onClick={() => setShowAdd(true)}
+              className="text-xs bg-red-600 hover:bg-red-700 text-white font-bold px-2 py-1 rounded"
+              title="إضافة عميل جديد"
+            >
+              + إضافة
+            </button>
+          </div>
           <input
             type="text"
             placeholder="بحث بالاسم أو الهاتف..."
@@ -595,6 +649,64 @@ export default function CRMView({ role }: CRMViewProps) {
           </div>
         ) : null}
       </div>
+
+      {/* ── Add Customer Modal ─────────────────────────────────────────── */}
+      {showAdd && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => !creating && setShowAdd(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()} dir="rtl">
+            <h3 className="text-lg font-bold text-gray-900 mb-4">إضافة عميل جديد</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">اسم العميل *</label>
+                <input
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">رقم الهاتف *</label>
+                <input
+                  type="tel"
+                  value={newPhone}
+                  onChange={(e) => setNewPhone(e.target.value)}
+                  placeholder="01XXXXXXXXX"
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">رصيد المحفظة (اختياري)</label>
+                <input
+                  type="number"
+                  value={newWallet}
+                  onChange={(e) => setNewWallet(e.target.value)}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button
+                type="button"
+                onClick={() => setShowAdd(false)}
+                disabled={creating}
+                className="px-4 py-2 text-sm rounded bg-gray-100 hover:bg-gray-200 text-gray-700"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateCustomer}
+                disabled={creating}
+                className="px-4 py-2 text-sm rounded bg-red-600 hover:bg-red-700 text-white font-bold disabled:opacity-60"
+              >
+                {creating ? '⏳ جاري الحفظ...' : 'حفظ'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

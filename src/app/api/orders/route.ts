@@ -160,25 +160,65 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 2. Insert address
-    const addressId = generateTextId('addr')
-    const deliveryAddress: CustomerAddressRecord = {
-      id: addressId,
-      customerId: customerId,
-      addressLabel: body.addressLabel || 'Home',
-      area: body.deliveryArea || '',
-      subArea: body.deliverySubArea || '',
-      streetAddress: body.streetAddress,
-      googleMapsLink: body.googleMapsLink || '',
-      createdAt: now,
-    }
+    // 2. Resolve address: reuse if customer already has same label, else insert new.
+    const incomingAddressId = String(body.deliveryAddressId || '').trim()
+    const incomingLabel = (body.addressLabel || 'Home').toString().trim()
+    const normalizedLabel = incomingLabel.toLowerCase()
 
-    const { error: addressError } = await supabase
+    let addressId: string
+    let resolvedArea = body.deliveryArea || ''
+    let resolvedSubArea = body.deliverySubArea || ''
+
+    // Fetch existing addresses for this customer.
+    const { data: existingAddrs } = await supabase
       .from('customer_addresses')
-      .insert([deliveryAddress])
+      .select('*')
+      .eq('customerId', customerId)
 
-    if (addressError) {
-      console.error('Error inserting address:', addressError)
+    const matchById =
+      incomingAddressId && incomingAddressId !== '__new'
+        ? (existingAddrs || []).find((a: any) => a.id === incomingAddressId)
+        : null
+    const matchByLabel = (existingAddrs || []).find(
+      (a: any) => String(a.addressLabel || '').trim().toLowerCase() === normalizedLabel
+    )
+    const existingAddr = matchById || matchByLabel || null
+
+    if (existingAddr) {
+      addressId = existingAddr.id
+      // Refresh the address fields so latest user input wins.
+      const updatePayload: any = {
+        addressLabel: incomingLabel,
+        area: resolvedArea,
+        subArea: resolvedSubArea,
+        streetAddress: body.streetAddress,
+        googleMapsLink: body.googleMapsLink || '',
+      }
+      const { error: addrUpdateError } = await supabase
+        .from('customer_addresses')
+        .update(updatePayload)
+        .eq('id', addressId)
+      if (addrUpdateError) {
+        console.error('Error updating address:', addrUpdateError)
+      }
+    } else {
+      addressId = generateTextId('addr')
+      const deliveryAddress: CustomerAddressRecord = {
+        id: addressId,
+        customerId: customerId,
+        addressLabel: incomingLabel,
+        area: resolvedArea,
+        subArea: resolvedSubArea,
+        streetAddress: body.streetAddress,
+        googleMapsLink: body.googleMapsLink || '',
+        createdAt: now,
+      }
+      const { error: addressError } = await supabase
+        .from('customer_addresses')
+        .insert([deliveryAddress])
+      if (addressError) {
+        console.error('Error inserting address:', addressError)
+      }
     }
 
     // Get products and normalize items
@@ -209,8 +249,8 @@ export async function POST(request: NextRequest) {
     const subtotal = normalizedItems.reduce((sum, i) => sum + i.lineTotal, 0)
     const deliveryFee = await computeDeliveryFeeByArea(
       subtotal,
-      body.deliveryArea || deliveryAddress.area,
-      body.deliverySubArea || deliveryAddress.subArea
+      resolvedArea,
+      resolvedSubArea
     )
     const orderTotal = subtotal + deliveryFee
 
