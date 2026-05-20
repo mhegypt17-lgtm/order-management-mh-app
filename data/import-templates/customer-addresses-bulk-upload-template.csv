@@ -1,0 +1,7 @@
+id,customerId,addressLabel,area,subArea,streetAddress,googleMapsLink,createdAt
+addr_0001,cust_0001,Home,القاهرة,مدينة نصر,شارع عباس العقاد - برج 12 - الدور 5,https://maps.app.goo.gl/exampleAhmed,2025-01-15T10:00:00+00:00
+addr_0002,cust_0001,Work,القاهرة,التجمع الخامس,التسعين الشمالي - مبنى الإدارة,https://maps.app.goo.gl/exampleAhmedWork,2025-02-01T09:00:00+00:00
+addr_0003,cust_0002,Home,الجيزة,المهندسين,شارع جامعة الدول العربية - برج النيل,https://maps.app.goo.gl/exampleMona,2025-02-10T13:20:00+00:00
+addr_0004,cust_0003,Home,القاهرة,مصر الجديدة,شارع الميرغني - فيلا 7,https://maps.app.goo.gl/exampleMohamed,2025-03-05T18:00:00+00:00
+addr_0005,cust_0004,Home,القاهرة,المعادي,شارع 9 - عمارة 22 - شقة 3,https://maps.app.goo.gl/exampleSara,2025-04-22T09:15:00+00:00
+addr_0006,cust_0005,Home,الجيزة,الشيخ زايد,بوابة 3 - الحي الأول - فيلا 18,https://maps.app.goo.gl/exampleKhaled,2025-05-10T14:00:00+00:00

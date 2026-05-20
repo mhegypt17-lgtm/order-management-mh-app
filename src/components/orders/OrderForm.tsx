@@ -239,43 +239,56 @@ export default function OrderForm({ mode, orderId }: Props) {
 
         if (mode === 'edit' && orderId) {
           const orderRes = await fetch(`/api/orders/${orderId}`)
-          if (!orderRes.ok) throw new Error('Failed to load order')
+          if (!orderRes.ok) {
+            console.error('[OrderForm] order fetch failed', orderRes.status, await orderRes.text().catch(() => ''))
+            throw new Error('Failed to load order')
+          }
           const orderData = await orderRes.json()
-          const order = orderData.order
+          const order = orderData.order || {}
 
           setForm({
-            orderDate: order.orderDate,
-            orderTime: order.orderTime,
-            orderType: order.orderType,
-            orderReceiver: order.orderReceiver,
-            orderMethod: order.orderMethod,
+            orderDate: order.orderDate || '',
+            orderTime: order.orderTime || '',
+            orderType: order.orderType || ORDER_TYPES_FALLBACK[1],
+            orderReceiver: order.orderReceiver || '',
+            orderMethod: order.orderMethod || '',
             phone: order.customer?.phone || '',
             customerName: order.customer?.customerName || '',
-            customerType: order.customerType,
-            customerSource: order.customerSource,
+            customerType: order.customerType || 'جديد',
+            customerSource: order.customerSource || CUSTOMER_SOURCES_FALLBACK[0],
             deliveryAddressId: order.address?.id || '__new',
             addressLabel: order.address?.addressLabel || 'Home',
             deliveryArea: order.address?.area || '',
             deliverySubArea: order.address?.subArea || '',
             streetAddress: order.address?.streetAddress || '',
             googleMapsLink: order.address?.googleMapsLink || '',
-            paymentMethod: order.paymentMethod,
-            orderStatus: order.orderStatus,
+            paymentMethod: order.paymentMethod || PAYMENT_METHODS_FALLBACK[1],
+            orderStatus: order.orderStatus || ORDER_STATUSES_FALLBACK[0],
             cancellationReason: order.cancellationReason || '',
             notes: order.notes || '',
             followUp: Boolean(order.followUp),
             followUpNotes: order.followUpNotes || '',
           })
 
+          // Best-effort: load other addresses for this customer (non-fatal).
           if (order.customer?.phone) {
-            const lookupRes = await fetch(`/api/customers?phone=${encodeURIComponent(order.customer.phone)}`)
-            const lookupData = await lookupRes.json()
-            setAddresses(lookupData.addresses || [])
+            try {
+              const lookupRes = await fetch(`/api/customers?phone=${encodeURIComponent(order.customer.phone)}`)
+              if (lookupRes.ok) {
+                const lookupData = await lookupRes.json()
+                setAddresses(Array.isArray(lookupData.addresses) ? lookupData.addresses : [])
+              } else {
+                setAddresses([])
+              }
+            } catch (err) {
+              console.warn('[OrderForm] customer addresses lookup failed', err)
+              setAddresses([])
+            }
           } else {
             setAddresses([])
           }
 
-          const mappedItems = (order.items || []).map((item: any) => ({
+          const mappedItems = (Array.isArray(order.items) ? order.items : []).map((item: any) => ({
             productId: item.productId,
             productNameInput: item.productName || '',
             quantity: item.quantity,
@@ -291,7 +304,8 @@ export default function OrderForm({ mode, orderId }: Props) {
             setDeliveryData(order.delivery)
           }
         }
-      } catch {
+      } catch (err) {
+        console.error('[OrderForm] loadBase failed', err)
         toast.error('خطأ في تحميل بيانات النموذج')
       } finally {
         setIsLoading(false)

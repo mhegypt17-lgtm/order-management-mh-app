@@ -1,0 +1,7 @@
+phone,customerName,email,notes,wallet,addressLabel,area,subArea,streetAddress,googleMapsLink
+01001234567,أحمد علي,ahmed.ali@example.com,موبايل آخر 01099887766 - واتساب 01112345678,0,Home,القاهرة,مدينة نصر,شارع عباس العقاد - برج 12 - الدور 5,https://maps.app.goo.gl/exampleAhmed
+01001234567,أحمد علي,ahmed.ali@example.com,موبايل آخر 01099887766 - واتساب 01112345678,0,Work,القاهرة,التجمع الخامس,التسعين الشمالي - مبنى الإدارة,https://maps.app.goo.gl/exampleAhmedWork
+01112345678,منى حسن,mona.hassan@example.com,تفضل التوصيل بعد الساعة 6 مساءً,50,Home,الجيزة,المهندسين,شارع جامعة الدول العربية - برج النيل,https://maps.app.goo.gl/exampleMona
+01223456789,محمد سمير,,واتساب فقط 01223456789,0,Home,القاهرة,مصر الجديدة,شارع الميرغني - فيلا 7,https://maps.app.goo.gl/exampleMohamed
+01099887766,سارة محمود,sara.m@example.com,,0,Home,القاهرة,المعادي,شارع 9 - عمارة 22 - شقة 3,https://maps.app.goo.gl/exampleSara
+01066554433,خالد إبراهيم,,رقم بديل 01555667788,100,Home,الجيزة,الشيخ زايد,بوابة 3 - الحي الأول - فيلا 18,https://maps.app.goo.gl/exampleKhaled
