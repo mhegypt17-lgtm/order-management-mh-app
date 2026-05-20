@@ -15,6 +15,10 @@ import {
   readDeliveryZones,
 } from '@/lib/omsData'
 
+// Always fetch fresh from Supabase — never serve a cached/stale orders list.
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 function generateTextId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 }
