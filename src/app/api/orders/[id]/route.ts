@@ -14,6 +14,12 @@ import {
   readDeliveryZones,
 } from '@/lib/omsData'
 
+// Disable Next.js fetch caching — Supabase queries here must always
+// return fresh data, otherwise a just-created order can 404 on its
+// own edit page until the cache expires.
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 type OrderUpdateItem = {
   productId: string
   productNameInput?: string
