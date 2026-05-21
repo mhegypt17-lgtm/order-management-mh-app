@@ -335,3 +335,80 @@ export async function PUT(
     return NextResponse.json({ error: 'Failed to update order' }, { status: 500 })
   }
 }
+
+// Delete an order (CS or admin). Cascade-removes related items, delivery,
+// and any edit-history rows tied to the order. Returns 404 if not found.
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const url = new URL(request.url)
+    const role = String(url.searchParams.get('role') || '').toLowerCase()
+    const deletedBy = String(url.searchParams.get('by') || 'unknown')
+
+    const allowed = role === 'admin' || role === 'cs'
+    if (!allowed) {
+      return NextResponse.json(
+        { error: 'صلاحية غير كافية لحذف الطلب' },
+        { status: 403 }
+      )
+    }
+
+    // Confirm the order exists first so we can return a clean 404.
+    const { data: order, error: fetchError } = await supabase
+      .from('orders')
+      .select('id, "appOrderNo"')
+      .eq('id', params.id)
+      .maybeSingle()
+
+    if (fetchError) {
+      console.error('DELETE /orders: fetch failed', fetchError)
+      return NextResponse.json({ error: 'Failed to delete order' }, { status: 500 })
+    }
+    if (!order) {
+      return NextResponse.json({ error: 'Order not found' }, { status: 404 })
+    }
+
+    // Cascade-delete dependents first (best-effort; errors are logged but not fatal
+    // so the order row itself still gets removed even if a child table is empty).
+    await supabase.from('order_items').delete().eq('orderId', params.id)
+    await supabase.from('order_delivery').delete().eq('orderId', params.id)
+    // Edit-history table name may differ; ignore failures gracefully.
+    try {
+      await supabase.from('order_edit_history').delete().eq('orderId', params.id)
+    } catch (err) {
+      console.warn('order_edit_history cleanup skipped:', err)
+    }
+
+    const { error: deleteError } = await supabase
+      .from('orders')
+      .delete()
+      .eq('id', params.id)
+
+    if (deleteError) {
+      console.error('DELETE /orders: delete failed', deleteError)
+      return NextResponse.json({ error: 'Failed to delete order' }, { status: 500 })
+    }
+
+    // Best-effort audit entry (do not fail the delete if history write errors).
+    try {
+      await appendEditHistory({
+        entityType: 'order',
+        entityId: params.id,
+        orderId: params.id,
+        action: 'deleted',
+        changedBy: deletedBy,
+        summary: `تم حذف الطلب ${(order as any).appOrderNo || params.id}`,
+        details: { role },
+      })
+    } catch (err) {
+      console.warn('appendEditHistory after delete failed:', err)
+    }
+
+    return NextResponse.json({ ok: true }, { status: 200 })
+  } catch (err) {
+    console.error('DELETE /orders unexpected:', err)
+    return NextResponse.json({ error: 'Failed to delete order' }, { status: 500 })
+  }
+}

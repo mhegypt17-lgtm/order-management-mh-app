@@ -921,6 +921,37 @@ export default function OrderForm({ mode, orderId }: Props) {
         <button type="button" onClick={() => router.push('/orders')} className="px-5 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold">
           رجوع
         </button>
+        {mode === 'edit' && orderId && (user?.role === 'admin' || user?.role === 'cs') && (
+          <button
+            type="button"
+            disabled={isSaving}
+            onClick={async () => {
+              if (!confirm('هل أنت متأكد من حذف هذا الطلب؟ لا يمكن التراجع.')) return
+              try {
+                const params = new URLSearchParams({
+                  role: user?.role || '',
+                  by: user?.name || user?.username || 'unknown',
+                })
+                const res = await fetch(`/api/orders/${orderId}?${params.toString()}`, {
+                  method: 'DELETE',
+                })
+                if (!res.ok) {
+                  const data = await res.json().catch(() => ({}))
+                  toast.error(data?.error || 'فشل حذف الطلب')
+                  return
+                }
+                toast.success('🗑️ تم حذف الطلب')
+                router.push('/orders')
+              } catch (err) {
+                console.error('[OrderForm] delete failed', err)
+                toast.error('فشل حذف الطلب')
+              }
+            }}
+            className="ml-auto px-5 py-2 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 font-semibold disabled:opacity-50"
+          >
+            🗑️ حذف الطلب
+          </button>
+        )}
       </div>
     </form>
   )
