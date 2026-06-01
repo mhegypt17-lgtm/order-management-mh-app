@@ -530,11 +530,17 @@ export default function CRMView({ role }: CRMViewProps) {
     setExpandedOrder(null)
     try {
       const res = await fetch(`/api/crm/customers/${id}?role=${role}`)
-      if (!res.ok) throw new Error('Failed to load profile')
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({} as any))
+        const msg = body?.error || `HTTP ${res.status}`
+        console.error('loadProfile failed:', msg, body)
+        throw new Error(msg)
+      }
       const data = await res.json()
       setProfile(data)
-    } catch {
-      toast.error('خطأ في تحميل بيانات العميل')
+    } catch (err: any) {
+      console.error('loadProfile error:', err)
+      toast.error(`خطأ في تحميل بيانات العميل${err?.message ? ': ' + err.message : ''}`)
     } finally {
       setProfileLoading(false)
     }
