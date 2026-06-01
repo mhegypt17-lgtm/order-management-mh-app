@@ -157,6 +157,9 @@ export default function OrderForm({ mode, orderId }: Props) {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [isLookupLoading, setIsLookupLoading] = useState(false)
+  const [discountCodeInput, setDiscountCodeInput] = useState('')
+  const [appliedDiscount, setAppliedDiscount] = useState<{ code: string; amount: number; type: 'percent' | 'value'; value: number } | null>(null)
+  const [isCheckingDiscount, setIsCheckingDiscount] = useState(false)
 
   const [products, setProducts] = useState<Product[]>([])
   const [addresses, setAddresses] = useState<CustomerAddress[]>([])
@@ -356,6 +359,39 @@ export default function OrderForm({ mode, orderId }: Props) {
     : 95
   const orderTotal = subtotal + deliveryFee
 
+  // Voucher / discount-code applied to the gross total
+  const discountAmount = appliedDiscount ? Math.min(appliedDiscount.amount, orderTotal) : 0
+  const netTotal = Math.max(0, orderTotal - discountAmount)
+
+  const handleApplyDiscount = async () => {
+    const code = discountCodeInput.trim().toUpperCase()
+    if (!code) {
+      toast.error('أدخل كود الخصم')
+      return
+    }
+    setIsCheckingDiscount(true)
+    try {
+      const res = await fetch(`/api/discount-codes/validate?code=${encodeURIComponent(code)}&gross=${orderTotal}`, { cache: 'no-store' })
+      const data = await res.json()
+      if (!data.ok) {
+        setAppliedDiscount(null)
+        toast.error(data.reason || 'الكود غير صالح')
+        return
+      }
+      setAppliedDiscount({ code: data.code, amount: Number(data.discount) || 0, type: data.type, value: Number(data.amount) || 0 })
+      toast.success(`✅ تم تطبيق خصم ${(Number(data.discount) || 0).toLocaleString()} ج.م`)
+    } catch {
+      toast.error('تعذر التحقق من الكود')
+    } finally {
+      setIsCheckingDiscount(false)
+    }
+  }
+
+  const handleClearDiscount = () => {
+    setAppliedDiscount(null)
+    setDiscountCodeInput('')
+  }
+
   const handleLookupCustomer = async () => {
     const cleanPhone = form.phone.trim()
     const cleanName = form.customerName.trim()
@@ -515,6 +551,7 @@ export default function OrderForm({ mode, orderId }: Props) {
         deliveryArea: resolvedDeliveryArea,
         deliverySubArea: form.deliverySubArea || '',
         items: validItems,
+        discountCode: appliedDiscount?.code || null,
         createdBy: user?.id || 'unknown',
         role: user?.role || '',
       }
@@ -777,8 +814,54 @@ export default function OrderForm({ mode, orderId }: Props) {
         <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
           <SummaryCard label="الإجمالي الفرعي" value={`${subtotal.toLocaleString()} ج.م`} />
           <SummaryCard label="رسوم التوصيل" value={`${deliveryFee.toLocaleString()} ج.م`} />
-          <SummaryCard label="الإجمالي الكلي" value={`${orderTotal.toLocaleString()} ج.م`} highlight />
+          <SummaryCard
+            label={discountAmount > 0 ? 'الإجمالي بعد الخصم' : 'الإجمالي الكلي'}
+            value={`${netTotal.toLocaleString()} ج.م`}
+            highlight
+          />
         </div>
+
+        {mode === 'create' && (
+          <div className="mt-3 rounded-lg border-2 border-amber-200 bg-amber-50 p-3">
+            <div className="text-sm font-semibold text-amber-900 mb-2">🏷️ كود الخصم</div>
+            {appliedDiscount ? (
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div className="text-sm text-amber-900">
+                  <span className="font-bold">{appliedDiscount.code}</span> —{' '}
+                  {appliedDiscount.type === 'percent'
+                    ? `خصم ${appliedDiscount.value}% (${appliedDiscount.amount.toLocaleString()} ج.م)`
+                    : `خصم ${appliedDiscount.amount.toLocaleString()} ج.م`}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleClearDiscount}
+                  className="w-full sm:w-auto px-3 py-2 rounded-lg bg-red-100 text-red-700 hover:bg-red-200 text-sm font-semibold min-h-[40px]"
+                >
+                  ✖ إزالة
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  value={discountCodeInput}
+                  onChange={(e) => setDiscountCodeInput(e.target.value.toUpperCase())}
+                  placeholder="أدخل كود الخصم"
+                  className="flex-1 px-3 py-2 border border-amber-300 rounded-lg text-left bg-white focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  dir="ltr"
+                />
+                <button
+                  type="button"
+                  onClick={handleApplyDiscount}
+                  disabled={isCheckingDiscount}
+                  className="w-full sm:w-auto px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-semibold min-h-[40px]"
+                >
+                  {isCheckingDiscount ? '...' : 'تطبيق'}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {selectedZone && freeDeliveryValue > 0 && (
           <p className="mt-2 text-xs text-gray-600 text-right">
@@ -930,7 +1013,7 @@ export default function OrderForm({ mode, orderId }: Props) {
               try {
                 const params = new URLSearchParams({
                   role: user?.role || '',
-                  by: user?.name || user?.username || 'unknown',
+                  by: user?.name || user?.id || 'unknown',
                 })
                 const res = await fetch(`/api/orders/${orderId}?${params.toString()}`, {
                   method: 'DELETE',
