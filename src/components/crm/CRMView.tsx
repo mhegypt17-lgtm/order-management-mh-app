@@ -23,6 +23,7 @@ interface Address {
   id: string
   addressLabel: string
   area?: string
+  subArea?: string
   streetAddress: string
   googleMapsLink: string
 }
@@ -173,6 +174,16 @@ export default function CRMView({ role }: CRMViewProps) {
   const [editAddrSubArea, setEditAddrSubArea] = useState('')
   const [editAddrStreet, setEditAddrStreet] = useState('')
   const [editAddrMaps, setEditAddrMaps] = useState('')
+
+  // Per-address modal (add or edit a single address row).
+  const [addrModal, setAddrModal] = useState<{ mode: 'add' | 'edit'; addrId?: string } | null>(null)
+  const [addrLabel, setAddrLabel] = useState('Home')
+  const [addrArea, setAddrArea] = useState('')
+  const [addrSubArea, setAddrSubArea] = useState('')
+  const [addrStreet, setAddrStreet] = useState('')
+  const [addrMaps, setAddrMaps] = useState('')
+  const [addrSaving, setAddrSaving] = useState(false)
+  const [deletingAddrId, setDeletingAddrId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   // Delete confirm state
@@ -325,6 +336,89 @@ export default function CRMView({ role }: CRMViewProps) {
       toast.error('تعذر حفظ التعديلات')
     } finally {
       setSaving(false)
+    }
+  }
+
+  // ── Per-address add / edit / delete ─────────────────────────────────────
+  const openAddAddress = () => {
+    setAddrLabel('Home')
+    setAddrArea('')
+    setAddrSubArea('')
+    setAddrStreet('')
+    setAddrMaps('')
+    setAddrModal({ mode: 'add' })
+  }
+
+  const openEditAddress = (addr: Address) => {
+    setAddrLabel(addr.addressLabel || 'Home')
+    setAddrArea(addr.area || '')
+    setAddrSubArea(addr.subArea || '')
+    setAddrStreet(addr.streetAddress || '')
+    setAddrMaps(addr.googleMapsLink || '')
+    setAddrModal({ mode: 'edit', addrId: addr.id })
+  }
+
+  const handleSaveAddress = async () => {
+    if (!profile || !addrModal) return
+    const street = addrStreet.trim()
+    const area = addrArea.trim()
+    const subArea = addrSubArea.trim()
+    if (!street && !area && !subArea) {
+      toast.error('أدخل المنطقة أو العنوان التفصيلي على الأقل')
+      return
+    }
+    setAddrSaving(true)
+    try {
+      const isEdit = addrModal.mode === 'edit' && addrModal.addrId
+      const url = isEdit
+        ? `/api/crm/customers/${profile.customer.id}/addresses/${addrModal.addrId}`
+        : `/api/crm/customers/${profile.customer.id}/addresses`
+      const res = await fetch(url, {
+        method: isEdit ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          addressLabel: addrLabel.trim() || 'Home',
+          area,
+          subArea,
+          streetAddress: street,
+          googleMapsLink: addrMaps.trim(),
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(data?.error || 'تعذر حفظ العنوان')
+        return
+      }
+      toast.success(isEdit ? '✅ تم تحديث العنوان' : '✅ تمت إضافة العنوان')
+      setAddrModal(null)
+      loadProfile(profile.customer.id)
+    } catch {
+      toast.error('تعذر حفظ العنوان')
+    } finally {
+      setAddrSaving(false)
+    }
+  }
+
+  const handleDeleteAddress = async (addr: Address) => {
+    if (!profile) return
+    if (!confirm(`حذف العنوان "${addr.addressLabel || addr.streetAddress}"؟`)) return
+    setDeletingAddrId(addr.id)
+    try {
+      const res = await fetch(
+        `/api/crm/customers/${profile.customer.id}/addresses/${addr.id}`,
+        { method: 'DELETE' },
+      )
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(data?.error || 'تعذر حذف العنوان')
+        return
+      }
+      toast.success('🗑️ تم حذف العنوان')
+      loadProfile(profile.customer.id)
+    } catch {
+      toast.error('تعذر حذف العنوان')
+    } finally {
+      setDeletingAddrId(null)
     }
   }
 
@@ -580,24 +674,52 @@ export default function CRMView({ role }: CRMViewProps) {
               <div className="space-y-4">
                 {/* Addresses */}
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-                  <h3 className="text-sm font-bold text-gray-700 mb-3">📍 العناوين</h3>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-bold text-gray-700">📍 العناوين</h3>
+                    <button
+                      type="button"
+                      onClick={openAddAddress}
+                      className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-700"
+                    >
+                      + إضافة عنوان
+                    </button>
+                  </div>
                   {profile.addresses.length === 0 ? (
                     <p className="text-sm text-gray-400">لا توجد عناوين محفوظة</p>
                   ) : (
                     <div className="space-y-2">
                       {profile.addresses.map((addr) => (
                         <div key={addr.id} className="bg-gray-50 rounded-lg p-3">
-                          <div className="flex justify-between items-start">
-                            <div>
+                          <div className="flex justify-between items-start gap-2">
+                            <div className="min-w-0">
                               <span className="font-medium text-sm text-gray-800">{addr.addressLabel}</span>
                               {addr.area && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full mr-2">{addr.area}</span>}
                               {(addr as any).subArea && <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full mr-2">{(addr as any).subArea}</span>}
                             </div>
-                            {addr.googleMapsLink && (
-                              <a href={addr.googleMapsLink} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline">
-                                🗺️ خريطة
-                              </a>
-                            )}
+                            <div className="flex items-center gap-1 shrink-0">
+                              {addr.googleMapsLink && (
+                                <a href={addr.googleMapsLink} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline">
+                                  🗺️ خريطة
+                                </a>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => openEditAddress(addr)}
+                                className="text-xs px-2 py-1 rounded bg-blue-100 hover:bg-blue-200 text-blue-700 font-semibold"
+                                title="تعديل"
+                              >
+                                ✏️
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteAddress(addr)}
+                                disabled={deletingAddrId === addr.id}
+                                className="text-xs px-2 py-1 rounded bg-red-100 hover:bg-red-200 text-red-700 font-semibold disabled:opacity-50"
+                                title="حذف"
+                              >
+                                🗑️
+                              </button>
+                            </div>
                           </div>
                           <p className="text-sm text-gray-600 mt-1">{addr.streetAddress}</p>
                         </div>
@@ -1156,6 +1278,117 @@ export default function CRMView({ role }: CRMViewProps) {
                 className="px-4 py-2 text-sm rounded bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:opacity-60"
               >
                 {saving ? '⏳ جاري الحفظ...' : 'حفظ'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Add / Edit single Address modal ─────────────────────────────── */}
+      {addrModal && profile && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          onClick={() => !addrSaving && setAddrModal(null)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+            dir="rtl"
+          >
+            <h3 className="text-lg font-bold text-gray-900 mb-4">
+              {addrModal.mode === 'add' ? '➕ إضافة عنوان جديد' : '✏️ تعديل العنوان'}
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">تسمية العنوان</label>
+                <input
+                  type="text"
+                  value={addrLabel}
+                  onChange={(e) => setAddrLabel(e.target.value)}
+                  placeholder="Home / Work"
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">المنطقة</label>
+                <select
+                  value={addrArea}
+                  onChange={(e) => {
+                    setAddrArea(e.target.value)
+                    setAddrSubArea('')
+                  }}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                >
+                  <option value="">— اختر —</option>
+                  {areaOptions.map((a) => (
+                    <option key={a} value={a}>{a}</option>
+                  ))}
+                  {addrArea && !areaOptions.includes(addrArea) && (
+                    <option value={addrArea}>{addrArea}</option>
+                  )}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">المنطقة الفرعية</label>
+                {subOptionsFor(addrArea).length > 0 ? (
+                  <select
+                    value={addrSubArea}
+                    onChange={(e) => setAddrSubArea(e.target.value)}
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                  >
+                    <option value="">— اختر —</option>
+                    {subOptionsFor(addrArea).map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                    {addrSubArea && !subOptionsFor(addrArea).includes(addrSubArea) && (
+                      <option value={addrSubArea}>{addrSubArea}</option>
+                    )}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={addrSubArea}
+                    onChange={(e) => setAddrSubArea(e.target.value)}
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                  />
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">رابط الخريطة</label>
+                <input
+                  type="url"
+                  value={addrMaps}
+                  onChange={(e) => setAddrMaps(e.target.value)}
+                  placeholder="https://maps.google.com/..."
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">العنوان التفصيلي</label>
+                <input
+                  type="text"
+                  value={addrStreet}
+                  onChange={(e) => setAddrStreet(e.target.value)}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button
+                type="button"
+                onClick={() => setAddrModal(null)}
+                disabled={addrSaving}
+                className="px-4 py-2 text-sm rounded bg-gray-100 hover:bg-gray-200 text-gray-700"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveAddress}
+                disabled={addrSaving}
+                className="px-4 py-2 text-sm rounded bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:opacity-60"
+              >
+                {addrSaving ? '⏳ جاري الحفظ...' : 'حفظ'}
               </button>
             </div>
           </div>
