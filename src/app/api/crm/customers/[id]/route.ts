@@ -21,9 +21,17 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const role = searchParams.get('role') || 'cs' // 'cs' | 'admin'
 
     const customerId = params.id
-    const customers = await readCustomers()
-    const customer = customers.find((c) => c.id === customerId)
+    // Direct lookup by id (avoids row-cap issues from fetching the full table).
+    const { data: customer, error: customerErr } = await supabase
+      .from('customers')
+      .select('*')
+      .eq('id', customerId)
+      .maybeSingle()
 
+    if (customerErr) {
+      console.error('CRM customer lookup error:', customerErr)
+      return NextResponse.json({ error: 'Server error', details: customerErr.message }, { status: 500 })
+    }
     if (!customer) {
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
     }
