@@ -168,6 +168,11 @@ export default function CRMView({ role }: CRMViewProps) {
   const [editEmail, setEditEmail] = useState('')
   const [editNotes, setEditNotes] = useState('')
   const [editWallet, setEditWallet] = useState('')
+  const [editAddrLabel, setEditAddrLabel] = useState('Home')
+  const [editAddrArea, setEditAddrArea] = useState('')
+  const [editAddrSubArea, setEditAddrSubArea] = useState('')
+  const [editAddrStreet, setEditAddrStreet] = useState('')
+  const [editAddrMaps, setEditAddrMaps] = useState('')
   const [saving, setSaving] = useState(false)
 
   // Delete confirm state
@@ -273,6 +278,13 @@ export default function CRMView({ role }: CRMViewProps) {
         ? String(profile.customer.wallet)
         : ''
     )
+    // Prefill primary (first) address into the edit modal.
+    const primary = profile.addresses && profile.addresses.length > 0 ? profile.addresses[0] : null
+    setEditAddrLabel(primary?.addressLabel || 'Home')
+    setEditAddrArea(primary?.area || '')
+    setEditAddrSubArea(((primary as any)?.subArea as string) || '')
+    setEditAddrStreet(primary?.streetAddress || '')
+    setEditAddrMaps(primary?.googleMapsLink || '')
     setShowEdit(true)
   }
 
@@ -293,6 +305,11 @@ export default function CRMView({ role }: CRMViewProps) {
           email: editEmail.trim(),
           notes: editNotes.trim(),
           wallet: editWallet === '' ? undefined : Number(editWallet),
+          addressLabel: editAddrLabel.trim() || 'Home',
+          area: editAddrArea.trim(),
+          subArea: editAddrSubArea.trim(),
+          streetAddress: editAddrStreet.trim(),
+          googleMapsLink: editAddrMaps.trim(),
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -1042,6 +1059,85 @@ export default function CRMView({ role }: CRMViewProps) {
                   rows={3}
                   className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
                 />
+              </div>
+            </div>
+
+            <div className="border-t border-gray-200 pt-3 mt-4">
+              <h4 className="text-sm font-bold text-gray-800 mb-2">📍 العنوان الأساسي</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">تسمية العنوان</label>
+                  <input
+                    type="text"
+                    value={editAddrLabel}
+                    onChange={(e) => setEditAddrLabel(e.target.value)}
+                    placeholder="Home / Work"
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">المنطقة</label>
+                  <select
+                    value={editAddrArea}
+                    onChange={(e) => {
+                      setEditAddrArea(e.target.value)
+                      setEditAddrSubArea('')
+                    }}
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                  >
+                    <option value="">— اختر —</option>
+                    {areaOptions.map((a) => (
+                      <option key={a} value={a}>{a}</option>
+                    ))}
+                    {editAddrArea && !areaOptions.includes(editAddrArea) && (
+                      <option value={editAddrArea}>{editAddrArea}</option>
+                    )}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">المنطقة الفرعية</label>
+                  {subOptionsFor(editAddrArea).length > 0 ? (
+                    <select
+                      value={editAddrSubArea}
+                      onChange={(e) => setEditAddrSubArea(e.target.value)}
+                      className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                    >
+                      <option value="">— اختر —</option>
+                      {subOptionsFor(editAddrArea).map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                      {editAddrSubArea && !subOptionsFor(editAddrArea).includes(editAddrSubArea) && (
+                        <option value={editAddrSubArea}>{editAddrSubArea}</option>
+                      )}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={editAddrSubArea}
+                      onChange={(e) => setEditAddrSubArea(e.target.value)}
+                      className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                    />
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">رابط الخريطة</label>
+                  <input
+                    type="url"
+                    value={editAddrMaps}
+                    onChange={(e) => setEditAddrMaps(e.target.value)}
+                    placeholder="https://maps.google.com/..."
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">العنوان التفصيلي</label>
+                  <input
+                    type="text"
+                    value={editAddrStreet}
+                    onChange={(e) => setEditAddrStreet(e.target.value)}
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                  />
+                </div>
               </div>
             </div>
             <div className="flex justify-end gap-2 mt-5">

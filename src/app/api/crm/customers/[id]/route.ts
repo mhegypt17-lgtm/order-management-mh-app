@@ -7,6 +7,7 @@ import {
   readOrderSettings,
   readProducts,
   resolveCustomerTier,
+  generateId,
   DEFAULT_LOYALTY_CONFIG,
 } from '@/lib/omsData'
 import { supabase } from '@/lib/supabase'
@@ -302,6 +303,66 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (error) {
       console.error('Supabase update error:', error)
       return NextResponse.json({ error: 'تعذر تحديث بيانات العميل', details: error.message }, { status: 500 })
+    }
+
+    // Optional: update (or create) the customer's primary address with the
+    // address fields shipped from the Edit modal. We only touch the address
+    // table when at least one address field is provided in the payload, so
+    // a customer-only PATCH stays a single-table update.
+    const hasAddressField =
+      typeof body.addressLabel === 'string' ||
+      typeof body.area === 'string' ||
+      typeof body.subArea === 'string' ||
+      typeof body.streetAddress === 'string' ||
+      typeof body.googleMapsLink === 'string'
+
+    if (hasAddressField) {
+      const addressLabel = String(body.addressLabel ?? '').trim() || 'Home'
+      const area = String(body.area ?? '').trim()
+      const subArea = String(body.subArea ?? '').trim()
+      const streetAddress = String(body.streetAddress ?? '').trim()
+      const googleMapsLink = String(body.googleMapsLink ?? '').trim()
+
+      const allAddresses = await readAddresses()
+      const customerAddresses = allAddresses
+        .filter((a) => a.customerId === params.id)
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      const primary = customerAddresses[0]
+
+      if (primary) {
+        const { error: addrErr } = await supabase
+          .from('customer_addresses')
+          .update({ addressLabel, area, subArea, streetAddress, googleMapsLink })
+          .eq('id', primary.id)
+        if (addrErr) {
+          console.error('Supabase address update error:', addrErr)
+          return NextResponse.json(
+            { error: 'تعذر تحديث العنوان', details: addrErr.message },
+            { status: 500 },
+          )
+        }
+      } else if (streetAddress || area || subArea || googleMapsLink) {
+        // No existing address — create one only if there is meaningful data.
+        const { error: addrErr } = await supabase.from('customer_addresses').insert([
+          {
+            id: generateId('addr'),
+            customerId: params.id,
+            addressLabel,
+            area,
+            subArea,
+            streetAddress,
+            googleMapsLink,
+            createdAt: new Date().toISOString(),
+          },
+        ])
+        if (addrErr) {
+          console.error('Supabase address insert error:', addrErr)
+          return NextResponse.json(
+            { error: 'تعذر إنشاء العنوان', details: addrErr.message },
+            { status: 500 },
+          )
+        }
+      }
     }
 
     return NextResponse.json({ customer: next })
