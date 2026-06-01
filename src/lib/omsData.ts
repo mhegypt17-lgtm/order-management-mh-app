@@ -405,18 +405,34 @@ export async function generateAppOrderNo(orderDate: string, orderType: string, o
 
 // ─── Customers ────────────────────────────────────────────────────────────────
 
-export async function readCustomers(): Promise<CustomerRecord[]> {
-  // Supabase/PostgREST defaults to 1000 rows; bump explicitly so growing
-  // tables don't silently drop rows from enrichment lookups.
-  const { data, error } = await supabase
-    .from('customers')
-    .select('*')
-    .range(0, 99999)
-  if (error) {
-    console.error('Error reading customers:', error)
-    return []
+// Paginate through a Supabase table to bypass the per-request row cap
+// (commonly 1000) so growing tables don't silently drop rows from
+// enrichment lookups and joins.
+async function fetchAllRows<T = any>(
+  table: string,
+  orderBy?: { column: string; ascending: boolean },
+): Promise<T[]> {
+  const pageSize = 1000
+  const all: T[] = []
+  let from = 0
+  while (true) {
+    let q = supabase.from(table).select('*').range(from, from + pageSize - 1)
+    if (orderBy) q = q.order(orderBy.column, { ascending: orderBy.ascending })
+    const { data, error } = await q
+    if (error) {
+      console.error(`Error reading ${table}:`, error)
+      return all
+    }
+    if (!data || data.length === 0) break
+    all.push(...(data as T[]))
+    if (data.length < pageSize) break
+    from += pageSize
   }
-  return data || []
+  return all
+}
+
+export async function readCustomers(): Promise<CustomerRecord[]> {
+  return fetchAllRows<CustomerRecord>('customers')
 }
 
 export async function writeCustomers(_data: CustomerRecord[]): Promise<void> {
@@ -426,15 +442,7 @@ export async function writeCustomers(_data: CustomerRecord[]): Promise<void> {
 // ─── Addresses ────────────────────────────────────────────────────────────────
 
 export async function readAddresses(): Promise<CustomerAddressRecord[]> {
-  const { data, error } = await supabase
-    .from('customer_addresses')
-    .select('*')
-    .range(0, 99999)
-  if (error) {
-    console.error('Error reading addresses:', error)
-    return []
-  }
-  return data || []
+  return fetchAllRows<CustomerAddressRecord>('customer_addresses')
 }
 
 export async function writeAddresses(_data: CustomerAddressRecord[]): Promise<void> {
@@ -444,16 +452,7 @@ export async function writeAddresses(_data: CustomerAddressRecord[]): Promise<vo
 // ─── Orders ───────────────────────────────────────────────────────────────────
 
 export async function readOrders(): Promise<OrderRecord[]> {
-  const { data, error } = await supabase
-    .from('orders')
-    .select('*')
-    .order('createdAt', { ascending: false })
-    .range(0, 99999)
-  if (error) {
-    console.error('Error reading orders:', error)
-    return []
-  }
-  return data || []
+  return fetchAllRows<OrderRecord>('orders', { column: 'createdAt', ascending: false })
 }
 
 export async function writeOrders(_data: OrderRecord[]): Promise<void> {
@@ -463,18 +462,7 @@ export async function writeOrders(_data: OrderRecord[]): Promise<void> {
 // ─── Order Items ──────────────────────────────────────────────────────────────
 
 export async function readOrderItems(): Promise<OrderItemRecord[]> {
-  // CRITICAL: without an explicit range, Supabase caps at 1000 rows and
-  // newer order items silently disappear from enriched order responses,
-  // making the edit form show an empty product row + subtotal 0.
-  const { data, error } = await supabase
-    .from('order_items')
-    .select('*')
-    .range(0, 99999)
-  if (error) {
-    console.error('Error reading order items:', error)
-    return []
-  }
-  return data || []
+  return fetchAllRows<OrderItemRecord>('order_items')
 }
 
 export async function writeOrderItems(_data: OrderItemRecord[]): Promise<void> {
@@ -484,15 +472,7 @@ export async function writeOrderItems(_data: OrderItemRecord[]): Promise<void> {
 // ─── Order Delivery ───────────────────────────────────────────────────────────
 
 export async function readOrderDelivery(): Promise<OrderDeliveryRecord[]> {
-  const { data, error } = await supabase
-    .from('order_delivery')
-    .select('*')
-    .range(0, 99999)
-  if (error) {
-    console.error('Error reading order delivery:', error)
-    return []
-  }
-  return data || []
+  return fetchAllRows<OrderDeliveryRecord>('order_delivery')
 }
 
 export async function writeOrderDelivery(_data: OrderDeliveryRecord[]): Promise<void> {
