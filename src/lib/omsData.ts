@@ -9,6 +9,10 @@ export interface CustomerRecord {
   wallet?: number
   createdAt: string
   updatedAt: string
+  status?: 'active' | 'warning' | 'suspended'
+  statusReason?: string | null
+  statusUpdatedAt?: string | null
+  statusUpdatedBy?: string | null
 }
 
 export interface CustomerAddressRecord {
@@ -279,6 +283,8 @@ export interface OrderSettingsRecord {
   agentNotice: AgentNoticeRecord
   retention?: RetentionConfig
   loyalty?: LoyaltyConfig
+  autoActivateThreshold?: number
+  autoActivateEnabled?: boolean
 }
 
 const DEFAULT_ORDER_RECEIVERS = ['رنا', 'مى', 'ميرنا', 'أمل']
@@ -334,6 +340,8 @@ function defaultOrderSettings(): OrderSettingsRecord {
       updatedAt: new Date().toISOString(),
     },
     retention: DEFAULT_RETENTION_CONFIG,
+    autoActivateThreshold: 3,
+    autoActivateEnabled: true,
   }
 }
 
@@ -711,6 +719,8 @@ export async function readOrderSettings(): Promise<OrderSettingsRecord> {
         updatedAt: (parsed.agentNotice as any)?.updatedAt || new Date().toISOString(),
       },
       retention: (parsed as any).retention || DEFAULT_RETENTION_CONFIG,
+      autoActivateThreshold: Math.max(1, Number((parsed as any).autoActivateThreshold) || 3),
+      autoActivateEnabled: (parsed as any).autoActivateEnabled !== false,
     }
 
     if (normalized.orderReceivers.length === 0) normalized.orderReceivers = defaults.orderReceivers

@@ -19,6 +19,8 @@ type OrderSettingsRecord = {
   monthlyCompensationBudget: number
   slaHours: number
   agentNotice: AgentNoticeRecord
+  autoActivateThreshold?: number
+  autoActivateEnabled?: boolean
 }
 
 type SectionKey = keyof OrderSettingsRecord
@@ -147,6 +149,15 @@ export async function PATCH(request: NextRequest) {
       nextSettings.monthlyCompensationBudget = parsedBudget
     }
 
+    // Handle auto-activate (warning → active) rule.
+    if (body.autoActivateThreshold !== undefined) {
+      const t = Math.max(1, Math.floor(Number(body.autoActivateThreshold) || 0))
+      nextSettings.autoActivateThreshold = t
+    }
+    if (body.autoActivateEnabled !== undefined) {
+      nextSettings.autoActivateEnabled = Boolean(body.autoActivateEnabled)
+    }
+
     // Handle agent notice update
     if (body.message !== undefined || body.type !== undefined || body.isActive !== undefined) {
       const notice: AgentNoticeRecord = {
@@ -167,6 +178,8 @@ export async function PATCH(request: NextRequest) {
         slaHours: nextSettings.slaHours,
         agentNotice: nextSettings.agentNotice,
         monthlyCompensationBudget: nextSettings.monthlyCompensationBudget,
+        autoActivateThreshold: nextSettings.autoActivateThreshold,
+        autoActivateEnabled: nextSettings.autoActivateEnabled,
       },
       { status: 200 }
     )

@@ -23,32 +23,15 @@ type DashboardOrder = {
     | 'Ad'
     | 'GoodsMart'
     | 'Other'
-  orderStatus: string
+  orderStatus: 'تم' | 'مؤجل' | 'لاغي' | 'حجز'
   cancellationReason: 'نفاد المنتج' | 'عدم توفر' | 'تأخير التوصيل' | 'سعر مرتفع' | 'موعد غير مناسب' | 'Other' | null
   orderTotal: number
   customerId: string
-  orderTime?: string
-  deliveryFee?: number
-  address?: { id?: string; area?: string | null } | null
-  isScheduled?: boolean
-  scheduledDate?: string | null
-  scheduledTimeSlot?: string | null
-  scheduledSpecificTime?: string | null
   items: Array<{ id: string; productName: string; quantity: number; lineTotal: number }>
-  delivery?: { deliveryStatus: 'قبول' | 'جاهز' | 'في الطريق' | 'تم التوصيل' | 'لم يخرج بعد' }
+  delivery?: { deliveryStatus: 'لم يخرج بعد' | 'جاهز' | 'في الطريق' | 'تم التوصيل' }
 }
 
 type DashboardComplaint = ComplaintAnalyticsRecord
-
-type DeliveryZone = {
-  id: string
-  zone: number
-  area: string
-  averageDistanceKm?: number
-  deliveryCost: number
-  customerDeliveryFee: number
-  freeDeliveryValue?: number
-}
 
 function statusClass(status: DashboardOrder['orderStatus']) {
   return {
@@ -88,9 +71,8 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [orders, setOrders] = useState<DashboardOrder[]>([])
   const [complaints, setComplaints] = useState<DashboardComplaint[]>([])
-  const [zones, setZones] = useState<DeliveryZone[]>([])
   const [monthlyCompensationBudget, setMonthlyCompensationBudget] = useState(0)
-
+  const [customerStatusStats, setCustomerStatusStats] = useState({ warning: 0, suspended: 0 })
   const now = new Date()
   const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
   const today = now.toISOString().slice(0, 10)
@@ -107,22 +89,30 @@ export default function DashboardPage() {
   const fetchOrders = async () => {
     setIsLoading(true)
     try {
-      const [ordersRes, complaintsRes, settingsRes, zonesRes] = await Promise.all([
+      const [ordersRes, complaintsRes, settingsRes] = await Promise.all([
         fetch('/api/orders'),
         fetch('/api/complaints'),
         fetch('/api/order-settings'),
-        fetch('/api/delivery-zones'),
       ])
 
       const ordersData = await ordersRes.json()
       const complaintsData = await complaintsRes.json()
       const settingsData = await settingsRes.json()
-      const zonesData = await zonesRes.json().catch(() => [])
 
       setOrders(ordersData.orders || [])
       setComplaints(Array.isArray(complaintsData) ? complaintsData : [])
-      setZones(Array.isArray(zonesData) ? zonesData : Array.isArray(zonesData?.zones) ? zonesData.zones : [])
       setMonthlyCompensationBudget(Number(settingsData?.settings?.monthlyCompensationBudget) || 0)
+
+      try {
+        const statsRes = await fetch('/api/customers/stats')
+        const statsData = await statsRes.json()
+        setCustomerStatusStats({
+          warning: Number(statsData?.warning) || 0,
+          suspended: Number(statsData?.suspended) || 0,
+        })
+      } catch {
+        /* non-fatal */
+      }
     } finally {
       setIsLoading(false)
     }
@@ -274,70 +264,6 @@ export default function DashboardPage() {
     }
   }, [filtered])
 
-  // Revenue / cost by delivery zone (area)
-  const zoneAnalytics = useMemo(() => {
-    const zoneByArea = new Map<string, DeliveryZone>()
-    for (const z of zones) zoneByArea.set(String(z.area || '').trim(), z)
-
-    const map = new Map<string, { orders: number; revenue: number; customerFees: number; internalCost: number; zoneNum: number | null }>()
-    for (const o of filtered) {
-      const area = (o.address?.area || 'غير محدد').trim() || 'غير محدد'
-      const z = zoneByArea.get(area)
-      const fee = Number(o.deliveryFee || 0)
-      const cost = z ? Number(z.deliveryCost) || 0 : 0
-      const cur = map.get(area) || { orders: 0, revenue: 0, customerFees: 0, internalCost: 0, zoneNum: z?.zone ?? null }
-      cur.orders += 1
-      cur.revenue += Number(o.orderTotal || 0)
-      cur.customerFees += fee
-      cur.internalCost += cost
-      map.set(area, cur)
-    }
-    const rows = Array.from(map.entries())
-      .map(([area, v]) => ({
-        area,
-        zone: v.zoneNum,
-        orders: v.orders,
-        revenue: v.revenue,
-        customerFees: v.customerFees,
-        internalCost: v.internalCost,
-        net: v.revenue - v.internalCost,
-        deliveryMargin: v.customerFees - v.internalCost,
-      }))
-      .sort((a, b) => b.revenue - a.revenue)
-
-    const totalRevenue = rows.reduce((s, r) => s + r.revenue, 0)
-    const totalCost = rows.reduce((s, r) => s + r.internalCost, 0)
-    const totalFees = rows.reduce((s, r) => s + r.customerFees, 0)
-    return { rows, totalRevenue, totalCost, totalFees, deliveryMargin: totalFees - totalCost }
-  }, [filtered, zones])
-
-  // Peak hours heatmap (day-of-week × hour)
-  const peakHourAnalytics = useMemo(() => {
-    // grid[day 0..6 (Sun..Sat)][hour 0..23] = orders count
-    const grid: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0))
-    const hourTotals: number[] = Array(24).fill(0)
-    const dayTotals: number[] = Array(7).fill(0)
-    let maxCell = 0
-
-    for (const o of filtered) {
-      const time = (o.orderTime || '').trim()
-      if (!time) continue
-      const hour = Number(time.split(':')[0])
-      if (!Number.isFinite(hour) || hour < 0 || hour > 23) continue
-      const dt = new Date(o.orderDate + 'T' + (time.length === 5 ? time : '12:00') + ':00')
-      const day = dt.getDay()
-      if (Number.isNaN(day)) continue
-      grid[day][hour] += 1
-      hourTotals[hour] += 1
-      dayTotals[day] += 1
-      if (grid[day][hour] > maxCell) maxCell = grid[day][hour]
-    }
-
-    const peakHourIdx = hourTotals.indexOf(Math.max(...hourTotals, 0))
-    const peakDayIdx = dayTotals.indexOf(Math.max(...dayTotals, 0))
-    return { grid, hourTotals, dayTotals, maxCell, peakHourIdx, peakDayIdx }
-  }, [filtered])
-
   const pieGradient = useMemo(() => {
     const total = analytics.totalOrders || 1
     const pDone = pct(analytics.byOrderStatus['تم'], total)
@@ -430,6 +356,8 @@ export default function DashboardPage() {
         <KpiCard title="نسبة الإتمام" value={`${analytics.completionRate}%`} tone="emerald" subtitle={`${analytics.completedOrders} طلب تم`} />
         <KpiCard title="نسبة الإلغاء" value={`${analytics.cancellationRate}%`} tone="orange" subtitle={`${analytics.cancelledOrders} طلب لاغي`} />
         <KpiCard title="عملاء نشطين" value={analytics.uniqueCustomers.toLocaleString()} tone="purple" subtitle="عدد العملاء الفريدين" />
+        <KpiCard title="عملاء بحالة تحذير" value={customerStatusStats.warning.toLocaleString()} tone="orange" subtitle="بحاجة للمتابعة" />
+        <KpiCard title="عملاء موقوفون" value={customerStatusStats.suspended.toLocaleString()} tone="red" subtitle="احتيال / مشاكل كبرى" />
       </div>
 
       <section className="bg-white rounded-lg border border-gray-200 p-4 space-y-4">
@@ -694,146 +622,6 @@ export default function DashboardPage() {
           </table>
         </section>
       </div>
-
-      {/* ── Revenue by Zone / Area ─────────────────────────────────────── */}
-      <section className="bg-white rounded-lg border border-gray-200 p-4 overflow-x-auto">
-        <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
-          <h2 className="font-bold text-gray-900">📍 الإيرادات والتكلفة حسب منطقة التوصيل</h2>
-          <div className="text-xs text-gray-500">
-            هامش التوصيل = رسوم العميل − تكلفة المندوب
-          </div>
-        </div>
-        {zoneAnalytics.rows.length === 0 ? (
-          <div className="text-center text-gray-500 py-6">لا توجد بيانات مناطق في هذه الفترة</div>
-        ) : (
-          <table className="w-full min-w-[820px] text-sm">
-            <thead className="bg-gray-100 border-b border-gray-200">
-              <tr>
-                <th className="px-3 py-2 text-right">المنطقة</th>
-                <th className="px-3 py-2 text-center">Zone</th>
-                <th className="px-3 py-2 text-center">الطلبات</th>
-                <th className="px-3 py-2 text-right">الإيراد الإجمالي</th>
-                <th className="px-3 py-2 text-right">رسوم التوصيل المحصلة</th>
-                <th className="px-3 py-2 text-right">تكلفة المندوب</th>
-                <th className="px-3 py-2 text-right">هامش التوصيل</th>
-                <th className="px-3 py-2 text-right">صافي بعد التوصيل</th>
-              </tr>
-            </thead>
-            <tbody>
-              {zoneAnalytics.rows.map((r) => {
-                const marginColor = r.deliveryMargin < 0 ? 'text-red-700' : r.deliveryMargin === 0 ? 'text-gray-700' : 'text-green-700'
-                const widthPct = zoneAnalytics.totalRevenue ? Math.max(2, Math.round((r.revenue / zoneAnalytics.totalRevenue) * 100)) : 0
-                return (
-                  <tr key={r.area} className="border-b border-gray-100">
-                    <td className="px-3 py-2 text-gray-900 font-semibold">
-                      <div className="flex items-center gap-2">
-                        <span className="inline-block w-2 h-2 rounded-full bg-emerald-500" />
-                        <span>{r.area}</span>
-                      </div>
-                      <div className="mt-1 h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-emerald-500" style={{ width: `${widthPct}%` }} />
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 text-center text-gray-600">{r.zone ?? '—'}</td>
-                    <td className="px-3 py-2 text-center">{r.orders}</td>
-                    <td className="px-3 py-2 font-semibold text-gray-900">{r.revenue.toLocaleString()} ج.م</td>
-                    <td className="px-3 py-2 text-blue-700">{r.customerFees.toLocaleString()} ج.م</td>
-                    <td className="px-3 py-2 text-orange-700">{r.internalCost.toLocaleString()} ج.م</td>
-                    <td className={`px-3 py-2 font-bold ${marginColor}`}>
-                      {r.deliveryMargin > 0 ? '+' : ''}{r.deliveryMargin.toLocaleString()} ج.م
-                    </td>
-                    <td className="px-3 py-2 font-bold text-emerald-700">{r.net.toLocaleString()} ج.م</td>
-                  </tr>
-                )
-              })}
-              <tr className="bg-gray-50 border-t-2 border-gray-300">
-                <td className="px-3 py-2 font-bold">الإجمالي</td>
-                <td className="px-3 py-2"></td>
-                <td className="px-3 py-2 text-center font-bold">{zoneAnalytics.rows.reduce((s, r) => s + r.orders, 0)}</td>
-                <td className="px-3 py-2 font-bold">{zoneAnalytics.totalRevenue.toLocaleString()} ج.م</td>
-                <td className="px-3 py-2 font-bold text-blue-700">{zoneAnalytics.totalFees.toLocaleString()} ج.م</td>
-                <td className="px-3 py-2 font-bold text-orange-700">{zoneAnalytics.totalCost.toLocaleString()} ج.م</td>
-                <td className={`px-3 py-2 font-bold ${zoneAnalytics.deliveryMargin < 0 ? 'text-red-700' : 'text-green-700'}`}>
-                  {zoneAnalytics.deliveryMargin > 0 ? '+' : ''}{zoneAnalytics.deliveryMargin.toLocaleString()} ج.م
-                </td>
-                <td className="px-3 py-2 font-bold text-emerald-700">{(zoneAnalytics.totalRevenue - zoneAnalytics.totalCost).toLocaleString()} ج.م</td>
-              </tr>
-            </tbody>
-          </table>
-        )}
-      </section>
-
-      {/* ── Peak Hours Heatmap ─────────────────────────────────────────── */}
-      <section className="bg-white rounded-lg border border-gray-200 p-4 overflow-x-auto">
-        <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
-          <h2 className="font-bold text-gray-900">🔥 ساعات الذروة (Peak Hours Heatmap)</h2>
-          {peakHourAnalytics.maxCell > 0 && (
-            <div className="text-xs text-gray-500">
-              أعلى يوم: <span className="font-bold text-gray-800">{['الأحد','الإثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'][peakHourAnalytics.peakDayIdx]}</span>
-              {' · '}
-              أعلى ساعة: <span className="font-bold text-gray-800" dir="ltr">{String(peakHourAnalytics.peakHourIdx).padStart(2,'0')}:00</span>
-            </div>
-          )}
-        </div>
-        {peakHourAnalytics.maxCell === 0 ? (
-          <div className="text-center text-gray-500 py-6">لا توجد بيانات أوقات طلبات في هذه الفترة</div>
-        ) : (
-          <div className="min-w-[860px]">
-            <table className="w-full text-xs border-separate" style={{ borderSpacing: 2 }} dir="ltr">
-              <thead>
-                <tr>
-                  <th className="text-right px-2 py-1 text-gray-500 font-medium">اليوم \\ الساعة</th>
-                  {Array.from({ length: 24 }).map((_, h) => (
-                    <th key={h} className="text-center text-[10px] text-gray-500 font-medium">
-                      {String(h).padStart(2, '0')}
-                    </th>
-                  ))}
-                  <th className="text-center text-[10px] text-gray-700 font-bold pl-2">مجموع</th>
-                </tr>
-              </thead>
-              <tbody>
-                {['الأحد','الإثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'].map((dayLabel, day) => (
-                  <tr key={day}>
-                    <td className="text-right px-2 py-1 text-gray-700 font-semibold whitespace-nowrap">{dayLabel}</td>
-                    {Array.from({ length: 24 }).map((_, h) => {
-                      const v = peakHourAnalytics.grid[day][h]
-                      const intensity = peakHourAnalytics.maxCell ? v / peakHourAnalytics.maxCell : 0
-                      // Tailwind opacity scale via inline style for smooth gradient
-                      const bg = v === 0
-                        ? 'rgb(243,244,246)'
-                        : `rgba(220, 38, 38, ${0.15 + intensity * 0.85})`
-                      const txt = intensity > 0.55 ? 'text-white' : 'text-gray-800'
-                      return (
-                        <td
-                          key={h}
-                          className={`text-center text-[10px] font-medium rounded ${txt}`}
-                          style={{ background: bg, minWidth: 24, height: 24 }}
-                          title={`${dayLabel} ${String(h).padStart(2,'0')}:00 — ${v} طلب`}
-                        >
-                          {v || ''}
-                        </td>
-                      )
-                    })}
-                    <td className="text-center font-bold text-gray-900 px-1">{peakHourAnalytics.dayTotals[day]}</td>
-                  </tr>
-                ))}
-                <tr>
-                  <td className="text-right px-2 py-1 text-gray-700 font-bold">مجموع</td>
-                  {peakHourAnalytics.hourTotals.map((v, h) => (
-                    <td key={h} className="text-center font-bold text-gray-700 text-[10px]">{v || ''}</td>
-                  ))}
-                  <td className="text-center font-bold text-gray-900 px-1">
-                    {peakHourAnalytics.dayTotals.reduce((s, n) => s + n, 0)}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <p className="text-[11px] text-gray-500 mt-2 text-right">
-              كثافة اللون تعكس عدد الطلبات في الساعة. استخدمها لتعديل جداول عمل خدمة العملاء وفريق التحضير.
-            </p>
-          </div>
-        )}
-      </section>
         </>
       )}
 

@@ -157,6 +157,7 @@ export default function OrderForm({ mode, orderId }: Props) {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [isLookupLoading, setIsLookupLoading] = useState(false)
+  const [customerStatus, setCustomerStatus] = useState<{ status: 'active' | 'warning' | 'suspended'; reason: string | null } | null>(null)
   const [discountCodeInput, setDiscountCodeInput] = useState('')
   const [appliedDiscount, setAppliedDiscount] = useState<{ code: string; amount: number; type: 'percent' | 'value'; value: number } | null>(null)
   const [isCheckingDiscount, setIsCheckingDiscount] = useState(false)
@@ -411,6 +412,7 @@ export default function OrderForm({ mode, orderId }: Props) {
 
       if (!data.customer) {
         setAddresses([])
+        setCustomerStatus(null)
         setForm((prev) => ({
           ...prev,
           customerName: '',
@@ -427,6 +429,12 @@ export default function OrderForm({ mode, orderId }: Props) {
 
       setAddresses(data.addresses || [])
       const firstAddress = data.addresses?.[0]
+
+      const lookedUpStatus = (data.customer?.status as 'active' | 'warning' | 'suspended') || 'active'
+      setCustomerStatus({
+        status: lookedUpStatus,
+        reason: data.customer?.statusReason || null,
+      })
 
       setForm((prev) => ({
         ...prev,
@@ -646,6 +654,28 @@ export default function OrderForm({ mode, orderId }: Props) {
               </button>
             </div>
           </div>
+
+          {customerStatus && customerStatus.status !== 'active' && (
+            <div
+              className={
+                customerStatus.status === 'suspended'
+                  ? 'md:col-span-2 border-2 border-red-400 bg-red-50 rounded-lg p-3'
+                  : 'md:col-span-2 border-2 border-amber-400 bg-amber-50 rounded-lg p-3'
+              }
+              dir="rtl"
+            >
+              <div className={`font-bold ${customerStatus.status === 'suspended' ? 'text-red-800' : 'text-amber-800'}`}>
+                {customerStatus.status === 'suspended'
+                  ? '🛑 عميل موقوف — انتبه قبل إنشاء الطلب'
+                  : '⚠️ عميل مُحذَّر — انتبه قبل إنشاء الطلب'}
+              </div>
+              {customerStatus.reason && (
+                <div className={`text-sm mt-1 ${customerStatus.status === 'suspended' ? 'text-red-700' : 'text-amber-700'}`}>
+                  السبب: {customerStatus.reason}
+                </div>
+              )}
+            </div>
+          )}
 
           <FieldInput label="اسم العميل" value={form.customerName} onChange={(v) => updateForm('customerName', v)} />
           <FieldSelect label="نوع العميل" value={form.customerType} onChange={(v) => updateForm('customerType', v as OrderFormModel['customerType'])} options={CUSTOMER_TYPES} />

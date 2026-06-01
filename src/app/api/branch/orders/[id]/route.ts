@@ -9,6 +9,7 @@ import {
   readOrderDelivery,
   readOrderItems,
   readOrders,
+  readOrderSettings,
 } from '@/lib/omsData'
 
 async function readProducts() {
@@ -159,9 +160,94 @@ export async function PUT(
       },
     })
 
+    // Auto-activate rule: if this order just became "delivered", count clean
+    // orders for the customer since their status was set to "warning". If the
+    // threshold is reached, flip them back to "active" and post a chat alert.
+    if (
+      body.deliveryStatus === 'تم التوصيل' &&
+      existing.deliveryStatus !== 'تم التوصيل'
+    ) {
+      try {
+        await runAutoActivateRule(params.id)
+      } catch (err) {
+        console.error('auto-activate rule failed:', err)
+      }
+    }
+
     const order = await enrich(params.id)
     return NextResponse.json({ order }, { status: 200 })
   } catch {
     return NextResponse.json({ error: 'Failed to update delivery data' }, { status: 500 })
+  }
+}
+
+async function runAutoActivateRule(orderId: string) {
+  const settings = await readOrderSettings()
+  if (settings.autoActivateEnabled === false) return
+  const threshold = Math.max(1, Number(settings.autoActivateThreshold) || 3)
+
+  const orders = await readOrders()
+  const order = orders.find((o) => o.id === orderId)
+  if (!order || !order.customerId) return
+
+  const customers = await readCustomers()
+  const customer = customers.find((c) => c.id === order.customerId)
+  if (!customer || (customer as any).status !== 'warning') return
+
+  const since = (customer as any).statusUpdatedAt || (customer as any).createdAt
+  const sinceMs = since ? new Date(since).getTime() : 0
+
+  const customerOrders = orders.filter(
+    (o) => o.customerId === customer.id && new Date(o.createdAt).getTime() >= sinceMs,
+  )
+  const orderIds = new Set(customerOrders.map((o) => o.id))
+  const deliveries = await readOrderDelivery()
+  const cleanCount = deliveries.filter((d) => {
+    if (!orderIds.has(d.orderId)) return false
+    if (d.deliveryStatus !== 'تم التوصيل') return false
+    const o = customerOrders.find((co) => co.id === d.orderId)
+    const comp = Number((o as any)?.compensationAmount || 0)
+    return comp <= 0
+  }).length
+
+  if (cleanCount < threshold) return
+
+  const now = new Date().toISOString()
+  await supabase
+    .from('customers')
+    .update({
+      status: 'active',
+      statusReason: `تم التفعيل تلقائياً بعد ${cleanCount} طلب نظيف`,
+      statusUpdatedAt: now,
+      statusUpdatedBy: 'system',
+      updatedAt: now,
+    })
+    .eq('id', customer.id)
+
+  await supabase.from('chat_messages').insert([
+    {
+      id: `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      role: 'admin',
+      author: 'النظام (تنبيه)',
+      text:
+        `✅ إعادة تفعيل تلقائي\n` +
+        `العميل: ${(customer as any).customerName} (${(customer as any).phone || '—'})\n` +
+        `تحذير → نشط بعد ${cleanCount} طلب نظيف`,
+      createdAt: now,
+    },
+  ])
+
+  try {
+    await appendEditHistory({
+      entityType: 'customer' as any,
+      entityId: customer.id,
+      orderId: null as any,
+      action: 'status_changed',
+      changedBy: 'system',
+      summary: `تفعيل تلقائي للعميل بعد ${cleanCount} طلب نظيف`,
+      details: { from: 'warning', to: 'active', threshold, cleanCount },
+    })
+  } catch {
+    /* non-fatal */
   }
 }

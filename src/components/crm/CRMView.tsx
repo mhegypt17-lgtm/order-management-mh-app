@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import toast from 'react-hot-toast'
+import { useAuthStore } from '@/lib/auth'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -137,6 +138,7 @@ interface CRMViewProps {
 }
 
 export default function CRMView({ role }: CRMViewProps) {
+  const { user } = useAuthStore()
   const [customers, setCustomers] = useState<CustomerSummary[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
@@ -184,6 +186,12 @@ export default function CRMView({ role }: CRMViewProps) {
   const [addrMaps, setAddrMaps] = useState('')
   const [addrSaving, setAddrSaving] = useState(false)
   const [deletingAddrId, setDeletingAddrId] = useState<string | null>(null)
+
+  // Customer status modal
+  const [showStatusModal, setShowStatusModal] = useState(false)
+  const [statusChoice, setStatusChoice] = useState<'active' | 'warning' | 'suspended'>('active')
+  const [statusReason, setStatusReason] = useState('')
+  const [savingStatus, setSavingStatus] = useState(false)
   const [saving, setSaving] = useState(false)
 
   // Delete confirm state
@@ -422,6 +430,55 @@ export default function CRMView({ role }: CRMViewProps) {
     }
   }
 
+  // ── Customer status ─────────────────────────────────────────────────────
+  const openStatusModal = () => {
+    if (!profile) return
+    const current = ((profile.customer as any).status || 'active') as
+      | 'active'
+      | 'warning'
+      | 'suspended'
+    setStatusChoice(current)
+    setStatusReason((profile.customer as any).statusReason || '')
+    setShowStatusModal(true)
+  }
+
+  const handleSaveStatus = async () => {
+    if (!profile) return
+    if (statusChoice === 'suspended' && role !== 'admin') {
+      toast.error('فقط المدير يمكنه تعليق العميل')
+      return
+    }
+    if ((statusChoice === 'warning' || statusChoice === 'suspended') && statusReason.trim().length < 3) {
+      toast.error('السبب مطلوب (3 أحرف على الأقل)')
+      return
+    }
+    setSavingStatus(true)
+    try {
+      const res = await fetch(`/api/crm/customers/${profile.customer.id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: statusChoice,
+          reason: statusReason.trim(),
+          by: user?.name || user?.id || 'unknown',
+          byRole: role,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(data?.error || 'تعذر تحديث الحالة')
+        return
+      }
+      toast.success('✅ تم تحديث الحالة')
+      setShowStatusModal(false)
+      loadProfile(profile.customer.id)
+    } catch {
+      toast.error('تعذر تحديث الحالة')
+    } finally {
+      setSavingStatus(false)
+    }
+  }
+
   const handleDeleteCustomer = async () => {
     if (!profile) return
     setDeleting(true)
@@ -571,13 +628,29 @@ export default function CRMView({ role }: CRMViewProps) {
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 mb-4">
               <div className="flex justify-between items-start flex-wrap gap-3">
                 <div>
-                  <div className="flex items-center gap-3 mb-1">
+                  <div className="flex items-center gap-3 mb-1 flex-wrap">
                     <h1 className="text-2xl font-bold text-gray-900">{profile.customer.customerName}</h1>
                     <span className={`px-2 py-0.5 rounded-full text-sm font-bold ${TIER_COLORS[profile.insights.tier]}`}>
                       {profile.insights.tier}
                     </span>
+                    {(() => {
+                      const s = ((profile.customer as any).status || 'active') as 'active' | 'warning' | 'suspended'
+                      const cfg = {
+                        active:    { cls: 'bg-emerald-100 text-emerald-800 border border-emerald-300', label: '✅ نشط' },
+                        warning:   { cls: 'bg-amber-100 text-amber-800 border border-amber-300',     label: '⚠️ تحذير' },
+                        suspended: { cls: 'bg-red-100 text-red-800 border border-red-300',           label: '🛑 موقوف' },
+                      }[s]
+                      return (
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${cfg.cls}`}>{cfg.label}</span>
+                      )
+                    })()}
                   </div>
                   <p className="text-gray-500 text-sm">{profile.customer.phone}</p>
+                  {(profile.customer as any).status && (profile.customer as any).status !== 'active' && (profile.customer as any).statusReason && (
+                    <p className="text-xs mt-1 px-2 py-1 rounded bg-amber-50 border border-amber-200 text-amber-900 whitespace-pre-wrap">
+                      📌 سبب الحالة: {(profile.customer as any).statusReason}
+                    </p>
+                  )}
                   {profile.customer.email && (
                     <p className="text-gray-500 text-sm">📧 {profile.customer.email}</p>
                   )}
@@ -603,6 +676,13 @@ export default function CRMView({ role }: CRMViewProps) {
                     className="text-xs bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-2 rounded"
                   >
                     ✏️ تعديل
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openStatusModal}
+                    className="text-xs bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-2 rounded"
+                  >
+                    🚦 تغيير الحالة
                   </button>
                   {role === 'admin' && (
                     <button
@@ -1278,6 +1358,92 @@ export default function CRMView({ role }: CRMViewProps) {
                 className="px-4 py-2 text-sm rounded bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:opacity-60"
               >
                 {saving ? '⏳ جاري الحفظ...' : 'حفظ'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Change customer status modal ────────────────────────────────── */}
+      {showStatusModal && profile && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          onClick={() => !savingStatus && setShowStatusModal(false)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl w-full max-w-md p-5"
+            onClick={(e) => e.stopPropagation()}
+            dir="rtl"
+          >
+            <h3 className="text-lg font-bold text-gray-900 mb-1">🚦 تغيير حالة العميل</h3>
+            <p className="text-xs text-gray-500 mb-4">
+              سيتم إرسال تنبيه للإدارة في الشات عند تغيير الحالة.
+            </p>
+
+            <div className="space-y-2">
+              {(['active', 'warning', 'suspended'] as const).map((s) => {
+                const meta = {
+                  active:    { label: '✅ نشط',    desc: 'العميل بدون مشاكل',        cls: 'border-emerald-300 bg-emerald-50' },
+                  warning:   { label: '⚠️ تحذير',  desc: 'تذمر/طلبات مرتجعة متكررة', cls: 'border-amber-300 bg-amber-50' },
+                  suspended: { label: '🛑 موقوف',  desc: 'احتيال / حالة كبرى',       cls: 'border-red-300 bg-red-50' },
+                }[s]
+                const disabled = s === 'suspended' && role !== 'admin'
+                return (
+                  <label
+                    key={s}
+                    className={`flex items-start gap-3 p-3 border-2 rounded-lg cursor-pointer transition ${statusChoice === s ? meta.cls : 'border-gray-200 bg-white hover:bg-gray-50'} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    <input
+                      type="radio"
+                      name="status"
+                      checked={statusChoice === s}
+                      onChange={() => setStatusChoice(s)}
+                      disabled={disabled}
+                      className="mt-1"
+                    />
+                    <div className="flex-1">
+                      <div className="text-sm font-bold text-gray-900">{meta.label}</div>
+                      <div className="text-xs text-gray-600">{meta.desc}</div>
+                      {disabled && (
+                        <div className="text-[10px] text-red-600 mt-1">يحتاج صلاحية المدير</div>
+                      )}
+                    </div>
+                  </label>
+                )
+              })}
+            </div>
+
+            {(statusChoice === 'warning' || statusChoice === 'suspended') && (
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  السبب <span className="text-red-600">*</span>
+                </label>
+                <textarea
+                  value={statusReason}
+                  onChange={(e) => setStatusReason(e.target.value)}
+                  rows={3}
+                  placeholder={statusChoice === 'warning' ? 'مثال: تذمر متكرر / طلبات مرتجعة' : 'مثال: ادعاء كاذب / احتيال'}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                />
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 mt-5">
+              <button
+                type="button"
+                onClick={() => setShowStatusModal(false)}
+                disabled={savingStatus}
+                className="px-4 py-2 text-sm rounded bg-gray-100 hover:bg-gray-200 text-gray-700"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveStatus}
+                disabled={savingStatus}
+                className="px-4 py-2 text-sm rounded bg-amber-600 hover:bg-amber-700 text-white font-bold disabled:opacity-60"
+              >
+                {savingStatus ? '⏳ جاري الحفظ...' : 'حفظ الحالة'}
               </button>
             </div>
           </div>

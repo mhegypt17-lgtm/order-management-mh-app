@@ -74,25 +74,11 @@ export default function OrderSettingsView() {
   const [savingNotice, setSavingNotice] = useState(false)
   const [savingBudget, setSavingBudget] = useState(false)
   const [savingSla, setSavingSla] = useState(false)
-  const [savingLoyalty, setSavingLoyalty] = useState(false)
-  const [savingRetention, setSavingRetention] = useState(false)
   const [monthlyCompensationBudget, setMonthlyCompensationBudget] = useState(0)
   const [slaHours, setSlaHours] = useState(4)
-  const [loyaltyMode, setLoyaltyMode] = useState<'frequency' | 'revenue'>('frequency')
-  const [loyaltyTiers, setLoyaltyTiers] = useState<Array<{ name: string; threshold: number; color: string; icon: string }>>([
-    { name: 'برونزي',  threshold: 0,  color: 'bg-amber-100 text-amber-800',   icon: '🥉' },
-    { name: 'فضي',     threshold: 5,  color: 'bg-gray-100 text-gray-700',     icon: '🥈' },
-    { name: 'ذهبي',    threshold: 10, color: 'bg-yellow-100 text-yellow-800', icon: '🥇' },
-    { name: 'بلاتيني',  threshold: 20, color: 'bg-purple-100 text-purple-800', icon: '💎' },
-  ])
-  type RetentionAction = 'reminder' | 'task' | 'off'
-  type RetentionAgent = 'رنا' | 'مى' | 'ميرنا' | 'أمل' | 'auto'
-  interface RetentionStageState { days: number; action: RetentionAction; assignedTo: RetentionAgent }
-  const [retention, setRetention] = useState<{ stage1: RetentionStageState; stage2: RetentionStageState; stage3: RetentionStageState }>({
-    stage1: { days: 30, action: 'reminder', assignedTo: 'auto' },
-    stage2: { days: 60, action: 'reminder', assignedTo: 'auto' },
-    stage3: { days: 90, action: 'task',     assignedTo: 'auto' },
-  })
+  const [autoActivateEnabled, setAutoActivateEnabled] = useState(true)
+  const [autoActivateThreshold, setAutoActivateThreshold] = useState(3)
+  const [savingAutoActivate, setSavingAutoActivate] = useState(false)
   const [agentNotice, setAgentNotice] = useState<AgentNotice>({
     message: '',
     type: 'info',
@@ -146,38 +132,14 @@ export default function OrderSettingsView() {
         }
 
         setMonthlyCompensationBudget(Number(data.settings?.monthlyCompensationBudget) || 0)
-
-        if (data.loyalty || data.settings?.loyalty) {
-          const ly = data.loyalty || data.settings.loyalty
-          if (ly?.mode === 'revenue' || ly?.mode === 'frequency') setLoyaltyMode(ly.mode)
-          if (Array.isArray(ly?.tiers) && ly.tiers.length === 4) {
-            setLoyaltyTiers(ly.tiers.map((t: any, i: number) => ({
-              name: String(t.name || ['برونزي','فضي','ذهبي','بلاتيني'][i]),
-              threshold: Number(t.threshold) || 0,
-              color: String(t.color || ''),
-              icon: String(t.icon || ''),
-            })))
-          }
-        }
-
         if (data.slaHours) {
           setSlaHours(data.slaHours)
         }
-
-        const ret = data.retention || data.settings?.retention
-        if (ret && ret.stage1 && ret.stage2 && ret.stage3) {
-          const validActions: RetentionAction[] = ['reminder', 'task', 'off']
-          const validAgents: RetentionAgent[] = ['رنا', 'مى', 'ميرنا', 'أمل', 'auto']
-          const norm = (s: any, def: RetentionStageState): RetentionStageState => ({
-            days: Number(s?.days) > 0 ? Math.floor(Number(s.days)) : def.days,
-            action: validActions.includes(s?.action) ? s.action : def.action,
-            assignedTo: validAgents.includes(s?.assignedTo) ? s.assignedTo : def.assignedTo,
-          })
-          setRetention({
-            stage1: norm(ret.stage1, { days: 30, action: 'reminder', assignedTo: 'auto' }),
-            stage2: norm(ret.stage2, { days: 60, action: 'reminder', assignedTo: 'auto' }),
-            stage3: norm(ret.stage3, { days: 90, action: 'task',     assignedTo: 'auto' }),
-          })
+        if (data.settings?.autoActivateThreshold !== undefined) {
+          setAutoActivateThreshold(Number(data.settings.autoActivateThreshold) || 3)
+        }
+        if (data.settings?.autoActivateEnabled !== undefined) {
+          setAutoActivateEnabled(data.settings.autoActivateEnabled !== false)
         }
       } catch {
         toast.error('تعذر تحميل إعدادات النظام')
@@ -440,264 +402,71 @@ export default function OrderSettingsView() {
         </div>
       </section>
 
-      {/* Customer Loyalty / Tier Settings */}
-      <section className="bg-white border-2 border-purple-300 rounded-xl p-4">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-4">
+      {/* Auto-activate (warning → active) rule */}
+      <section className="bg-white border-2 border-amber-300 rounded-xl p-4">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">🏆 ولاء العملاء (Customer Tiers)</h2>
-            <p className="text-xs text-gray-500">حدد قاعدة الترقية واختر العتبات الخاصة بكل مستوى. يتم حساب المستوى تلقائياً ويُعرض في صفحة CRM.</p>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div className={`rounded-lg p-3 border-2 ${loyaltyMode === 'frequency' ? 'border-blue-300 bg-blue-50' : 'border-emerald-300 bg-emerald-50'}`} dir="rtl">
-            <p className="text-sm font-bold">
-              ✅ القاعدة المُفعَّلة حالياً: {loyaltyMode === 'frequency' ? '📦 عدد الطلبات المكتملة' : '💰 إجمالي الإيرادات'}
-            </p>
-            <p className="text-xs text-gray-600 mt-1">
-              يتم تطبيق قاعدة واحدة فقط في كل مرة. يتم تجاهل القاعدة الأخرى عند الحساب.
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2 text-right">اختر قاعدة الترقية (واحدة فقط)</label>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              <label className={`cursor-pointer px-4 py-3 rounded-lg border-2 text-right transition ${loyaltyMode === 'frequency' ? 'border-purple-500 bg-purple-50 text-purple-900 font-semibold ring-2 ring-purple-200' : 'border-gray-200 text-gray-500 bg-white opacity-70 hover:opacity-100'}`}>
-                <input
-                  type="radio"
-                  name="loyaltyMode"
-                  className="sr-only"
-                  checked={loyaltyMode === 'frequency'}
-                  onChange={() => setLoyaltyMode('frequency')}
-                />
-                <div className="flex items-center justify-between">
-                  <span>{loyaltyMode === 'frequency' ? '🟢 مفعَّل' : '⚪ غير مفعَّل'}</span>
-                  <span>📦 عدد الطلبات المكتملة (Frequency)</span>
-                </div>
-              </label>
-              <label className={`cursor-pointer px-4 py-3 rounded-lg border-2 text-right transition ${loyaltyMode === 'revenue' ? 'border-purple-500 bg-purple-50 text-purple-900 font-semibold ring-2 ring-purple-200' : 'border-gray-200 text-gray-500 bg-white opacity-70 hover:opacity-100'}`}>
-                <input
-                  type="radio"
-                  name="loyaltyMode"
-                  className="sr-only"
-                  checked={loyaltyMode === 'revenue'}
-                  onChange={() => setLoyaltyMode('revenue')}
-                />
-                <div className="flex items-center justify-between">
-                  <span>{loyaltyMode === 'revenue' ? '🟢 مفعَّل' : '⚪ غير مفعَّل'}</span>
-                  <span>💰 إجمالي الإيرادات (Revenue)</span>
-                </div>
-              </label>
-            </div>
-            <p className="text-[11px] text-gray-500 mt-2 text-right">
-              {loyaltyMode === 'revenue'
-                ? 'يتم حساب المستوى بناءً على إجمالي الإيرادات (ج.م) من جميع الطلبات (ما عدا الملغاة).'
-                : 'يتم حساب المستوى بناءً على عدد الطلبات (ما عدا الملغاة).'}
-            </p>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50 text-gray-700">
-                  <th className="px-3 py-2 text-right font-semibold">المستوى</th>
-                  <th className="px-3 py-2 text-right font-semibold">الاسم</th>
-                  <th className="px-3 py-2 text-right font-semibold">
-                    الحد الأدنى ({loyaltyMode === 'revenue' ? 'ج.م' : 'طلب'})
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {loyaltyTiers.map((t, idx) => (
-                  <tr key={idx} className="border-t border-gray-100">
-                    <td className="px-3 py-2">
-                      <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold ${t.color}`}>
-                        <span>{t.icon}</span>
-                        <span>{t.name || '—'}</span>
-                      </span>
-                    </td>
-                    <td className="px-3 py-2">
-                      <input
-                        type="text"
-                        value={t.name}
-                        onChange={(e) => {
-                          const v = e.target.value
-                          setLoyaltyTiers((prev) => prev.map((p, i) => (i === idx ? { ...p, name: v } : p)))
-                        }}
-                        className="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-right"
-                        dir="rtl"
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      <input
-                        type="number"
-                        min={0}
-                        step={loyaltyMode === 'revenue' ? 100 : 1}
-                        value={t.threshold}
-                        disabled={idx === 0}
-                        onChange={(e) => {
-                          const v = Math.max(0, Number(e.target.value) || 0)
-                          setLoyaltyTiers((prev) => prev.map((p, i) => (i === idx ? { ...p, threshold: v } : p)))
-                        }}
-                        className="w-32 px-2 py-1.5 border border-gray-300 rounded-lg text-left disabled:bg-gray-100 disabled:text-gray-500"
-                        dir="ltr"
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="text-[11px] text-gray-500 mt-1 text-right">المستوى الأول يبدأ تلقائياً من 0 وهو الافتراضي لكل عميل جديد.</p>
-          </div>
-
-          <div>
-            <button
-              type="button"
-              disabled={savingLoyalty}
-              onClick={async () => {
-                // Validate: thresholds must be strictly increasing (after first)
-                const sorted = [...loyaltyTiers]
-                for (let i = 1; i < sorted.length; i++) {
-                  if (sorted[i].threshold <= sorted[i - 1].threshold) {
-                    toast.error('الحد الأدنى لكل مستوى يجب أن يكون أكبر من السابق')
-                    return
-                  }
-                }
-                setSavingLoyalty(true)
-                try {
-                  const res = await fetch('/api/order-settings', {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ loyalty: { mode: loyaltyMode, tiers: loyaltyTiers } }),
-                  })
-                  if (!res.ok) throw new Error()
-                  toast.success('تم حفظ إعدادات ولاء العملاء')
-                } catch {
-                  toast.error('تعذر حفظ إعدادات الولاء')
-                } finally {
-                  setSavingLoyalty(false)
-                }
-              }}
-              className="px-5 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 font-medium"
-            >
-              {savingLoyalty ? 'جاري الحفظ...' : '💾 حفظ إعدادات الولاء'}
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {/* Customer Retention Section */}
-      <section className="bg-white border-2 border-orange-300 rounded-xl p-4">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-4">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">🔁 متابعة العملاء الخاملين (Retention)</h2>
+            <h2 className="text-lg font-semibold text-gray-900">🔄 قاعدة إعادة تفعيل العميل تلقائياً</h2>
             <p className="text-xs text-gray-500">
-              حدد عدد الأيام لكل مرحلة ونوع الإجراء (تذكير فقط أو إنشاء مهمة) والوكيل المسؤول.
+              عندما يكون العميل في حالة <span className="font-semibold text-amber-700">تحذير</span>،
+              يعود تلقائياً إلى <span className="font-semibold text-emerald-700">نشط</span> بعد عدد معين من الطلبات
+              النظيفة (تم التوصيل بدون تعويض/مرتجع).
             </p>
           </div>
         </div>
 
-        <div className="space-y-3">
-          {([
-            { key: 'stage1', label: 'المرحلة الأولى', emoji: '🟡', color: 'border-yellow-300 bg-yellow-50' },
-            { key: 'stage2', label: 'المرحلة الثانية', emoji: '🟠', color: 'border-orange-300 bg-orange-50' },
-            { key: 'stage3', label: 'المرحلة الثالثة', emoji: '🔴', color: 'border-red-300 bg-red-50' },
-          ] as const).map((s) => {
-            const cur = retention[s.key]
-            const update = (patch: Partial<RetentionStageState>) =>
-              setRetention((prev) => ({ ...prev, [s.key]: { ...prev[s.key], ...patch } }))
-            return (
-              <div key={s.key} className={`rounded-lg p-3 border-2 ${s.color}`} dir="rtl">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-gray-600">
-                    {cur.action === 'task' ? '🛠️ يُنشئ مهمة تلقائياً' : cur.action === 'off' ? '⛔ مُعطَّلة' : '🔔 تذكير فقط'}
-                  </span>
-                  <h3 className="font-bold text-gray-900">{s.emoji} {s.label}</h3>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs text-gray-700 mb-1 text-right">عدد الأيام بدون طلب</label>
-                    <input
-                      type="number"
-                      min={1}
-                      value={cur.days}
-                      onChange={(e) => update({ days: Math.max(1, Number(e.target.value) || 1) })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-right focus:outline-none focus:ring-2 focus:ring-orange-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-700 mb-1 text-right">الإجراء</label>
-                    <select
-                      value={cur.action}
-                      onChange={(e) => update({ action: e.target.value as RetentionAction })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-right bg-white"
-                    >
-                      <option value="reminder">🔔 تذكير فقط (Notification)</option>
-                      <option value="task">🛠️ إنشاء مهمة متابعة</option>
-                      <option value="off">⛔ تعطيل هذه المرحلة</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-700 mb-1 text-right">يُسند إلى</label>
-                    <select
-                      value={cur.assignedTo}
-                      onChange={(e) => update({ assignedTo: e.target.value as RetentionAgent })}
-                      disabled={cur.action === 'off'}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-right bg-white disabled:bg-gray-100 disabled:opacity-60"
-                    >
-                      <option value="auto">🎲 توزيع تلقائي (Round Robin)</option>
-                      <option value="رنا">رنا</option>
-                      <option value="مى">مى</option>
-                      <option value="ميرنا">ميرنا</option>
-                      <option value="أمل">أمل</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-            )
-          })}
+        <div className="flex flex-col md:flex-row gap-3 items-end">
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={autoActivateEnabled}
+              onChange={(e) => setAutoActivateEnabled(e.target.checked)}
+              className="w-4 h-4"
+            />
+            <span className="text-sm font-medium text-gray-800">تفعيل القاعدة</span>
+          </label>
 
-          <p className="text-[11px] text-gray-500 text-right">
-            عدد الأيام يجب أن يتزايد بين المراحل (الأولى &lt; الثانية &lt; الثالثة).
-            عند اختيار وكيل محدد، تُنشأ المهمة باسمه (إن كان الإجراء = إنشاء مهمة)، ويظهر اسمه أيضاً في تذكير الجرس.
-          </p>
-
-          <div>
-            <button
-              type="button"
-              disabled={savingRetention}
-              onClick={async () => {
-                if (retention.stage2.days <= retention.stage1.days) {
-                  toast.error('أيام المرحلة الثانية يجب أن تكون أكبر من الأولى')
-                  return
-                }
-                if (retention.stage3.days <= retention.stage2.days) {
-                  toast.error('أيام المرحلة الثالثة يجب أن تكون أكبر من الثانية')
-                  return
-                }
-                setSavingRetention(true)
-                try {
-                  const res = await fetch('/api/order-settings', {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ retention }),
-                  })
-                  if (!res.ok) {
-                    const j = await res.json().catch(() => ({}))
-                    throw new Error(j?.error || 'failed')
-                  }
-                  toast.success('تم حفظ إعدادات متابعة العملاء')
-                } catch (e: any) {
-                  toast.error(e?.message || 'تعذر حفظ إعدادات المتابعة')
-                } finally {
-                  setSavingRetention(false)
-                }
-              }}
-              className="px-5 py-2 rounded-lg bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50 font-medium"
-            >
-              {savingRetention ? 'جاري الحفظ...' : '💾 حفظ إعدادات المتابعة'}
-            </button>
+          <div className="flex-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1 text-right">
+              عدد الطلبات النظيفة المطلوبة
+            </label>
+            <input
+              type="number"
+              min={1}
+              value={autoActivateThreshold}
+              onChange={(e) => setAutoActivateThreshold(Math.max(1, Number(e.target.value) || 1))}
+              disabled={!autoActivateEnabled}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:bg-gray-100"
+              dir="ltr"
+            />
           </div>
+
+          <button
+            type="button"
+            disabled={savingAutoActivate}
+            onClick={async () => {
+              setSavingAutoActivate(true)
+              try {
+                const res = await fetch('/api/order-settings', {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    autoActivateEnabled,
+                    autoActivateThreshold,
+                  }),
+                })
+                if (!res.ok) throw new Error()
+                toast.success('تم حفظ قاعدة التفعيل التلقائي')
+              } catch {
+                toast.error('تعذر حفظ القاعدة')
+              } finally {
+                setSavingAutoActivate(false)
+              }
+            }}
+            className="px-5 py-2 rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 font-medium"
+          >
+            {savingAutoActivate ? 'جاري الحفظ...' : '💾 حفظ القاعدة'}
+          </button>
         </div>
       </section>
 
@@ -759,7 +528,7 @@ export default function OrderSettingsView() {
       <section className="bg-white border-2 border-yellow-300 rounded-xl p-4">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-4">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">📢 تنبيه للوكلاء</h2>
+            <h2 className="text-lg font-semibold text-gray-900">� تنبيه</h2>
             <p className="text-xs text-gray-500">تظهر أعلى نموذج الطلب الجديد كرسالة ملونة للموظف (upsell، عرض، إجازة...)</p>
           </div>
           <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700">
