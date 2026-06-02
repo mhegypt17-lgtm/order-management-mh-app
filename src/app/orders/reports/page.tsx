@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { calculateComplaintAnalytics, type ComplaintAnalyticsRecord } from '@/lib/complaintAnalytics'
-
 type OrderItem = {
   id: string
   productName: string
@@ -13,13 +12,13 @@ type OrderRecord = {
   id: string
   appOrderNo: string
   orderDate: string
-  orderStatus: string
+  orderStatus: 'تم' | 'مؤجل' | 'لاغي' | 'حجز'
   orderMethod: 'FB' | 'Call' | 'App' | 'WhatsApp' | 'B2B' | 'W.S'
   customerType: 'جديد' | 'قديم' | 'عائد' | 'استكمال' | 'استرجاع' | 'استبدال' | 'تسويق' | 'تعويض' | 'فحص' | 'تحصيل'
   orderTotal: number
   items: OrderItem[]
   delivery?: {
-    deliveryStatus: 'قبول' | 'جاهز' | 'في الطريق' | 'تم التوصيل' | 'لم يخرج بعد'
+    deliveryStatus: 'لم يخرج بعد' | 'جاهز' | 'في الطريق' | 'تم التوصيل'
   }
 }
 
@@ -40,6 +39,13 @@ export default function ReportsPage() {
   const [orders, setOrders] = useState<OrderRecord[]>([])
   const [complaints, setComplaints] = useState<ReportComplaint[]>([])
   const [monthlyCompensationBudget, setMonthlyCompensationBudget] = useState(0)
+  const [targetedStats, setTargetedStats] = useState<{
+    monthLabel: string
+    totalUnits: number
+    productCount: number
+    targetedProducts: { id: string; productName: string }[]
+    perAgent: { agent: string; units: number }[]
+  }>({ monthLabel: '', totalUnits: 0, productCount: 0, targetedProducts: [], perAgent: [] })
 
   const today = new Date().toISOString().slice(0, 10)
   const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
@@ -72,6 +78,26 @@ export default function ReportsPage() {
 
   useEffect(() => {
     fetchOrders()
+  }, [])
+
+  useEffect(() => {
+    const loadTargeted = async () => {
+      try {
+        const res = await fetch('/api/products/targeted-stats?scope=admin')
+        if (!res.ok) return
+        const data = await res.json()
+        setTargetedStats({
+          monthLabel: data.monthLabel || '',
+          totalUnits: Number(data.totalUnits) || 0,
+          productCount: Number(data.productCount) || 0,
+          targetedProducts: Array.isArray(data.targetedProducts) ? data.targetedProducts : [],
+          perAgent: Array.isArray(data.perAgent) ? data.perAgent : [],
+        })
+      } catch {
+        /* ignore */
+      }
+    }
+    loadTargeted()
   }, [])
 
   const thisMonthOrders = useMemo(() => {
@@ -151,6 +177,57 @@ export default function ReportsPage() {
         <StatCard label="إيراد الفترة المحددة" value={`${rangeRevenue.toLocaleString()} ج.م`} />
         <StatCard label="متوسط قيمة الطلب" value={`${avgOrderValue.toFixed(0)} ج.م`} />
       </div>
+
+      {/* 🎯 Targeted products report */}
+      <section className="bg-white rounded-lg border-2 border-amber-200 p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            <h2 className="font-bold text-gray-900">🎯 المنتجات المستهدفة</h2>
+            <p className="text-xs text-gray-500">وحدات مباعة هذا الشهر · طلبات تمت أو تم توصيلها</p>
+          </div>
+          <span className="px-3 py-1 rounded-full text-sm font-bold bg-amber-500 text-white">
+            {targetedStats.totalUnits.toLocaleString()} وحدة · {targetedStats.monthLabel}
+          </span>
+        </div>
+
+        {targetedStats.productCount === 0 ? (
+          <div className="text-sm text-gray-500">لا توجد منتجات مستهدفة حالياً</div>
+        ) : (
+          <>
+            <div className="text-xs text-gray-700">
+              <span className="font-semibold">المنتجات المستهدفة ({targetedStats.productCount}):</span>{' '}
+              {targetedStats.targetedProducts.map((p) => p.productName).join(' · ')}
+            </div>
+            {targetedStats.perAgent.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-amber-50 border-b border-amber-200">
+                    <tr>
+                      <th className="px-3 py-2 text-right font-semibold text-amber-900">الوكيل</th>
+                      <th className="px-3 py-2 text-right font-semibold text-amber-900">الوحدات المباعة</th>
+                      <th className="px-3 py-2 text-right font-semibold text-amber-900">% من الإجمالي</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {targetedStats.perAgent.map((row) => {
+                      const pct = targetedStats.totalUnits > 0
+                        ? ((row.units / targetedStats.totalUnits) * 100).toFixed(1)
+                        : '0.0'
+                      return (
+                        <tr key={row.agent} className="border-b border-gray-100">
+                          <td className="px-3 py-2 text-gray-800">{row.agent}</td>
+                          <td className="px-3 py-2 text-gray-900 font-bold">{row.units.toLocaleString()}</td>
+                          <td className="px-3 py-2 text-gray-700">{pct}%</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </section>
 
       <section className="bg-white rounded-lg border border-gray-200 p-4 space-y-4">
         <div className="flex items-center justify-between gap-2">

@@ -301,7 +301,7 @@ export default function OrdersPage() {
                       const res = await fetch(`/api/orders/${order.id}/duplicate`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ createdBy: user?.id || 'unknown' }),
+                        body: JSON.stringify({ createdBy: user?.name || user?.id || 'unknown' }),
                       })
                       if (!res.ok) throw new Error('Failed')
                       const data = await res.json()
@@ -396,7 +396,7 @@ export default function OrdersPage() {
                           const res = await fetch(`/api/orders/${order.id}/duplicate`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ createdBy: user?.id || 'unknown' }),
+                            body: JSON.stringify({ createdBy: user?.name || user?.id || 'unknown' }),
                           })
                           if (!res.ok) throw new Error('Failed')
                           const data = await res.json()

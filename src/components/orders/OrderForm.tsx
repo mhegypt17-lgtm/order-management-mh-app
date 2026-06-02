@@ -16,6 +16,7 @@ type Product = {
   offerPrice: number | null
   productCondition: 'فريش' | 'مبردة' | 'مجمد'
   isActive: boolean
+  isTargeted?: boolean
 }
 
 type CustomerAddress = {
@@ -560,7 +561,7 @@ export default function OrderForm({ mode, orderId }: Props) {
         deliverySubArea: form.deliverySubArea || '',
         items: validItems,
         discountCode: appliedDiscount?.code || null,
-        createdBy: user?.id || 'unknown',
+        createdBy: user?.name || user?.id || 'unknown',
         role: user?.role || '',
       }
 
@@ -765,14 +766,24 @@ export default function OrderForm({ mode, orderId }: Props) {
                 return (
                   <tr key={index} className="border-b border-gray-200">
                     <td className="p-2">
-                      <input
-                        list={`products-${index}`}
-                        value={item.productNameInput}
-                        onChange={(e) => onProductNameChange(index, e.target.value)}
-                        className="w-full px-2 py-1 border rounded"
-                        placeholder="ابحث عن منتج"
-                        dir="rtl"
-                      />
+                      <div className="flex items-center gap-1">
+                        <input
+                          list={`products-${index}`}
+                          value={item.productNameInput}
+                          onChange={(e) => onProductNameChange(index, e.target.value)}
+                          className={`flex-1 px-2 py-1 border rounded ${selectedProduct?.isTargeted ? 'border-amber-400 bg-amber-50' : ''}`}
+                          placeholder="ابحث عن منتج"
+                          dir="rtl"
+                        />
+                        {selectedProduct?.isTargeted && (
+                          <span
+                            className="shrink-0 px-1.5 py-0.5 rounded bg-amber-500 text-white text-[10px] font-bold"
+                            title="منتج مستهدف هذا الشهر"
+                          >
+                            🎯
+                          </span>
+                        )}
+                      </div>
                       <datalist id={`products-${index}`}>
                         {products.map((p) => (
                           <option key={p.id} value={p.productName} />
