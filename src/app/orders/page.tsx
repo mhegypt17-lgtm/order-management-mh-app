@@ -12,6 +12,12 @@ export default function OrdersPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [orders, setOrders] = useState<any[]>([])
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null)
+  const [targetedWidget, setTargetedWidget] = useState<{
+    monthLabel: string
+    productCount: number
+    targetedProducts: { id: string; productName: string }[]
+    myUnits: number
+  }>({ monthLabel: '', productCount: 0, targetedProducts: [], myUnits: 0 })
 
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -43,6 +49,24 @@ export default function OrdersPage() {
   useEffect(() => {
     fetchOrders()
   }, [])
+
+  useEffect(() => {
+    const agent = encodeURIComponent(user?.name || user?.email || '')
+    const url = agent
+      ? `/api/products/targeted-stats?scope=cs&agent=${agent}`
+      : `/api/products/targeted-stats?scope=cs`
+    fetch(url)
+      .then((r) => r.json())
+      .then((d) => {
+        setTargetedWidget({
+          monthLabel: String(d?.monthLabel || ''),
+          productCount: Number(d?.productCount) || 0,
+          targetedProducts: Array.isArray(d?.targetedProducts) ? d.targetedProducts : [],
+          myUnits: Number(d?.myUnits) || 0,
+        })
+      })
+      .catch(() => {/* non-fatal */})
+  }, [user?.name, user?.email])
 
   const filteredOrders = useMemo(() => {
     const now = new Date()
@@ -104,6 +128,33 @@ export default function OrdersPage() {
           + طلب جديد
         </button>
       </div>
+
+      {/* 🎯 Targeted products focus widget */}
+      {targetedWidget.productCount > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 space-y-2">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xl">🎯</span>
+              <span className="font-bold text-amber-900">منتجات الشهر المستهدفة</span>
+              <span className="text-xs text-amber-700">({targetedWidget.monthLabel})</span>
+            </div>
+            <div className="text-sm">
+              <span className="text-amber-800">وحداتي هذا الشهر: </span>
+              <span className="font-bold text-amber-900 text-lg">{targetedWidget.myUnits.toLocaleString()}</span>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {targetedWidget.targetedProducts.map((p) => (
+              <span
+                key={p.id}
+                className="px-3 py-1 bg-white border border-amber-300 rounded-full text-xs text-amber-800 font-medium"
+              >
+                {p.productName}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
         <input

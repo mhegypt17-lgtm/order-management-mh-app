@@ -73,6 +73,13 @@ export default function DashboardPage() {
   const [complaints, setComplaints] = useState<DashboardComplaint[]>([])
   const [monthlyCompensationBudget, setMonthlyCompensationBudget] = useState(0)
   const [customerStatusStats, setCustomerStatusStats] = useState({ warning: 0, suspended: 0 })
+  const [targetedStats, setTargetedStats] = useState<{
+    monthLabel: string
+    totalUnits: number
+    productCount: number
+    targetedProducts: { id: string; productName: string }[]
+    perAgent: { agent: string; units: number }[]
+  }>({ monthLabel: '', totalUnits: 0, productCount: 0, targetedProducts: [], perAgent: [] })
   const now = new Date()
   const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
   const today = now.toISOString().slice(0, 10)
@@ -109,6 +116,20 @@ export default function DashboardPage() {
         setCustomerStatusStats({
           warning: Number(statsData?.warning) || 0,
           suspended: Number(statsData?.suspended) || 0,
+        })
+      } catch {
+        /* non-fatal */
+      }
+
+      try {
+        const tRes = await fetch('/api/products/targeted-stats?scope=admin')
+        const tData = await tRes.json()
+        setTargetedStats({
+          monthLabel: String(tData?.monthLabel || ''),
+          totalUnits: Number(tData?.totalUnits) || 0,
+          productCount: Number(tData?.productCount) || 0,
+          targetedProducts: Array.isArray(tData?.targetedProducts) ? tData.targetedProducts : [],
+          perAgent: Array.isArray(tData?.perAgent) ? tData.perAgent : [],
         })
       } catch {
         /* non-fatal */
@@ -358,7 +379,64 @@ export default function DashboardPage() {
         <KpiCard title="عملاء نشطين" value={analytics.uniqueCustomers.toLocaleString()} tone="purple" subtitle="عدد العملاء الفريدين" />
         <KpiCard title="عملاء بحالة تحذير" value={customerStatusStats.warning.toLocaleString()} tone="orange" subtitle="بحاجة للمتابعة" />
         <KpiCard title="عملاء موقوفون" value={customerStatusStats.suspended.toLocaleString()} tone="red" subtitle="احتيال / مشاكل كبرى" />
+        <KpiCard
+          title="🎯 وحدات مستهدفة (هذا الشهر)"
+          value={targetedStats.totalUnits.toLocaleString()}
+          tone="amber"
+          subtitle={`${targetedStats.productCount} منتج مستهدف · ${targetedStats.monthLabel}`}
+        />
       </div>
+
+      <section className="bg-white rounded-lg border border-amber-200 p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            <h2 className="font-bold text-gray-900">🎯 أداء الوكلاء على المنتجات المستهدفة</h2>
+            <p className="text-xs text-gray-500">وحدات مباعة خلال الشهر الحالي (طلبات تمت فقط)</p>
+          </div>
+          <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1">
+            {targetedStats.productCount === 0
+              ? 'لا توجد منتجات مستهدفة حالياً'
+              : `الإجمالي: ${targetedStats.totalUnits.toLocaleString()} وحدة`}
+          </span>
+        </div>
+        {targetedStats.productCount > 0 && (
+          <div className="text-xs text-gray-600">
+            <span className="font-semibold">المنتجات المستهدفة:</span>{' '}
+            {targetedStats.targetedProducts.map((p) => p.productName).join('، ')}
+          </div>
+        )}
+        {targetedStats.perAgent.length === 0 ? (
+          <p className="text-sm text-gray-500">لا توجد مبيعات للمنتجات المستهدفة خلال هذا الشهر بعد.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[420px] text-sm">
+              <thead>
+                <tr className="text-right text-gray-700 border-b border-gray-200">
+                  <th className="py-2 px-3">#</th>
+                  <th className="py-2 px-3">الوكيل</th>
+                  <th className="py-2 px-3">الوحدات المباعة</th>
+                  <th className="py-2 px-3">% من الإجمالي</th>
+                </tr>
+              </thead>
+              <tbody>
+                {targetedStats.perAgent.map((row, i) => {
+                  const pct = targetedStats.totalUnits > 0
+                    ? Math.round((row.units / targetedStats.totalUnits) * 100)
+                    : 0
+                  return (
+                    <tr key={row.agent} className="border-b last:border-0 border-gray-100">
+                      <td className="py-2 px-3 text-gray-500">{i + 1}</td>
+                      <td className="py-2 px-3 font-medium text-gray-900">{row.agent}</td>
+                      <td className="py-2 px-3 font-bold text-amber-700">{row.units.toLocaleString()}</td>
+                      <td className="py-2 px-3 text-gray-700">{pct}%</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <section className="bg-white rounded-lg border border-gray-200 p-4 space-y-4">
         <div className="flex items-center justify-between gap-2">
@@ -697,7 +775,7 @@ function KpiCard({
   title: string
   value: string
   subtitle: string
-  tone: 'red' | 'green' | 'blue' | 'emerald' | 'orange' | 'purple'
+  tone: 'red' | 'green' | 'blue' | 'emerald' | 'orange' | 'purple' | 'amber'
 }) {
   const toneClass = {
     red: 'border-red-200 bg-red-50',
@@ -706,6 +784,7 @@ function KpiCard({
     emerald: 'border-emerald-200 bg-emerald-50',
     orange: 'border-orange-200 bg-orange-50',
     purple: 'border-fuchsia-200 bg-fuchsia-50',
+    amber: 'border-amber-300 bg-amber-50',
   }[tone]
 
   return (

@@ -20,6 +20,7 @@ export async function GET() {
       ...product,
       productCategory: product.productCategory || 'غير محدد',
       packagingType: product.packagingType || 'غير محدد',
+      isTargeted: Boolean(product.isTargeted),
     }))
 
     return NextResponse.json({ products: normalized }, { status: 200 })

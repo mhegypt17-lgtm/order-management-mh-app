@@ -19,10 +19,7 @@ export interface Product {
   isByReservation: boolean
   productCondition: 'فريش' | 'مبردة' | 'مجمد'
   isActive: boolean
-  stockStatus?: 'available' | 'low' | 'out'
-  stockQuantity?: number | null
-  stockUpdatedAt?: string | null
-  stockUpdatedBy?: string | null
+  isTargeted?: boolean
 }
 
 export default function ProductCatalogPage() {
@@ -31,6 +28,7 @@ export default function ProductCatalogPage() {
   const [showModal, setShowModal] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
+  const [showTargetedOnly, setShowTargetedOnly] = useState(false)
   const [formData, setFormData] = useState<Product>({
     productName: '',
     productDescription: '',
@@ -46,6 +44,7 @@ export default function ProductCatalogPage() {
     isByReservation: false,
     productCondition: 'فريش',
     isActive: true,
+    isTargeted: false,
   })
 
   useEffect(() => {
@@ -67,6 +66,7 @@ export default function ProductCatalogPage() {
         isStandardPackage: Boolean(product.isStandardPackage),
         hasDailyPriceChange: Boolean(product.hasDailyPriceChange),
         isByReservation: Boolean(product.isByReservation),
+        isTargeted: Boolean(product.isTargeted),
       }))
       setProducts(normalizedProducts)
     } catch (error) {
@@ -94,6 +94,7 @@ export default function ProductCatalogPage() {
         isByReservation: false,
         productCondition: 'فريش',
         isActive: true,
+        isTargeted: false,
         ...product,
       })
       setEditingId(product.id || null)
@@ -113,6 +114,7 @@ export default function ProductCatalogPage() {
         isByReservation: false,
         productCondition: 'فريش',
         isActive: true,
+        isTargeted: false,
       })
       setEditingId(null)
     }
@@ -217,9 +219,33 @@ export default function ProductCatalogPage() {
     }
   }
 
-  const filteredProducts = products.filter((p) =>
-    p.productName.includes(searchTerm)
-  )
+  const handleToggleTargeted = async (product: Product) => {
+    try {
+      const updatedProduct = { ...product, isTargeted: !product.isTargeted }
+      const res = await fetch('/api/products', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedProduct),
+      })
+      if (!res.ok) throw new Error('Failed to update')
+      toast.success(
+        updatedProduct.isTargeted
+          ? '🎯 تم تحديد كمنتج مستهدف'
+          : '➖ تم الغاء الاستهداف',
+      )
+      fetchProducts()
+    } catch (error) {
+      toast.error('خطأ في تحديث حالة الاستهداف')
+      console.error(error)
+    }
+  }
+
+  const filteredProducts = products.filter((p) => {
+    if (showTargetedOnly && !p.isTargeted) return false
+    return p.productName.includes(searchTerm)
+  })
+
+  const targetedCount = products.filter((p) => p.isTargeted).length
 
   return (
     <div className="space-y-6">
@@ -253,6 +279,18 @@ export default function ProductCatalogPage() {
             🔍
           </span>
         </div>
+        <button
+          type="button"
+          onClick={() => setShowTargetedOnly((v) => !v)}
+          className={`px-4 py-2 rounded-lg border text-sm font-semibold transition whitespace-nowrap ${
+            showTargetedOnly
+              ? 'bg-amber-500 border-amber-500 text-white shadow'
+              : 'bg-white border-amber-300 text-amber-700 hover:bg-amber-50'
+          }`}
+          title="عرض المنتجات المستهدفة فقط"
+        >
+          🎯 المستهدفة فقط ({targetedCount})
+        </button>
       </div>
 
       {/* Products Table */}
@@ -309,10 +347,10 @@ export default function ProductCatalogPage() {
                   الحالة
                 </th>
                 <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">
-                  التوفر
-                </th>
-                <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">
                   نشط
+                </th>
+                <th className="px-6 py-3 text-center text-sm font-semibold text-gray-900">
+                  🎯 مستهدف
                 </th>
                 <th className="px-6 py-3 text-center text-sm font-semibold text-gray-900">
                   الإجراءات
@@ -377,44 +415,6 @@ export default function ProductCatalogPage() {
                       {product.productCondition}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-sm" onClick={(e) => e.stopPropagation()}>
-                    <select
-                      value={product.stockStatus || 'available'}
-                      onChange={async (e) => {
-                        const next = e.target.value as 'available' | 'low' | 'out'
-                        try {
-                          const res = await fetch('/api/products/stock', {
-                            method: 'PATCH',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              id: product.id,
-                              stockStatus: next,
-                              stockQuantity: next === 'out' ? 0 : product.stockQuantity ?? null,
-                              role: 'admin',
-                              actor: 'مدير',
-                            }),
-                          })
-                          if (!res.ok) throw new Error()
-                          const d = await res.json()
-                          setProducts((prev) => prev.map((p) => (p.id === product.id ? { ...p, ...d.product } : p)))
-                          toast.success('تم تحديث المخزون')
-                        } catch {
-                          toast.error('تعذر تحديث المخزون')
-                        }
-                      }}
-                      className={`px-2 py-1 rounded-md text-xs font-bold border-2 ${
-                        (product.stockStatus || 'available') === 'out'
-                          ? 'border-red-300 bg-red-50 text-red-700'
-                          : product.stockStatus === 'low'
-                          ? 'border-amber-300 bg-amber-50 text-amber-800'
-                          : 'border-green-300 bg-green-50 text-green-700'
-                      }`}
-                    >
-                      <option value="available">✅ متاح</option>
-                      <option value="low">⚠️ منخفض</option>
-                      <option value="out">⛔ غير متاح</option>
-                    </select>
-                  </td>
                   <td className="px-6 py-4">
                     <label className="flex items-center cursor-pointer">
                       <input
@@ -428,6 +428,23 @@ export default function ProductCatalogPage() {
                         {product.isActive ? '🟢' : '🔴'}
                       </span>
                     </label>
+                  </td>
+                  <td className="px-6 py-4 text-center">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleToggleTargeted(product)
+                      }}
+                      className={`px-3 py-1 rounded-full text-xs font-semibold border transition ${
+                        product.isTargeted
+                          ? 'bg-amber-500 border-amber-500 text-white hover:bg-amber-600'
+                          : 'bg-white border-gray-300 text-gray-500 hover:bg-amber-50 hover:border-amber-300 hover:text-amber-700'
+                      }`}
+                      title={product.isTargeted ? 'اضغط لإلغاء الاستهداف' : 'اضغط لتحديد كمستهدف'}
+                    >
+                      {product.isTargeted ? '🎯 مستهدف' : 'غير مستهدف'}
+                    </button>
                   </td>
                   <td className="px-6 py-4 text-sm flex items-center justify-center space-x-2 rtl:space-x-reverse">
                     <button
@@ -685,6 +702,20 @@ export default function ProductCatalogPage() {
                 />
                 <label className="ml-2 text-sm font-medium text-gray-700 rtl:ml-0 rtl:mr-2">
                   نشط
+                </label>
+              </div>
+
+              {/* Targeted Checkbox */}
+              <div className="flex items-center bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <input
+                  type="checkbox"
+                  name="isTargeted"
+                  checked={Boolean(formData.isTargeted)}
+                  onChange={handleInputChange}
+                  className="w-4 h-4 rounded accent-amber-500"
+                />
+                <label className="ml-2 text-sm font-semibold text-amber-800 rtl:ml-0 rtl:mr-2">
+                  🎯 منتج مستهدف (تركيز للوكلاء)
                 </label>
               </div>
 

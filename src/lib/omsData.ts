@@ -235,6 +235,7 @@ export interface ProductRecord {
   barcode?: string
   packagingType?: string
   isActive: boolean
+  isTargeted?: boolean
   createdAt: string
   updatedAt: string
 }
