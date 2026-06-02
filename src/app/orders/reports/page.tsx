@@ -227,22 +227,15 @@ export default function ReportsPage() {
                     <tr>
                       <th className="px-3 py-2 text-right font-semibold text-amber-900">الوكيل</th>
                       <th className="px-3 py-2 text-right font-semibold text-amber-900">الوحدات المباعة</th>
-                      <th className="px-3 py-2 text-right font-semibold text-amber-900">% من الإجمالي</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {targetedStats.perAgent.map((row) => {
-                      const pct = targetedStats.totalUnits > 0
-                        ? ((row.units / targetedStats.totalUnits) * 100).toFixed(1)
-                        : '0.0'
-                      return (
-                        <tr key={row.agent} className="border-b border-gray-100">
-                          <td className="px-3 py-2 text-gray-800">{row.agent}</td>
-                          <td className="px-3 py-2 text-gray-900 font-bold">{row.units.toLocaleString()}</td>
-                          <td className="px-3 py-2 text-gray-700">{pct}%</td>
-                        </tr>
-                      )
-                    })}
+                    {targetedStats.perAgent.map((row) => (
+                      <tr key={row.agent} className="border-b border-gray-100">
+                        <td className="px-3 py-2 text-gray-800">{row.agent}</td>
+                        <td className="px-3 py-2 text-gray-900 font-bold">{row.units.toLocaleString()}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>

@@ -436,29 +436,22 @@ export default function DashboardPage() {
           <p className="text-sm text-gray-500">لا توجد مبيعات للمنتجات المستهدفة خلال هذا الشهر بعد.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[420px] text-sm">
+            <table className="w-full min-w-[360px] text-sm">
               <thead>
                 <tr className="text-right text-gray-700 border-b border-gray-200">
                   <th className="py-2 px-3">#</th>
                   <th className="py-2 px-3">الوكيل</th>
                   <th className="py-2 px-3">الوحدات المباعة</th>
-                  <th className="py-2 px-3">% من الإجمالي</th>
                 </tr>
               </thead>
               <tbody>
-                {targetedStats.perAgent.map((row, i) => {
-                  const pct = targetedStats.totalUnits > 0
-                    ? Math.round((row.units / targetedStats.totalUnits) * 100)
-                    : 0
-                  return (
-                    <tr key={row.agent} className="border-b last:border-0 border-gray-100">
-                      <td className="py-2 px-3 text-gray-500">{i + 1}</td>
-                      <td className="py-2 px-3 font-medium text-gray-900">{row.agent}</td>
-                      <td className="py-2 px-3 font-bold text-amber-700">{row.units.toLocaleString()}</td>
-                      <td className="py-2 px-3 text-gray-700">{pct}%</td>
-                    </tr>
-                  )
-                })}
+                {targetedStats.perAgent.map((row, i) => (
+                  <tr key={row.agent} className="border-b last:border-0 border-gray-100">
+                    <td className="py-2 px-3 text-gray-500">{i + 1}</td>
+                    <td className="py-2 px-3 font-medium text-gray-900">{row.agent}</td>
+                    <td className="py-2 px-3 font-bold text-amber-700">{row.units.toLocaleString()}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

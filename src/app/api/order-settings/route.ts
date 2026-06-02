@@ -179,9 +179,17 @@ export async function PATCH(request: NextRequest) {
       nextSettings.agentNotice = notice
     }
 
-    await supabase
+    const { error: upsertError } = await supabase
       .from('order_settings')
       .upsert({ id: 'singleton', ...nextSettings })
+
+    if (upsertError) {
+      console.error('order-settings PATCH upsert failed:', upsertError)
+      return NextResponse.json(
+        { error: 'Failed to persist settings', detail: upsertError.message },
+        { status: 500 }
+      )
+    }
 
     return NextResponse.json(
       {
