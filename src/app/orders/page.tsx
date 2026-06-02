@@ -16,8 +16,9 @@ export default function OrdersPage() {
     monthLabel: string
     productCount: number
     targetedProducts: { id: string; productName: string }[]
-    myUnits: number
-  }>({ monthLabel: '', productCount: 0, targetedProducts: [], myUnits: 0 })
+    totalUnits: number
+    perAgent: { agent: string; units: number }[]
+  }>({ monthLabel: '', productCount: 0, targetedProducts: [], totalUnits: 0, perAgent: [] })
 
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -51,22 +52,19 @@ export default function OrdersPage() {
   }, [])
 
   useEffect(() => {
-    const agent = encodeURIComponent(user?.name || user?.email || '')
-    const url = agent
-      ? `/api/products/targeted-stats?scope=cs&agent=${agent}`
-      : `/api/products/targeted-stats?scope=cs`
-    fetch(url)
+    fetch('/api/products/targeted-stats?scope=cs')
       .then((r) => r.json())
       .then((d) => {
         setTargetedWidget({
           monthLabel: String(d?.monthLabel || ''),
           productCount: Number(d?.productCount) || 0,
           targetedProducts: Array.isArray(d?.targetedProducts) ? d.targetedProducts : [],
-          myUnits: Number(d?.myUnits) || 0,
+          totalUnits: Number(d?.totalUnits) || 0,
+          perAgent: Array.isArray(d?.perAgent) ? d.perAgent : [],
         })
       })
       .catch(() => {/* non-fatal */})
-  }, [user?.name, user?.email])
+  }, [])
 
   const filteredOrders = useMemo(() => {
     const now = new Date()
@@ -131,7 +129,7 @@ export default function OrdersPage() {
 
       {/* 🎯 Targeted products focus widget */}
       {targetedWidget.productCount > 0 && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 space-y-2">
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2">
               <span className="text-xl">🎯</span>
@@ -139,8 +137,8 @@ export default function OrdersPage() {
               <span className="text-xs text-amber-700">({targetedWidget.monthLabel})</span>
             </div>
             <div className="text-sm">
-              <span className="text-amber-800">وحداتي هذا الشهر: </span>
-              <span className="font-bold text-amber-900 text-lg">{targetedWidget.myUnits.toLocaleString()}</span>
+              <span className="text-amber-800">إجمالي الوحدات هذا الشهر: </span>
+              <span className="font-bold text-amber-900 text-lg">{targetedWidget.totalUnits.toLocaleString()}</span>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -153,6 +151,24 @@ export default function OrdersPage() {
               </span>
             ))}
           </div>
+          {targetedWidget.perAgent.length > 0 && (
+            <div className="pt-2 border-t border-amber-200">
+              <div className="text-xs font-bold text-amber-900 mb-2">وحدات حسب متلقي الطلب:</div>
+              <div className="flex flex-wrap gap-2">
+                {targetedWidget.perAgent.map((row) => (
+                  <span
+                    key={row.agent}
+                    className="inline-flex items-center gap-2 px-3 py-1 bg-white border border-amber-400 rounded-full text-xs"
+                  >
+                    <span className="font-bold text-gray-800">{row.agent}</span>
+                    <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-white font-bold">
+                      {row.units.toLocaleString()}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

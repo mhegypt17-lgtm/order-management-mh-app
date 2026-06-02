@@ -78,6 +78,8 @@ export async function GET(req: NextRequest) {
     for (const o of monthOrders) orderById.set(o.id, o)
 
     // Sum quantities of targeted items linked to those orders.
+    // Group by orderReceiver (the متلقي الطلب field on the order), falling back
+    // to createdBy for legacy orders missing the receiver.
     let totalUnits = 0
     const perAgentMap: Record<string, number> = {}
     let myUnits = 0
@@ -89,7 +91,10 @@ export async function GET(req: NextRequest) {
       const qty = Number(it.quantity) || 0
       if (qty <= 0) continue
       totalUnits += qty
-      const who = String(o.createdBy || '').trim() || 'غير معروف'
+      const who =
+        String(o.orderReceiver || '').trim() ||
+        String(o.createdBy || '').trim() ||
+        'غير معروف'
       perAgentMap[who] = (perAgentMap[who] || 0) + qty
       if (agent && who === agent) myUnits += qty
     }
@@ -106,7 +111,7 @@ export async function GET(req: NextRequest) {
         id: p.id,
         productName: p.productName,
       })),
-      perAgent: scope === 'admin' ? perAgent : [],
+      perAgent, // always include: small list, useful for both admin and CS
       myUnits,
     })
   } catch (err) {

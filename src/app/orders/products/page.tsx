@@ -36,6 +36,7 @@ export default function CSProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<string>('')
+  const [showTargetedOnly, setShowTargetedOnly] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
 
   const fetchProducts = async () => {
@@ -73,10 +74,13 @@ export default function CSProductsPage() {
       )
       
       const matchesCategory = !selectedCategory || p.productCategory === selectedCategory
+      const matchesTargeted = !showTargetedOnly || Boolean(p.isTargeted)
 
-      return matchesSearch && matchesCategory
+      return matchesSearch && matchesCategory && matchesTargeted
     })
-  }, [products, searchTerm, selectedCategory])
+  }, [products, searchTerm, selectedCategory, showTargetedOnly])
+
+  const targetedCount = useMemo(() => products.filter((p) => p.isTargeted).length, [products])
 
   const stats = {
     total: products.length,
@@ -128,6 +132,17 @@ export default function CSProductsPage() {
 
           {categories.length > 0 && (
             <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setShowTargetedOnly((v) => !v)}
+                className={`px-3 py-1.5 rounded-lg text-sm font-bold transition border ${
+                  showTargetedOnly
+                    ? 'bg-amber-500 text-white border-amber-500'
+                    : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+                }`}
+                title="عرض المنتجات المستهدفة فقط"
+              >
+                🎯 المستهدفة فقط ({targetedCount})
+              </button>
               <button
                 onClick={() => setSelectedCategory('')}
                 className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
