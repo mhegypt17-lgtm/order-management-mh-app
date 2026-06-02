@@ -241,17 +241,26 @@ export default function ReportsPage() {
                     <tr>
                       <td className="px-3 py-2 font-bold text-amber-900">
                         الإجمالي
-                        {targetedStats.monthlyGoal > 0 && (
-                          <span className="mr-2 inline-block px-2 py-0.5 rounded-full bg-amber-600 text-white text-[11px] font-bold">
+                        {targetedStats.monthlyGoal > 0 ? (
+                          <span
+                            className={`mr-2 inline-block px-2 py-0.5 rounded-full text-[11px] font-bold text-white ${
+                              targetedStats.achievementPct >= 100 ? 'bg-emerald-600' : 'bg-amber-600'
+                            }`}
+                          >
                             {targetedStats.achievementPct.toFixed(1)}% من الهدف
+                          </span>
+                        ) : (
+                          <span className="mr-2 inline-block px-2 py-0.5 rounded-full text-[11px] bg-gray-300 text-gray-700">
+                            لم يتم تحديد هدف
                           </span>
                         )}
                       </td>
                       <td className="px-3 py-2 font-bold text-amber-900">
                         {targetedStats.totalUnits.toLocaleString()}
-                        {targetedStats.monthlyGoal > 0 && (
-                          <span className="text-amber-700 font-normal"> / {targetedStats.monthlyGoal.toLocaleString()}</span>
-                        )}
+                        <span className="text-amber-700 font-normal">
+                          {' '}
+                          / {targetedStats.monthlyGoal > 0 ? targetedStats.monthlyGoal.toLocaleString() : '—'}
+                        </span>
                       </td>
                     </tr>
                   </tfoot>
