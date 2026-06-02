@@ -164,6 +164,12 @@ export async function PATCH(request: NextRequest) {
         ...((nextSettings as any).retention || {}),
         monthlyTargetedUnitsGoal: goalInt,
       }
+      // Also stash inside agentNotice (a JSON column known to exist) so the
+      // value persists even if the `retention` column is missing in this DB.
+      ;(nextSettings as any).agentNotice = {
+        ...((nextSettings as any).agentNotice || {}),
+        monthlyTargetedUnitsGoal: goalInt,
+      }
     }
 
     // Handle auto-activate (warning → active) rule.
@@ -191,16 +197,37 @@ export async function PATCH(request: NextRequest) {
     const { monthlyTargetedUnitsGoal: _omitGoal, ...persistable } = nextSettings as any
     void _omitGoal
 
-    const { error: upsertError } = await supabase
-      .from('order_settings')
-      .upsert({ id: 'singleton', ...persistable })
+    // Self-healing upsert: Supabase rejects payloads that include columns the
+    // current DB schema doesn't have. Parse those errors and retry with the
+    // offending field removed so saves succeed even if older migrations were
+    // never applied.
+    const droppedColumns: string[] = []
+    let payload: Record<string, any> = { id: 'singleton', ...persistable }
+    let upsertError: any = null
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const { error } = await supabase.from('order_settings').upsert(payload)
+      if (!error) {
+        upsertError = null
+        break
+      }
+      upsertError = error
+      const missing = String(error.message || '').match(/'([^']+)' column/i)?.[1]
+      if (!missing || !(missing in payload)) break
+      delete payload[missing]
+      droppedColumns.push(missing)
+    }
 
     if (upsertError) {
-      console.error('order-settings PATCH upsert failed:', upsertError)
+      console.error('order-settings PATCH upsert failed:', upsertError, 'dropped:', droppedColumns)
       return NextResponse.json(
-        { error: 'Failed to persist settings', detail: upsertError.message },
+        { error: 'Failed to persist settings', detail: upsertError.message, droppedColumns },
         { status: 500 }
       )
+    }
+
+    if (droppedColumns.length > 0) {
+      console.warn('order-settings PATCH succeeded after dropping missing columns:', droppedColumns)
     }
 
     return NextResponse.json(
@@ -211,6 +238,7 @@ export async function PATCH(request: NextRequest) {
         monthlyTargetedUnitsGoal: nextSettings.monthlyTargetedUnitsGoal,
         autoActivateThreshold: nextSettings.autoActivateThreshold,
         autoActivateEnabled: nextSettings.autoActivateEnabled,
+        droppedColumns: droppedColumns.length ? droppedColumns : undefined,
       },
       { status: 200 }
     )

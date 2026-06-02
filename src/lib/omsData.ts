@@ -696,7 +696,8 @@ export async function readOrderSettings(): Promise<OrderSettingsRecord> {
         0,
         Number(
           (parsed as any).monthlyTargetedUnitsGoal ??
-            (parsed as any).retention?.monthlyTargetedUnitsGoal,
+            (parsed as any).retention?.monthlyTargetedUnitsGoal ??
+            (parsed as any).agentNotice?.monthlyTargetedUnitsGoal,
         ) || 0,
       ),
       slaHours: Math.max(1, Number(parsed.slaHours) || 4),
