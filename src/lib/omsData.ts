@@ -692,7 +692,13 @@ export async function readOrderSettings(): Promise<OrderSettingsRecord> {
       complaintChannels: normalizeLookupRows(parsed.complaintChannels),
       complaintReasons: normalizeLookupRows((parsed as any).complaintReasons),
       monthlyCompensationBudget: Number(parsed.monthlyCompensationBudget) || 5000,
-      monthlyTargetedUnitsGoal: Math.max(0, Number((parsed as any).monthlyTargetedUnitsGoal) || 0),
+      monthlyTargetedUnitsGoal: Math.max(
+        0,
+        Number(
+          (parsed as any).monthlyTargetedUnitsGoal ??
+            (parsed as any).retention?.monthlyTargetedUnitsGoal,
+        ) || 0,
+      ),
       slaHours: Math.max(1, Number(parsed.slaHours) || 4),
       agentNotice: {
         message: String((parsed.agentNotice as any)?.message || '').trim(),

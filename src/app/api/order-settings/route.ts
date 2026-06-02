@@ -150,13 +150,20 @@ export async function PATCH(request: NextRequest) {
       nextSettings.monthlyCompensationBudget = parsedBudget
     }
 
-    // Handle monthly targeted-units team goal update
+    // Handle monthly targeted-units team goal update.
+    // We persist this inside the existing `retention` JSON column so no
+    // schema migration is required for the new field.
     if (body.monthlyTargetedUnitsGoal !== undefined) {
       const parsedGoal = Number(body.monthlyTargetedUnitsGoal)
       if (!Number.isFinite(parsedGoal) || parsedGoal < 0) {
         return NextResponse.json({ error: 'Invalid monthly targeted units goal' }, { status: 400 })
       }
-      nextSettings.monthlyTargetedUnitsGoal = Math.floor(parsedGoal)
+      const goalInt = Math.floor(parsedGoal)
+      nextSettings.monthlyTargetedUnitsGoal = goalInt
+      ;(nextSettings as any).retention = {
+        ...((nextSettings as any).retention || {}),
+        monthlyTargetedUnitsGoal: goalInt,
+      }
     }
 
     // Handle auto-activate (warning → active) rule.
@@ -179,9 +186,14 @@ export async function PATCH(request: NextRequest) {
       nextSettings.agentNotice = notice
     }
 
+    // Strip fields that don't have dedicated columns in `order_settings`
+    // (these are tracked in JSON columns instead).
+    const { monthlyTargetedUnitsGoal: _omitGoal, ...persistable } = nextSettings as any
+    void _omitGoal
+
     const { error: upsertError } = await supabase
       .from('order_settings')
-      .upsert({ id: 'singleton', ...nextSettings })
+      .upsert({ id: 'singleton', ...persistable })
 
     if (upsertError) {
       console.error('order-settings PATCH upsert failed:', upsertError)
