@@ -151,25 +151,15 @@ export async function PATCH(request: NextRequest) {
     }
 
     // Handle monthly targeted-units team goal update.
-    // We persist this inside the existing `retention` JSON column so no
-    // schema migration is required for the new field.
+    // Persisted in the dedicated `monthlyTargetedUnitsGoal` column on
+    // `order_settings`. Requires the migration in
+    // data/monthly-targeted-goal-migration.sql to have been applied.
     if (body.monthlyTargetedUnitsGoal !== undefined) {
       const parsedGoal = Number(body.monthlyTargetedUnitsGoal)
       if (!Number.isFinite(parsedGoal) || parsedGoal < 0) {
         return NextResponse.json({ error: 'Invalid monthly targeted units goal' }, { status: 400 })
       }
-      const goalInt = Math.floor(parsedGoal)
-      nextSettings.monthlyTargetedUnitsGoal = goalInt
-      ;(nextSettings as any).retention = {
-        ...((nextSettings as any).retention || {}),
-        monthlyTargetedUnitsGoal: goalInt,
-      }
-      // Also stash inside agentNotice (a JSON column known to exist) so the
-      // value persists even if the `retention` column is missing in this DB.
-      ;(nextSettings as any).agentNotice = {
-        ...((nextSettings as any).agentNotice || {}),
-        monthlyTargetedUnitsGoal: goalInt,
-      }
+      nextSettings.monthlyTargetedUnitsGoal = Math.floor(parsedGoal)
     }
 
     // Handle auto-activate (warning → active) rule.
@@ -192,17 +182,12 @@ export async function PATCH(request: NextRequest) {
       nextSettings.agentNotice = notice
     }
 
-    // Strip fields that don't have dedicated columns in `order_settings`
-    // (these are tracked in JSON columns instead).
-    const { monthlyTargetedUnitsGoal: _omitGoal, ...persistable } = nextSettings as any
-    void _omitGoal
-
     // Self-healing upsert: Supabase rejects payloads that include columns the
     // current DB schema doesn't have. Parse those errors and retry with the
     // offending field removed so saves succeed even if older migrations were
     // never applied.
     const droppedColumns: string[] = []
-    let payload: Record<string, any> = { id: 'singleton', ...persistable }
+    let payload: Record<string, any> = { id: 'singleton', ...nextSettings }
     let upsertError: any = null
 
     for (let attempt = 0; attempt < 10; attempt++) {
