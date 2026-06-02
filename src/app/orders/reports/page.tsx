@@ -237,6 +237,24 @@ export default function ReportsPage() {
                       </tr>
                     ))}
                   </tbody>
+                  <tfoot className="bg-amber-100 border-t-2 border-amber-300">
+                    <tr>
+                      <td className="px-3 py-2 font-bold text-amber-900">
+                        الإجمالي
+                        {targetedStats.monthlyGoal > 0 && (
+                          <span className="mr-2 inline-block px-2 py-0.5 rounded-full bg-amber-600 text-white text-[11px] font-bold">
+                            {targetedStats.achievementPct.toFixed(1)}% من الهدف
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 font-bold text-amber-900">
+                        {targetedStats.totalUnits.toLocaleString()}
+                        {targetedStats.monthlyGoal > 0 && (
+                          <span className="text-amber-700 font-normal"> / {targetedStats.monthlyGoal.toLocaleString()}</span>
+                        )}
+                      </td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             )}
