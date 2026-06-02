@@ -19,6 +19,16 @@ type Product = {
   isByReservation?: boolean
   description?: string
   bestRecipes?: string
+  stockStatus?: 'available' | 'low' | 'out'
+  stockQuantity?: number | null
+  stockUpdatedAt?: string | null
+}
+
+function stockBadge(p: Product) {
+  const s = p.stockStatus || 'available'
+  if (s === 'out') return { cls: 'bg-red-100 text-red-700 border-red-300', label: '⛔ غير متاح' }
+  if (s === 'low') return { cls: 'bg-amber-100 text-amber-800 border-amber-300', label: '⚠️ مخزون منخفض' }
+  return { cls: 'bg-green-100 text-green-700 border-green-300', label: '✅ متاح' }
 }
 
 export default function CSProductsPage() {
@@ -167,6 +177,7 @@ export default function CSProductsPage() {
                   <th className="px-4 py-3 text-right font-semibold text-gray-700">🎯</th>
                   <th className="px-4 py-3 text-right font-semibold text-gray-700">المنتج</th>
                   <th className="px-4 py-3 text-right font-semibold text-gray-700">التصنيف</th>
+                  <th className="px-4 py-3 text-right font-semibold text-gray-700">التوفر</th>
                   <th className="px-4 py-3 text-right font-semibold text-gray-700">الحالة</th>
                   <th className="px-4 py-3 text-right font-semibold text-gray-700">التغليف</th>
                   <th className="px-4 py-3 text-center font-semibold text-gray-700">الوزن (جم)</th>
@@ -206,6 +217,11 @@ export default function CSProductsPage() {
                       </td>
                       <td className="px-4 py-3 text-gray-900 font-semibold">{product.productName}</td>
                       <td className="px-4 py-3 text-gray-700">{product.productCategory || '-'}</td>
+                      <td className="px-4 py-3">
+                        {(() => { const b = stockBadge(product); return (
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold border ${b.cls}`}>{b.label}</span>
+                        )})()}
+                      </td>
                       <td className="px-4 py-3">
                         {product.productCondition ? (
                           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${conditionColor}`}>
@@ -367,6 +383,22 @@ export default function CSProductsPage() {
                   <div className="text-gray-900 text-sm">{selectedProduct.bestRecipes}</div>
                 </div>
               )}
+
+              {/* Stock status (read-only for CS) */}
+              <div className="bg-orange-50 rounded-lg p-3 border border-orange-200">
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="text-sm font-bold text-orange-900">📦 حالة المخزون</h3>
+                  {(() => { const b = stockBadge(selectedProduct); return (
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-bold border ${b.cls}`}>{b.label}</span>
+                  )})()}
+                </div>
+                {selectedProduct.stockQuantity != null && (
+                  <p className="text-sm text-gray-700">عدد القطع المتاحة: <strong>{selectedProduct.stockQuantity}</strong></p>
+                )}
+                {selectedProduct.stockUpdatedAt && (
+                  <p className="text-[11px] text-gray-500 mt-1">آخر تحديث من الفرع: {new Date(selectedProduct.stockUpdatedAt).toLocaleString('ar-EG')}</p>
+                )}
+              </div>
             </div>
 
             <div className="px-6 pb-4">
