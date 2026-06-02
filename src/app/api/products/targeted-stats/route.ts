@@ -4,6 +4,7 @@ import {
   readOrders,
   readOrderItems,
   readOrderDelivery,
+  readOrderSettings,
 } from '@/lib/omsData'
 
 export const dynamic = 'force-dynamic'
@@ -39,12 +40,15 @@ export async function GET(req: NextRequest) {
       .slice(0, 10)
     const monthLabel = `${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`
 
-    const [products, orders, items, deliveries] = await Promise.all([
+    const [products, orders, items, deliveries, settings] = await Promise.all([
       readProducts(),
       readOrders(),
       readOrderItems(),
       readOrderDelivery(),
+      readOrderSettings(),
     ])
+
+    const monthlyGoal = Math.max(0, Number((settings as any)?.monthlyTargetedUnitsGoal) || 0)
 
     const targeted = products.filter((p: any) => Boolean(p.isTargeted))
     const targetedIds = new Set(targeted.map((p) => p.id))
@@ -57,6 +61,8 @@ export async function GET(req: NextRequest) {
         targetedProducts: [],
         perAgent: [],
         myUnits: 0,
+        monthlyGoal,
+        achievementPct: 0,
       })
     }
 
@@ -113,6 +119,8 @@ export async function GET(req: NextRequest) {
       })),
       perAgent, // always include: small list, useful for both admin and CS
       myUnits,
+      monthlyGoal,
+      achievementPct: monthlyGoal > 0 ? Math.round((totalUnits / monthlyGoal) * 1000) / 10 : 0,
     })
   } catch (err) {
     console.error('targeted-stats error:', err)

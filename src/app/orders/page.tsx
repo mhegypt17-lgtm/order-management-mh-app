@@ -18,7 +18,9 @@ export default function OrdersPage() {
     targetedProducts: { id: string; productName: string }[]
     totalUnits: number
     perAgent: { agent: string; units: number }[]
-  }>({ monthLabel: '', productCount: 0, targetedProducts: [], totalUnits: 0, perAgent: [] })
+    monthlyGoal: number
+    achievementPct: number
+  }>({ monthLabel: '', productCount: 0, targetedProducts: [], totalUnits: 0, perAgent: [], monthlyGoal: 0, achievementPct: 0 })
 
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -61,6 +63,8 @@ export default function OrdersPage() {
           targetedProducts: Array.isArray(d?.targetedProducts) ? d.targetedProducts : [],
           totalUnits: Number(d?.totalUnits) || 0,
           perAgent: Array.isArray(d?.perAgent) ? d.perAgent : [],
+          monthlyGoal: Number(d?.monthlyGoal) || 0,
+          achievementPct: Number(d?.achievementPct) || 0,
         })
       })
       .catch(() => {/* non-fatal */})
@@ -139,8 +143,29 @@ export default function OrdersPage() {
             <div className="text-sm">
               <span className="text-amber-800">إجمالي الوحدات هذا الشهر: </span>
               <span className="font-bold text-amber-900 text-lg">{targetedWidget.totalUnits.toLocaleString()}</span>
+              {targetedWidget.monthlyGoal > 0 && (
+                <>
+                  <span className="text-amber-800"> / {targetedWidget.monthlyGoal.toLocaleString()}</span>
+                  <span className="mr-2 inline-block px-2 py-0.5 rounded-full bg-amber-500 text-white text-xs font-bold">
+                    {targetedWidget.achievementPct.toFixed(1)}%
+                  </span>
+                </>
+              )}
             </div>
           </div>
+          {targetedWidget.monthlyGoal > 0 && (
+            <div>
+              <div className="h-2 w-full bg-amber-100 rounded-full overflow-hidden">
+                <div
+                  className={`h-full ${targetedWidget.achievementPct >= 100 ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                  style={{ width: `${Math.min(100, targetedWidget.achievementPct)}%` }}
+                />
+              </div>
+              <div className="text-[11px] text-amber-800 mt-1 text-right">
+                إنجاز الهدف الشهري للفريق (إجمالي جميع الوكيلات)
+              </div>
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
             {targetedWidget.targetedProducts.map((p) => (
               <span

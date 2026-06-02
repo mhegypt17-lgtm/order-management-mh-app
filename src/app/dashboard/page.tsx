@@ -79,7 +79,9 @@ export default function DashboardPage() {
     productCount: number
     targetedProducts: { id: string; productName: string }[]
     perAgent: { agent: string; units: number }[]
-  }>({ monthLabel: '', totalUnits: 0, productCount: 0, targetedProducts: [], perAgent: [] })
+    monthlyGoal: number
+    achievementPct: number
+  }>({ monthLabel: '', totalUnits: 0, productCount: 0, targetedProducts: [], perAgent: [], monthlyGoal: 0, achievementPct: 0 })
   const now = new Date()
   const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
   const today = now.toISOString().slice(0, 10)
@@ -130,6 +132,8 @@ export default function DashboardPage() {
           productCount: Number(tData?.productCount) || 0,
           targetedProducts: Array.isArray(tData?.targetedProducts) ? tData.targetedProducts : [],
           perAgent: Array.isArray(tData?.perAgent) ? tData.perAgent : [],
+          monthlyGoal: Number(tData?.monthlyGoal) || 0,
+          achievementPct: Number(tData?.achievementPct) || 0,
         })
       } catch {
         /* non-fatal */
@@ -381,9 +385,17 @@ export default function DashboardPage() {
         <KpiCard title="عملاء موقوفون" value={customerStatusStats.suspended.toLocaleString()} tone="red" subtitle="احتيال / مشاكل كبرى" />
         <KpiCard
           title="🎯 وحدات مستهدفة (هذا الشهر)"
-          value={targetedStats.totalUnits.toLocaleString()}
+          value={
+            targetedStats.monthlyGoal > 0
+              ? `${targetedStats.totalUnits.toLocaleString()} / ${targetedStats.monthlyGoal.toLocaleString()}`
+              : targetedStats.totalUnits.toLocaleString()
+          }
           tone="amber"
-          subtitle={`${targetedStats.productCount} منتج مستهدف · ${targetedStats.monthLabel}`}
+          subtitle={
+            targetedStats.monthlyGoal > 0
+              ? `إنجاز الفريق: ${targetedStats.achievementPct.toFixed(1)}% · ${targetedStats.monthLabel}`
+              : `${targetedStats.productCount} منتج مستهدف · ${targetedStats.monthLabel}`
+          }
         />
       </div>
 
@@ -396,9 +408,24 @@ export default function DashboardPage() {
           <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1">
             {targetedStats.productCount === 0
               ? 'لا توجد منتجات مستهدفة حالياً'
+              : targetedStats.monthlyGoal > 0
+              ? `الإجمالي: ${targetedStats.totalUnits.toLocaleString()} / ${targetedStats.monthlyGoal.toLocaleString()} وحدة · ${targetedStats.achievementPct.toFixed(1)}%`
               : `الإجمالي: ${targetedStats.totalUnits.toLocaleString()} وحدة`}
           </span>
         </div>
+        {targetedStats.monthlyGoal > 0 && targetedStats.productCount > 0 && (
+          <div>
+            <div className="h-2 w-full bg-amber-100 rounded-full overflow-hidden">
+              <div
+                className={`h-full ${targetedStats.achievementPct >= 100 ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                style={{ width: `${Math.min(100, targetedStats.achievementPct)}%` }}
+              />
+            </div>
+            <div className="text-[11px] text-amber-800 mt-1 text-right">
+              إنجاز الهدف الشهري للفريق (إجمالي جميع الوكيلات)
+            </div>
+          </div>
+        )}
         {targetedStats.productCount > 0 && (
           <div className="text-xs text-gray-600">
             <span className="font-semibold">المنتجات المستهدفة:</span>{' '}

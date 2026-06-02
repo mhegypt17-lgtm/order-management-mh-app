@@ -74,7 +74,9 @@ export default function OrderSettingsView() {
   const [savingNotice, setSavingNotice] = useState(false)
   const [savingBudget, setSavingBudget] = useState(false)
   const [savingSla, setSavingSla] = useState(false)
+  const [savingTargetedGoal, setSavingTargetedGoal] = useState(false)
   const [monthlyCompensationBudget, setMonthlyCompensationBudget] = useState(0)
+  const [monthlyTargetedUnitsGoal, setMonthlyTargetedUnitsGoal] = useState(0)
   const [slaHours, setSlaHours] = useState(4)
   const [autoActivateEnabled, setAutoActivateEnabled] = useState(true)
   const [autoActivateThreshold, setAutoActivateThreshold] = useState(3)
@@ -132,6 +134,7 @@ export default function OrderSettingsView() {
         }
 
         setMonthlyCompensationBudget(Number(data.settings?.monthlyCompensationBudget) || 0)
+        setMonthlyTargetedUnitsGoal(Number(data.settings?.monthlyTargetedUnitsGoal) || 0)
         if (data.slaHours) {
           setSlaHours(data.slaHours)
         }
@@ -397,6 +400,66 @@ export default function OrderSettingsView() {
               className="px-5 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 font-medium"
             >
               {savingBudget ? 'جاري الحفظ...' : '💾 حفظ الميزانية'}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* Monthly targeted-units team goal */}
+      <section className="bg-white border-2 border-amber-300 rounded-xl p-4">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">🎯 هدف الفريق الشهري للمنتجات المستهدفة</h2>
+            <p className="text-xs text-gray-500">
+              عدد الوحدات المطلوب بيعها شهرياً من المنتجات المستهدفة لكل فريق خدمة العملاء.
+              يتم احتساب نسبة الإنجاز تلقائياً على إجمالي الفريق فقط (وليس لكل وكيلة على حدة)،
+              ويتم تصفير الإنجاز تلقائياً مع بداية كل شهر ميلادي.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-col md:flex-row gap-2">
+          <div className="flex-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1 text-right">عدد الوحدات (شهرياً)</label>
+            <input
+              type="number"
+              min={0}
+              step={1}
+              value={monthlyTargetedUnitsGoal}
+              onChange={(e) => setMonthlyTargetedUnitsGoal(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+              className="w-full px-3 py-2 border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+              dir="ltr"
+              placeholder="0 = بدون هدف"
+            />
+            <p className="text-[11px] text-gray-500 mt-1 text-right">
+              ضع 0 لإخفاء نسبة الإنجاز.
+            </p>
+          </div>
+
+          <div className="md:self-end">
+            <button
+              type="button"
+              disabled={savingTargetedGoal}
+              onClick={async () => {
+                setSavingTargetedGoal(true)
+                try {
+                  const res = await fetch('/api/order-settings', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ monthlyTargetedUnitsGoal }),
+                  })
+
+                  if (!res.ok) throw new Error()
+                  toast.success('تم حفظ هدف الفريق الشهري')
+                } catch {
+                  toast.error('تعذر حفظ هدف الفريق الشهري')
+                } finally {
+                  setSavingTargetedGoal(false)
+                }
+              }}
+              className="px-5 py-2 rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 font-medium"
+            >
+              {savingTargetedGoal ? 'جاري الحفظ...' : '💾 حفظ الهدف'}
             </button>
           </div>
         </div>

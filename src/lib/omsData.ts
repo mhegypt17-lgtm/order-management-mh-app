@@ -280,6 +280,7 @@ export interface OrderSettingsRecord {
   complaintChannels: LookupValueRecord[]
   complaintReasons: LookupValueRecord[]
   monthlyCompensationBudget: number
+  monthlyTargetedUnitsGoal: number
   slaHours: number
   agentNotice: AgentNoticeRecord
   retention?: RetentionConfig
@@ -333,6 +334,7 @@ function defaultOrderSettings(): OrderSettingsRecord {
     complaintChannels: defaultsToLookupRows(DEFAULT_COMPLAINT_CHANNELS),
     complaintReasons: defaultsToLookupRows(DEFAULT_COMPLAINT_REASONS),
     monthlyCompensationBudget: 5000,
+    monthlyTargetedUnitsGoal: 0,
     slaHours: 4,
     agentNotice: {
       message: '',
@@ -690,6 +692,7 @@ export async function readOrderSettings(): Promise<OrderSettingsRecord> {
       complaintChannels: normalizeLookupRows(parsed.complaintChannels),
       complaintReasons: normalizeLookupRows((parsed as any).complaintReasons),
       monthlyCompensationBudget: Number(parsed.monthlyCompensationBudget) || 5000,
+      monthlyTargetedUnitsGoal: Math.max(0, Number((parsed as any).monthlyTargetedUnitsGoal) || 0),
       slaHours: Math.max(1, Number(parsed.slaHours) || 4),
       agentNotice: {
         message: String((parsed.agentNotice as any)?.message || '').trim(),

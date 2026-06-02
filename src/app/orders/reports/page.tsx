@@ -45,7 +45,9 @@ export default function ReportsPage() {
     productCount: number
     targetedProducts: { id: string; productName: string }[]
     perAgent: { agent: string; units: number }[]
-  }>({ monthLabel: '', totalUnits: 0, productCount: 0, targetedProducts: [], perAgent: [] })
+    monthlyGoal: number
+    achievementPct: number
+  }>({ monthLabel: '', totalUnits: 0, productCount: 0, targetedProducts: [], perAgent: [], monthlyGoal: 0, achievementPct: 0 })
 
   const today = new Date().toISOString().slice(0, 10)
   const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
@@ -92,6 +94,8 @@ export default function ReportsPage() {
           productCount: Number(data.productCount) || 0,
           targetedProducts: Array.isArray(data.targetedProducts) ? data.targetedProducts : [],
           perAgent: Array.isArray(data.perAgent) ? data.perAgent : [],
+          monthlyGoal: Number(data.monthlyGoal) || 0,
+          achievementPct: Number(data.achievementPct) || 0,
         })
       } catch {
         /* ignore */
@@ -186,9 +190,27 @@ export default function ReportsPage() {
             <p className="text-xs text-gray-500">وحدات مباعة هذا الشهر · طلبات تمت أو تم توصيلها</p>
           </div>
           <span className="px-3 py-1 rounded-full text-sm font-bold bg-amber-500 text-white">
-            {targetedStats.totalUnits.toLocaleString()} وحدة · {targetedStats.monthLabel}
+            {targetedStats.monthlyGoal > 0
+              ? `${targetedStats.totalUnits.toLocaleString()} / ${targetedStats.monthlyGoal.toLocaleString()} وحدة · ${targetedStats.achievementPct.toFixed(1)}% · ${targetedStats.monthLabel}`
+              : `${targetedStats.totalUnits.toLocaleString()} وحدة · ${targetedStats.monthLabel}`}
           </span>
         </div>
+
+        {targetedStats.monthlyGoal > 0 && (
+          <div>
+            <div className="h-2 w-full bg-amber-100 rounded-full overflow-hidden">
+              <div
+                className={`h-full ${targetedStats.achievementPct >= 100 ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                style={{ width: `${Math.min(100, targetedStats.achievementPct)}%` }}
+              />
+            </div>
+            <div className="text-[11px] text-amber-800 mt-1 text-right">
+              {targetedStats.achievementPct >= 100
+                ? `🎉 تحقيق الهدف! (${targetedStats.achievementPct.toFixed(1)}%)`
+                : `إنجاز الفريق الشهري (إجمالي جميع الوكيلات)`}
+            </div>
+          </div>
+        )}
 
         {targetedStats.productCount === 0 ? (
           <div className="text-sm text-gray-500">لا توجد منتجات مستهدفة حالياً</div>

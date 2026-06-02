@@ -17,6 +17,7 @@ type OrderSettingsRecord = {
   complaintChannels: LookupValueRecord[]
   complaintReasons: LookupValueRecord[]
   monthlyCompensationBudget: number
+  monthlyTargetedUnitsGoal?: number
   slaHours: number
   agentNotice: AgentNoticeRecord
   autoActivateThreshold?: number
@@ -149,6 +150,15 @@ export async function PATCH(request: NextRequest) {
       nextSettings.monthlyCompensationBudget = parsedBudget
     }
 
+    // Handle monthly targeted-units team goal update
+    if (body.monthlyTargetedUnitsGoal !== undefined) {
+      const parsedGoal = Number(body.monthlyTargetedUnitsGoal)
+      if (!Number.isFinite(parsedGoal) || parsedGoal < 0) {
+        return NextResponse.json({ error: 'Invalid monthly targeted units goal' }, { status: 400 })
+      }
+      nextSettings.monthlyTargetedUnitsGoal = Math.floor(parsedGoal)
+    }
+
     // Handle auto-activate (warning → active) rule.
     if (body.autoActivateThreshold !== undefined) {
       const t = Math.max(1, Math.floor(Number(body.autoActivateThreshold) || 0))
@@ -178,6 +188,7 @@ export async function PATCH(request: NextRequest) {
         slaHours: nextSettings.slaHours,
         agentNotice: nextSettings.agentNotice,
         monthlyCompensationBudget: nextSettings.monthlyCompensationBudget,
+        monthlyTargetedUnitsGoal: nextSettings.monthlyTargetedUnitsGoal,
         autoActivateThreshold: nextSettings.autoActivateThreshold,
         autoActivateEnabled: nextSettings.autoActivateEnabled,
       },
