@@ -3,6 +3,7 @@ import {
   readProducts,
   readOrders,
   readOrderItems,
+  readOrderDelivery,
 } from '@/lib/omsData'
 
 export const dynamic = 'force-dynamic'
@@ -38,10 +39,11 @@ export async function GET(req: NextRequest) {
       .slice(0, 10)
     const monthLabel = `${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`
 
-    const [products, orders, items] = await Promise.all([
+    const [products, orders, items, deliveries] = await Promise.all([
       readProducts(),
       readOrders(),
       readOrderItems(),
+      readOrderDelivery(),
     ])
 
     const targeted = products.filter((p: any) => Boolean(p.isTargeted))
@@ -58,10 +60,19 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    // Orders within current month + successful only.
+    // Build delivered set: orderId -> true when branch marked as 'تم التوصيل'.
+    const deliveredOrderIds = new Set<string>()
+    for (const d of deliveries) {
+      if (d.deliveryStatus === 'تم التوصيل') deliveredOrderIds.add(d.orderId)
+    }
+
+    // An order COUNTS if:
+    //   - it is in the current calendar month, AND
+    //   - orderStatus === 'تم'  OR  branch marked it 'تم التوصيل'.
     const monthOrders = orders.filter((o: any) => {
       const d = String(o.orderDate || '').slice(0, 10)
-      return d >= firstDay && d <= lastDay && o.orderStatus === 'تم'
+      if (!(d >= firstDay && d <= lastDay)) return false
+      return o.orderStatus === 'تم' || deliveredOrderIds.has(o.id)
     })
     const orderById = new Map<string, any>()
     for (const o of monthOrders) orderById.set(o.id, o)
