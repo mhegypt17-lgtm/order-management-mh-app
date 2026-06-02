@@ -182,37 +182,19 @@ export async function PATCH(request: NextRequest) {
       nextSettings.agentNotice = notice
     }
 
-    // Self-healing upsert: Supabase rejects payloads that include columns the
-    // current DB schema doesn't have. Parse those errors and retry with the
-    // offending field removed so saves succeed even if older migrations were
-    // never applied.
-    const droppedColumns: string[] = []
-    let payload: Record<string, any> = { id: 'singleton', ...nextSettings }
-    let upsertError: any = null
-
-    for (let attempt = 0; attempt < 10; attempt++) {
-      const { error } = await supabase.from('order_settings').upsert(payload)
-      if (!error) {
-        upsertError = null
-        break
-      }
-      upsertError = error
-      const missing = String(error.message || '').match(/'([^']+)' column/i)?.[1]
-      if (!missing || !(missing in payload)) break
-      delete payload[missing]
-      droppedColumns.push(missing)
-    }
+    // Strict upsert: all referenced columns must exist in the DB schema.
+    // If a column is missing, the error surfaces immediately so the schema
+    // drift can be fixed with a migration rather than silently swallowed.
+    const { error: upsertError } = await supabase
+      .from('order_settings')
+      .upsert({ id: 'singleton', ...nextSettings })
 
     if (upsertError) {
-      console.error('order-settings PATCH upsert failed:', upsertError, 'dropped:', droppedColumns)
+      console.error('order-settings PATCH upsert failed:', upsertError)
       return NextResponse.json(
-        { error: 'Failed to persist settings', detail: upsertError.message, droppedColumns },
+        { error: 'Failed to persist settings', detail: upsertError.message },
         { status: 500 }
       )
-    }
-
-    if (droppedColumns.length > 0) {
-      console.warn('order-settings PATCH succeeded after dropping missing columns:', droppedColumns)
     }
 
     return NextResponse.json(
@@ -223,7 +205,6 @@ export async function PATCH(request: NextRequest) {
         monthlyTargetedUnitsGoal: nextSettings.monthlyTargetedUnitsGoal,
         autoActivateThreshold: nextSettings.autoActivateThreshold,
         autoActivateEnabled: nextSettings.autoActivateEnabled,
-        droppedColumns: droppedColumns.length ? droppedColumns : undefined,
       },
       { status: 200 }
     )
