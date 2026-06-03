@@ -68,6 +68,7 @@ export async function POST(request: NextRequest) {
       assignedTo: body.assignedTo,
       createdBy: body.createdBy,
       compensationAmount: 0,
+      productIds: Array.isArray(body.productIds) ? body.productIds.filter((id: any) => typeof id === 'string' && id) : [],
       openedAt: new Date().toISOString(),
       closedAt: null,
     })
@@ -98,7 +99,7 @@ export async function PUT(request: NextRequest) {
     }
 
     // Handle regular update
-    const updated = await updateComplaint(id, {
+    const updates: any = {
       subject: body.subject,
       description: body.description,
       reason: body.reason,
@@ -107,7 +108,11 @@ export async function PUT(request: NextRequest) {
       assignedTo: body.assignedTo,
       compensationAmount: Number(body.compensationAmount) || 0,
       closedAt: body.status === 'closed' && !body.closedAt ? new Date().toISOString() : body.closedAt,
-    })
+    }
+    if (Array.isArray(body.productIds)) {
+      updates.productIds = body.productIds.filter((id: any) => typeof id === 'string' && id)
+    }
+    const updated = await updateComplaint(id, updates)
 
     if (!updated) {
       return NextResponse.json({ error: 'Complaint not found' }, { status: 404 })

@@ -20,11 +20,18 @@ interface Complaint {
   assignedTo: string
   createdBy: string
   compensationAmount: number
+  productIds: string[]
   comments: Array<{ id: string; authorName: string; text: string; createdAt: string }>
   openedAt: string
   closedAt: string | null
   createdAt: string
   updatedAt: string
+}
+
+interface OrderItem {
+  productId: string
+  productName?: string
+  quantity?: number
 }
 
 interface Order {
@@ -35,6 +42,7 @@ interface Order {
   customerId: string
   customerName?: string
   orderTotal?: number
+  items?: OrderItem[]
   customer?: {
     id: string
     phone: string
@@ -46,6 +54,12 @@ interface Customer {
   id: string
   phone: string
   customerName: string
+}
+
+interface Product {
+  id: string
+  productName: string
+  isActive?: boolean
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -74,6 +88,8 @@ export default function ComplaintsSection() {
   const [agents, setAgents] = useState(['رنا', 'مى', 'ميرنا', 'أمل'])
   const [orders, setOrders] = useState<Order[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
+  const [products, setProducts] = useState<Product[]>([])
+  const [productSearch, setProductSearch] = useState('')
   const [slaHours, setSlaHours] = useState(4)
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -101,6 +117,7 @@ export default function ComplaintsSection() {
     customerSearch: '',
     orderSearch: '',
     assignedTo: '',
+    productIds: [] as string[],
   })
 
   useEffect(() => {
@@ -120,11 +137,12 @@ export default function ComplaintsSection() {
   const fetchData = async () => {
     try {
       setLoading(true)
-      const [complaintRes, settingsRes, ordersRes, customersRes] = await Promise.all([
+      const [complaintRes, settingsRes, ordersRes, customersRes, productsRes] = await Promise.all([
         fetch('/api/complaints'),
         fetch('/api/order-settings'),
         fetch('/api/orders'),
         fetch('/api/customers'),
+        fetch('/api/products'),
       ])
 
       if (complaintRes.ok) {
@@ -156,6 +174,12 @@ export default function ComplaintsSection() {
         const data = await customersRes.json()
         setCustomers(Array.isArray(data) ? data : [])
       }
+
+      if (productsRes.ok) {
+        const data = await productsRes.json()
+        const list = Array.isArray(data) ? data : (data.products || [])
+        setProducts(list.filter((p: any) => p && p.id && p.productName))
+      }
     } catch (error) {
       console.error('Error fetching data:', error)
       toast.error('فشل تحميل البيانات')
@@ -164,6 +188,7 @@ export default function ComplaintsSection() {
       setReasons([])
       setOrders([])
       setCustomers([])
+      setProducts([])
     } finally {
       setLoading(false)
     }
@@ -195,6 +220,7 @@ export default function ComplaintsSection() {
           linkedOrderId: orderData?.id || null,
           assignedTo: formData.assignedTo,
           createdBy: user?.name || 'System',
+          productIds: formData.productIds,
         }),
       })
 
@@ -210,6 +236,7 @@ export default function ComplaintsSection() {
         customerSearch: '',
         orderSearch: '',
         assignedTo: user?.name || '',
+        productIds: [],
       })
       setShowForm(false)
       await fetchData()
@@ -400,7 +427,12 @@ export default function ComplaintsSection() {
   const handleSelectOrder = (order: Order) => {
     // Use embedded customer data from order
     const customerData = order.customer
-    
+
+    // Prefill productIds from this order's line items (CS can edit afterwards)
+    const orderProductIds = Array.isArray(order.items)
+      ? Array.from(new Set(order.items.map((it) => it.productId).filter((id): id is string => !!id)))
+      : []
+
     setSelectedOrder(order)
     setFormData({
       channel: '',
@@ -411,12 +443,18 @@ export default function ComplaintsSection() {
       customerSearch: customerData?.phone || '',
       orderSearch: order.appOrderNo,
       assignedTo: user?.name || '',
+      productIds: orderProductIds,
     })
-    
+    setProductSearch('')
+
     setShowSearchResults(false)
     setShowForm(true)
-    
-    toast.success(`✅ تم تحديد الطلب #${order.appOrderNo}`)
+
+    if (orderProductIds.length > 0) {
+      toast.success(`✅ تم تحديد الطلب #${order.appOrderNo} وتحميل ${orderProductIds.length} منتج`)
+    } else {
+      toast.success(`✅ تم تحديد الطلب #${order.appOrderNo}`)
+    }
   }
 
   const filteredComplaints = complaints.filter((c) => {
@@ -636,6 +674,105 @@ export default function ComplaintsSection() {
             />
           </div>
 
+          {/* Products (optional - for product-related complaints) */}
+          <div className="bg-amber-50/40 border border-amber-200 rounded-lg p-4 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <label className="block text-sm font-medium text-gray-800">
+                🛒 المنتج/المنتجات المعنية{' '}
+                <span className="text-xs font-normal text-gray-500">
+                  (اختياري — اتركها فارغة إذا لم تكن الشكوى متعلقة بمنتج)
+                </span>
+              </label>
+              {formData.productIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, productIds: [] })}
+                  className="text-xs text-red-600 hover:text-red-800 underline"
+                >
+                  مسح الكل ({formData.productIds.length})
+                </button>
+              )}
+            </div>
+
+            {selectedOrder && Array.isArray(selectedOrder.items) && selectedOrder.items.length > 0 && (
+              <p className="text-xs text-amber-800 bg-amber-100/60 rounded px-2 py-1 inline-block">
+                ✓ تم تحميل منتجات الطلب تلقائياً — يمكنك إلغاء التحديد أو إضافة منتجات أخرى
+              </p>
+            )}
+
+            {/* Selected products chips */}
+            {formData.productIds.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {formData.productIds.map((id) => {
+                  const p = products.find((pr) => pr.id === id)
+                  const name = p?.productName || 'منتج محذوف'
+                  return (
+                    <span
+                      key={id}
+                      className="inline-flex items-center gap-1 bg-white border border-amber-300 text-amber-900 rounded-full px-3 py-1 text-xs"
+                    >
+                      {name}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFormData({
+                            ...formData,
+                            productIds: formData.productIds.filter((x) => x !== id),
+                          })
+                        }
+                        className="text-red-500 hover:text-red-700 font-bold"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Search + add */}
+            <input
+              type="text"
+              value={productSearch}
+              onChange={(e) => setProductSearch(e.target.value)}
+              placeholder="ابحث عن منتج لإضافته..."
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500"
+            />
+            {productSearch.trim() && (
+              <div className="max-h-48 overflow-y-auto bg-white border border-gray-200 rounded-lg divide-y">
+                {products
+                  .filter(
+                    (p) =>
+                      p.isActive !== false &&
+                      !formData.productIds.includes(p.id) &&
+                      p.productName.toLowerCase().includes(productSearch.trim().toLowerCase())
+                  )
+                  .slice(0, 20)
+                  .map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        setFormData({ ...formData, productIds: [...formData.productIds, p.id] })
+                        setProductSearch('')
+                      }}
+                      className="w-full text-right px-3 py-2 text-sm hover:bg-amber-50 transition"
+                    >
+                      + {p.productName}
+                    </button>
+                  ))}
+                {products.filter(
+                  (p) =>
+                    p.isActive !== false &&
+                    !formData.productIds.includes(p.id) &&
+                    p.productName.toLowerCase().includes(productSearch.trim().toLowerCase())
+                ).length === 0 && (
+                  <p className="px-3 py-2 text-xs text-gray-500">لا توجد منتجات مطابقة</p>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Selected Order & Customer Display */}
           {selectedOrder && (
             <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-300 rounded-lg p-4 space-y-2">
@@ -674,7 +811,9 @@ export default function ComplaintsSection() {
                   customerSearch: '',
                   orderSearch: '',
                   assignedTo: user?.name || '',
+                  productIds: [],
                 })
+                setProductSearch('')
               }}
               className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition"
             >

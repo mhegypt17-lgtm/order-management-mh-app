@@ -214,6 +214,7 @@ export interface ComplaintRecord {
   assignedTo: string
   createdBy: string
   compensationAmount: number
+  productIds: string[]
   comments: ComplaintCommentRecord[]
   openedAt: string
   closedAt: string | null

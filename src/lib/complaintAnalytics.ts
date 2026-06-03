@@ -8,6 +8,12 @@ export interface ComplaintAnalyticsRecord {
   compensationAmount: number
   openedAt: string
   closedAt: string | null
+  productIds?: string[]
+}
+
+export interface ProductLookupEntry {
+  id: string
+  productName: string
 }
 
 function pct(value: number, total: number) {
@@ -54,7 +60,8 @@ export function calculateComplaintAnalytics(
   complaints: ComplaintAnalyticsRecord[],
   dateFrom: string,
   dateTo: string,
-  currentDate = new Date()
+  currentDate = new Date(),
+  products: ProductLookupEntry[] = []
 ) {
   const filtered = complaints.filter((complaint) => {
     const openedDate = complaint.openedAt.slice(0, 10)
@@ -91,6 +98,45 @@ export function calculateComplaintAnalytics(
     .filter((complaint) => complaint.openedAt.slice(0, 7) === monthKey)
     .reduce((sum, complaint) => sum + Number(complaint.compensationAmount || 0), 0)
 
+  // ── Top products (only complaints that have at least one productId) ──
+  const productNameById = new Map(products.map((p) => [p.id, p.productName || 'منتج بدون اسم']))
+  const productAgg = new Map<string, { count: number; compensation: number; reasons: Map<string, number> }>()
+  const complaintsWithProducts = filtered.filter((c) => Array.isArray(c.productIds) && c.productIds.length > 0).length
+
+  filtered.forEach((complaint) => {
+    const ids = Array.isArray(complaint.productIds) ? complaint.productIds : []
+    ids.forEach((id) => {
+      const name = productNameById.get(id) || 'منتج محذوف'
+      const bucket = productAgg.get(name) || { count: 0, compensation: 0, reasons: new Map<string, number>() }
+      bucket.count += 1
+      // Split compensation evenly across products on the ticket so totals don't double-count
+      bucket.compensation += Number(complaint.compensationAmount || 0) / Math.max(ids.length, 1)
+      const reasonKey = complaint.reason?.trim() || 'غير محدد'
+      bucket.reasons.set(reasonKey, (bucket.reasons.get(reasonKey) || 0) + 1)
+      productAgg.set(name, bucket)
+    })
+  })
+
+  const topProducts = Array.from(productAgg.entries())
+    .map(([name, b]) => {
+      let topReason = 'غير محدد'
+      let topReasonCount = 0
+      b.reasons.forEach((cnt, key) => {
+        if (cnt > topReasonCount) {
+          topReasonCount = cnt
+          topReason = key
+        }
+      })
+      return {
+        name,
+        count: b.count,
+        share: pct(b.count, complaintsWithProducts),
+        compensation: Math.round(b.compensation),
+        topReason,
+      }
+    })
+    .sort((a, b) => b.count - a.count)
+
   return {
     totalTickets,
     resolvedTickets,
@@ -103,5 +149,7 @@ export function calculateComplaintAnalytics(
     monthLabel,
     topReasons: rankByCount(filtered.map((complaint) => complaint.reason), totalTickets),
     topChannels: rankByCount(filtered.map((complaint) => complaint.channel), totalTickets),
+    topProducts,
+    complaintsWithProducts,
   }
 }

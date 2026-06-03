@@ -38,6 +38,7 @@ export default function ReportsPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [orders, setOrders] = useState<OrderRecord[]>([])
   const [complaints, setComplaints] = useState<ReportComplaint[]>([])
+  const [productLookup, setProductLookup] = useState<{ id: string; productName: string }[]>([])
   const [monthlyCompensationBudget, setMonthlyCompensationBudget] = useState(0)
   const [targetedStats, setTargetedStats] = useState<{
     monthLabel: string
@@ -60,18 +61,26 @@ export default function ReportsPage() {
   const fetchOrders = async () => {
     setIsLoading(true)
     try {
-      const [ordersRes, complaintsRes, settingsRes] = await Promise.all([
+      const [ordersRes, complaintsRes, settingsRes, productsRes] = await Promise.all([
         fetch('/api/orders'),
         fetch('/api/complaints'),
         fetch('/api/order-settings'),
+        fetch('/api/products'),
       ])
 
       const ordersData = await ordersRes.json()
       const complaintsData = await complaintsRes.json()
       const settingsData = await settingsRes.json()
+      const productsData = await productsRes.json()
 
       setOrders(ordersData.orders || [])
       setComplaints(Array.isArray(complaintsData) ? complaintsData : [])
+      const productsList = Array.isArray(productsData) ? productsData : (productsData.products || [])
+      setProductLookup(
+        productsList
+          .filter((p: any) => p && p.id && p.productName)
+          .map((p: any) => ({ id: p.id, productName: p.productName }))
+      )
       setMonthlyCompensationBudget(Number(settingsData?.settings?.monthlyCompensationBudget) || 0)
     } finally {
       setIsLoading(false)
@@ -149,8 +158,8 @@ export default function ReportsPage() {
   }, [rangeOrders])
 
   const complaintAnalytics = useMemo(() => {
-    return calculateComplaintAnalytics(complaints, dateFrom, dateTo)
-  }, [complaints, dateFrom, dateTo])
+    return calculateComplaintAnalytics(complaints, dateFrom, dateTo, new Date(), productLookup)
+  }, [complaints, dateFrom, dateTo, productLookup])
 
   const isCompensationBudgetExceeded =
     monthlyCompensationBudget > 0 && complaintAnalytics.monthlyCompensation > monthlyCompensationBudget
@@ -353,6 +362,50 @@ export default function ReportsPage() {
             </table>
           </section>
         </div>
+
+        {/* Top problem products */}
+        <section className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-lg border-2 border-amber-200 p-4 mt-4 overflow-x-auto">
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+            <h3 className="font-bold text-gray-900">🛒 أعلى المنتجات إثارة للشكاوى</h3>
+            <span className="text-xs text-gray-600">
+              {complaintAnalytics.complaintsWithProducts} شكوى مرتبطة بمنتجات من إجمالي {complaintAnalytics.totalTickets}
+            </span>
+          </div>
+          <table className="w-full min-w-[640px] text-sm">
+            <thead className="bg-amber-100 border-b border-amber-200">
+              <tr>
+                <th className="px-3 py-2 text-center">الترتيب</th>
+                <th className="px-3 py-2 text-right">المنتج</th>
+                <th className="px-3 py-2 text-center">عدد الشكاوى</th>
+                <th className="px-3 py-2 text-right">أبرز سبب</th>
+                <th className="px-3 py-2 text-center">إجمالي التعويض</th>
+                <th className="px-3 py-2 text-center">% من شكاوى المنتجات</th>
+              </tr>
+            </thead>
+            <tbody>
+              {complaintAnalytics.topProducts.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-3 py-6 text-center text-gray-500">
+                    لا توجد شكاوى مرتبطة بمنتجات في هذا النطاق
+                  </td>
+                </tr>
+              ) : (
+                complaintAnalytics.topProducts.slice(0, 10).map((product, index) => (
+                  <tr key={product.name} className="border-b border-amber-100 hover:bg-amber-50/60">
+                    <td className="px-3 py-2 text-center font-semibold">#{index + 1}</td>
+                    <td className="px-3 py-2 text-gray-900 font-medium">{product.name}</td>
+                    <td className="px-3 py-2 text-center font-bold text-red-700">{product.count}</td>
+                    <td className="px-3 py-2 text-gray-700 text-xs">{product.topReason}</td>
+                    <td className="px-3 py-2 text-center text-gray-800">
+                      {product.compensation.toLocaleString()} ج.م
+                    </td>
+                    <td className="px-3 py-2 text-center">{product.share}%</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </section>
       </section>
 
       <section className="bg-white rounded-lg border border-gray-200 p-4">
