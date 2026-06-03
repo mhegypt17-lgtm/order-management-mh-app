@@ -21,6 +21,7 @@ export type NotificationType =
   | 'briefing'
   | 'complaint-new'
   | 'complaint-comment'
+  | 'complaint-sla-breach'
   | 'order-new'
   | 'order-status-changed'
   | 'delivery-status-changed'
@@ -74,7 +75,10 @@ interface ComplaintRec {
   ticketNumber?: string
   channel?: string
   status?: string
+  assignedTo?: string
   createdBy?: string
+  openedAt?: string
+  closedAt?: string | null
   createdAt: string
   comments?: CommentRec[]
 }
@@ -174,7 +178,13 @@ export async function GET(req: NextRequest) {
 
     // ── Complaints ────────────────────────────────────────────────────────
     const complaints = await readComplaints()
-    for (const c of complaints) {
+    // SLA threshold from settings (default 4h)
+    const _settingsForSla = await readOrderSettings()
+    const slaHours = Number(_settingsForSla?.slaHours) || 4
+    const slaMs = slaHours * 60 * 60 * 1000
+    const nowMsForSla = Date.now()
+
+    for (const c of complaints as ComplaintRec[]) {
       const created = new Date(c.createdAt).getTime()
       if (isFinite(created) && created >= cutoff && c.createdBy !== userName) {
         items.push({
@@ -188,6 +198,24 @@ export async function GET(req: NextRequest) {
           priority: 'high',
         })
       }
+
+      // 🚨 SLA breach — fires while ticket is still open/in-progress past the SLA window
+      const openedMs = c.openedAt ? new Date(c.openedAt).getTime() : created
+      const isStillOpen = c.status !== 'closed'
+      if (isStillOpen && isFinite(openedMs) && nowMsForSla - openedMs > slaMs) {
+        const overdueHours = Math.floor((nowMsForSla - openedMs) / (1000 * 60 * 60))
+        items.push({
+          id: `comp-sla:${c.id}`,
+          type: 'complaint-sla-breach',
+          title: '🚨 تذكرة تجاوزت SLA',
+          body: `#${c.ticketNumber || c.id.slice(-6)} — مفتوحة منذ ${overdueHours}س${c.assignedTo ? ' · ' + c.assignedTo : ''}`,
+          href: '/orders/complaints',
+          createdAt: new Date(openedMs + slaMs).toISOString(),
+          actor: c.assignedTo,
+          priority: 'urgent',
+        })
+      }
+
       // Comments on the ticket (from someone else)
       for (const cm of c.comments || []) {
         const ct = new Date(cm.createdAt).getTime()
