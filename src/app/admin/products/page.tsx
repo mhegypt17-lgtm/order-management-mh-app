@@ -29,6 +29,7 @@ export default function ProductCatalogPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [showTargetedOnly, setShowTargetedOnly] = useState(false)
+  const [sortBy, setSortBy] = useState<'default' | 'category' | 'name' | 'priceAsc' | 'priceDesc'>('default')
   const [formData, setFormData] = useState<Product>({
     productName: '',
     productDescription: '',
@@ -240,10 +241,21 @@ export default function ProductCatalogPage() {
     }
   }
 
-  const filteredProducts = products.filter((p) => {
-    if (showTargetedOnly && !p.isTargeted) return false
-    return p.productName.includes(searchTerm)
-  })
+  const filteredProducts = (() => {
+    const list = products.filter((p) => {
+      if (showTargetedOnly && !p.isTargeted) return false
+      return p.productName.includes(searchTerm)
+    })
+    const priceOf = (p: Product) => (p.offerPrice && p.offerPrice > 0 ? p.offerPrice : p.basePrice)
+    const cmp = (a: string, b: string) => a.localeCompare(b, 'ar')
+    if (sortBy === 'category') {
+      return [...list].sort((a, b) => cmp(a.productCategory || '', b.productCategory || '') || cmp(a.productName, b.productName))
+    }
+    if (sortBy === 'name') return [...list].sort((a, b) => cmp(a.productName, b.productName))
+    if (sortBy === 'priceAsc') return [...list].sort((a, b) => priceOf(a) - priceOf(b))
+    if (sortBy === 'priceDesc') return [...list].sort((a, b) => priceOf(b) - priceOf(a))
+    return list
+  })()
 
   const targetedCount = products.filter((p) => p.isTargeted).length
 
@@ -291,6 +303,19 @@ export default function ProductCatalogPage() {
         >
           🎯 المستهدفة فقط ({targetedCount})
         </button>
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+          className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-red-500"
+          dir="rtl"
+          title="ترتيب المنتجات"
+        >
+          <option value="default">↕️ الترتيب الافتراضي</option>
+          <option value="category">📂 حسب التصنيف</option>
+          <option value="name">🔤 حسب الاسم</option>
+          <option value="priceAsc">💰 السعر تصاعدي</option>
+          <option value="priceDesc">💰 السعر تنازلي</option>
+        </select>
       </div>
 
       {/* Products Table */}

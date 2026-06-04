@@ -43,6 +43,7 @@ export default function BranchProductsPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [stockFilter, setStockFilter] = useState<'all' | StockStatus>('all')
+  const [sortBy, setSortBy] = useState<'default' | 'category' | 'name' | 'priceAsc' | 'priceDesc'>('default')
   const [stockEditStatus, setStockEditStatus] = useState<StockStatus>('available')
   const [stockEditQty, setStockEditQty] = useState<string>('')
   const [savingStock, setSavingStock] = useState(false)
@@ -68,7 +69,7 @@ export default function BranchProductsPage() {
 
   const filteredProducts = useMemo(() => {
     const term = searchTerm.trim().toLowerCase()
-    return products.filter((p) => {
+    const list = products.filter((p) => {
       const matchesSearch = !term || (
         String(p.productName || '').toLowerCase().includes(term) ||
         String(p.productCategory || '').toLowerCase().includes(term) ||
@@ -77,7 +78,14 @@ export default function BranchProductsPage() {
       const matchesStock = stockFilter === 'all' || (p.stockStatus || 'available') === stockFilter
       return matchesSearch && matchesStock
     })
-  }, [products, searchTerm, stockFilter])
+    const priceOf = (p: Product) => (p.offerPrice && p.offerPrice > 0 ? p.offerPrice : p.basePrice)
+    const cmp = (a: string, b: string) => a.localeCompare(b, 'ar')
+    if (sortBy === 'category') return [...list].sort((a, b) => cmp(a.productCategory || '', b.productCategory || '') || cmp(a.productName, b.productName))
+    if (sortBy === 'name') return [...list].sort((a, b) => cmp(a.productName, b.productName))
+    if (sortBy === 'priceAsc') return [...list].sort((a, b) => priceOf(a) - priceOf(b))
+    if (sortBy === 'priceDesc') return [...list].sort((a, b) => priceOf(b) - priceOf(a))
+    return list
+  }, [products, searchTerm, stockFilter, sortBy])
 
   // Sync modal edit fields when a product is opened
   useEffect(() => {
@@ -145,13 +153,28 @@ export default function BranchProductsPage() {
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
-        <input
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          placeholder="بحث باسم المنتج أو التصنيف أو التغليف"
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-          dir="rtl"
-        />
+        <div className="flex flex-col md:flex-row gap-3">
+          <input
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="بحث باسم المنتج أو التصنيف أو التغليف"
+            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+            dir="rtl"
+          />
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-red-500"
+            dir="rtl"
+            title="ترتيب المنتجات"
+          >
+            <option value="default">↕️ الترتيب الافتراضي</option>
+            <option value="category">📂 حسب التصنيف</option>
+            <option value="name">🔤 حسب الاسم</option>
+            <option value="priceAsc">💰 السعر تصاعدي</option>
+            <option value="priceDesc">💰 السعر تنازلي</option>
+          </select>
+        </div>
         <div className="flex flex-wrap gap-2">
           {([
             { key: 'all', label: `الكل (${stockCounts.all})`, cls: 'bg-gray-100 text-gray-700' },
