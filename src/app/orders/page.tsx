@@ -109,10 +109,8 @@ export default function OrdersPage() {
   }
 
   const summary = useMemo(() => {
-    const totalValue = filteredOrders.reduce((sum, order) => sum + Number(order.orderTotal || 0), 0)
     return {
       count: filteredOrders.length,
-      totalValue,
     }
   }, [filteredOrders])
 
@@ -280,8 +278,30 @@ export default function OrdersPage() {
           <p className="text-2xl font-bold text-gray-900 mt-1">{summary.count}</p>
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <p className="text-sm text-gray-500">إجمالي قيمة الطلبات</p>
-          <p className="text-2xl font-bold text-gray-900 mt-1">{summary.totalValue.toLocaleString()} ج.م</p>
+          <p className="text-sm text-gray-500">المنتجات المستهدفة المنفذة</p>
+          <div className="flex items-baseline gap-2 mt-1">
+            <p className="text-2xl font-bold text-gray-900">{targetedWidget.totalUnits.toLocaleString()}</p>
+            {targetedWidget.monthlyGoal > 0 && (
+              <span className="text-sm text-gray-500">/ {targetedWidget.monthlyGoal.toLocaleString()} وحدة</span>
+            )}
+          </div>
+          {targetedWidget.monthlyGoal > 0 ? (
+            <div className="mt-2">
+              <div className="flex items-center justify-between text-xs mb-1">
+                <span className={`font-bold ${targetedWidget.achievementPct >= 100 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                  {targetedWidget.achievementPct.toFixed(1)}% من الهدف الشهري
+                </span>
+              </div>
+              <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                <div
+                  className={`h-full ${targetedWidget.achievementPct >= 100 ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                  style={{ width: `${Math.min(100, targetedWidget.achievementPct)}%` }}
+                />
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-gray-400 mt-1">لا يوجد هدف شهري محدد</p>
+          )}
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4 flex items-center justify-between gap-3">
           <div>
