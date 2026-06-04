@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
+import { compareCategories } from '@/lib/omsData'
 
 export interface Product {
   id?: string
@@ -249,7 +250,7 @@ export default function ProductCatalogPage() {
     const priceOf = (p: Product) => (p.offerPrice && p.offerPrice > 0 ? p.offerPrice : p.basePrice)
     const cmp = (a: string, b: string) => a.localeCompare(b, 'ar')
     if (sortBy === 'category') {
-      return [...list].sort((a, b) => cmp(a.productCategory || '', b.productCategory || '') || cmp(a.productName, b.productName))
+      return [...list].sort((a, b) => compareCategories(a.productCategory, b.productCategory) || cmp(a.productName, b.productName))
     }
     if (sortBy === 'name') return [...list].sort((a, b) => cmp(a.productName, b.productName))
     if (sortBy === 'priceAsc') return [...list].sort((a, b) => priceOf(a) - priceOf(b))

@@ -241,6 +241,41 @@ export interface ProductRecord {
   updatedAt: string
 }
 
+// Preferred display order for product categories.
+// Any category not in this list will be sorted alphabetically AFTER these.
+// Add new entries below to extend the sequence in the future.
+export const PRODUCT_CATEGORY_ORDER: string[] = [
+  'لحوم',
+  'لحوم متبلة',
+  'لحوم لذيذة',
+  'ضاني',
+  'دواجن فريش',
+  'دواجن لذيذة',
+  'دواجن فريش متبلة',
+  'مقبلات',
+  'بقالة',
+  'خضروات',
+  'اخشاب',
+  'حيوانات اليفة وجبات',
+]
+
+const normalizeCategory = (c: string) => (c || '').replace(/\s+/g, ' ').trim()
+
+export const categoryRank = (category?: string): number => {
+  const c = normalizeCategory(category || '')
+  if (!c) return Number.MAX_SAFE_INTEGER
+  const idx = PRODUCT_CATEGORY_ORDER.findIndex((x) => normalizeCategory(x) === c)
+  return idx === -1 ? Number.MAX_SAFE_INTEGER - 1 : idx
+}
+
+export const compareCategories = (a?: string, b?: string): number => {
+  const ra = categoryRank(a)
+  const rb = categoryRank(b)
+  if (ra !== rb) return ra - rb
+  // Same rank (both unknown or both empty) → fall back to alphabetical (Arabic locale)
+  return normalizeCategory(a || '').localeCompare(normalizeCategory(b || ''), 'ar')
+}
+
 export interface RetentionStageConfig {
   days: number
   action: 'off' | 'notify' | 'task'
