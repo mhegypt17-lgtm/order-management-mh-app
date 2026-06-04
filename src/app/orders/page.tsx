@@ -109,7 +109,7 @@ export default function OrdersPage() {
   }
 
   const summary = useMemo(() => {
-    const delivered = filteredOrders.filter((o) => o.orderStatus === 'تم').length
+    const delivered = filteredOrders.filter((o) => o.delivery?.deliveryStatus === 'تم التوصيل').length
     const total = filteredOrders.length
     const fulfilmentPct = total > 0 ? (delivered / total) * 100 : 0
     return {
