@@ -196,6 +196,19 @@ export default function OrderForm({ mode, orderId }: Props) {
         const activeProducts = (productsData.products || []).filter((p: Product) => p.isActive)
         setProducts(activeProducts)
 
+        // Diagnostic: count stock states so we can confirm low/out actually arrive in the client.
+        if (typeof window !== 'undefined') {
+          const lowList = activeProducts.filter((p: any) => String(p?.stockStatus || '').toLowerCase().trim() === 'low')
+          const outList = activeProducts.filter((p: any) => String(p?.stockStatus || '').toLowerCase().trim() === 'out')
+          // eslint-disable-next-line no-console
+          console.info('[OrderForm] products loaded', {
+            total: activeProducts.length,
+            low: lowList.length,
+            out: outList.length,
+            lowSample: lowList.slice(0, 3).map((p: any) => ({ name: p.productName, stockStatus: p.stockStatus, stockQuantity: p.stockQuantity })),
+          })
+        }
+
         const zonesData = await zonesRes.json()
         const zones = Array.isArray(zonesData.zones) ? zonesData.zones : []
         setDeliveryZones(zones)
@@ -562,7 +575,11 @@ export default function OrderForm({ mode, orderId }: Props) {
     const outOfStockNames = validItems
       .map((i) => {
         const p = products.find((pp) => pp.id === i.productId)
-        return p && p.stockStatus === 'out' ? p.productName : null
+        if (!p) return null
+        const s = String((p.stockStatus as any) || '').toLowerCase().trim()
+        const qty = (p as any).stockQuantity
+        const isOut = s === 'out' || s === 'out_of_stock' || s === 'unavailable' || s === 'غير متاح' || (qty != null && Number(qty) === 0)
+        return isOut ? p.productName : null
       })
       .filter(Boolean) as string[]
     if (outOfStockNames.length > 0) {
@@ -573,9 +590,13 @@ export default function OrderForm({ mode, orderId }: Props) {
     const lowStockBreaches = validItems
       .map((i) => {
         const p = products.find((pp) => pp.id === i.productId)
-        if (!p || p.stockStatus !== 'low') return null
-        if (p.stockQuantity != null && Number(i.quantity) > Number(p.stockQuantity)) {
-          return `${p.productName} (متبقي ${p.stockQuantity})`
+        if (!p) return null
+        const s = String((p.stockStatus as any) || '').toLowerCase().trim()
+        const qty = (p as any).stockQuantity
+        const isLow = s === 'low' || s === 'low_stock' || s === 'منخفض' || s === 'مخزون منخفض' || (qty != null && Number(qty) > 0 && Number(qty) <= 3)
+        if (!isLow) return null
+        if (qty != null && Number(i.quantity) > Number(qty)) {
+          return `${p.productName} (متبقي ${qty})`
         }
         return null
       })
@@ -804,9 +825,21 @@ export default function OrderForm({ mode, orderId }: Props) {
               {items.map((item, index) => {
                 const selectedProduct = findProductByName(products, item.productNameInput)
                 const lineTotal = (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0)
-                const stock = selectedProduct?.stockStatus || 'available'
-                const isOut = stock === 'out'
-                const isLow = stock === 'low'
+                const stockRaw = String((selectedProduct?.stockStatus as any) || 'available').toLowerCase().trim()
+                const stockQty = selectedProduct?.stockQuantity
+                const isOut =
+                  stockRaw === 'out' ||
+                  stockRaw === 'out_of_stock' ||
+                  stockRaw === 'unavailable' ||
+                  stockRaw === 'غير متاح' ||
+                  (stockQty != null && Number(stockQty) === 0)
+                const isLow =
+                  !isOut &&
+                  (stockRaw === 'low' ||
+                    stockRaw === 'low_stock' ||
+                    stockRaw === 'منخفض' ||
+                    stockRaw === 'مخزون منخفض' ||
+                    (stockQty != null && Number(stockQty) > 0 && Number(stockQty) <= 3))
                 const rowCls = isOut
                   ? 'border-b-2 border-red-300 bg-red-50'
                   : isLow
