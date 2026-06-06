@@ -254,9 +254,28 @@ export async function POST(request: NextRequest) {
     )
     const orderTotal = subtotal + deliveryFee
 
-    // Get existing orders for appOrderNo generation
-    const { data: existingOrders = [] } = await supabase.from('orders').select('*')
-    const appOrderNo = await generateAppOrderNo(body.orderDate, body.orderType, existingOrders as OrderRecord[])
+    // Get existing orders for that same date+type only (cheap & accurate)
+    const dateKey = (() => {
+      try {
+        const [y, m, d] = body.orderDate.split('-')
+        return `${d}${m}${y.slice(-2)}`
+      } catch { return '' }
+    })()
+    const typeSlug = String(body.orderType || '').toLowerCase()
+    const { data: sameBucket = [] } = await supabase
+      .from('orders')
+      .select('appOrderNo')
+      .ilike('appOrderNo', `${dateKey}${typeSlug}%`)
+
+    // Pick suffix = max(existing trailing digits) + 1 to survive deletions/gaps
+    const usedSuffixes = (sameBucket as { appOrderNo: string }[])
+      .map((r) => {
+        const m = (r.appOrderNo || '').match(/(\d+)$/)
+        return m ? parseInt(m[1], 10) : 0
+      })
+      .filter((n) => Number.isFinite(n))
+    let suffix = (usedSuffixes.length ? Math.max(...usedSuffixes) : 0) + 1
+    let appOrderNo = `${dateKey}${typeSlug}${suffix}`
 
     // 3. Insert order
     const orderId = generateTextId('ord')
@@ -299,8 +318,24 @@ export async function POST(request: NextRequest) {
     let finalOrder = createdOrder
     let finalError = orderError
 
+    // Retry-on-unique-violation: bump suffix until a free appOrderNo is found.
+    let attempts = 0
+    while (
+      finalError &&
+      /unique constraint|duplicate key|orders_apporderno/i.test(finalError.message || '') &&
+      attempts < 10
+    ) {
+      attempts++
+      suffix++
+      appOrderNo = `${dateKey}${typeSlug}${suffix}`
+      order.appOrderNo = appOrderNo
+      const retry = await supabase.from('orders').insert([order]).select().single()
+      finalOrder = retry.data
+      finalError = retry.error
+    }
+
     // Fallback: DB may not yet have the scheduled columns from the new migration.
-    if (orderError && /scheduled|column .* does not exist/i.test(orderError.message || '')) {
+    if (finalError && /scheduled|column .* does not exist/i.test(finalError.message || '')) {
       console.warn('[orders POST] scheduled columns missing in DB, retrying without them')
       const {
         isScheduled: _i,
