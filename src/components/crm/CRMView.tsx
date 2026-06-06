@@ -118,7 +118,21 @@ const TIER_COLORS: Record<string, string> = {
   'فضي':   'bg-gray-100 text-gray-700',
   'ذهبي':  'bg-yellow-100 text-yellow-800',
   'بلاتيني': 'bg-purple-100 text-purple-800',
+  Bronze:   'bg-amber-100 text-amber-800',
+  Silver:   'bg-gray-100 text-gray-700',
+  Gold:     'bg-yellow-100 text-yellow-800',
+  Platinum: 'bg-purple-100 text-purple-800',
 }
+
+const TIER_AR_TO_EN: Record<string, string> = {
+  'برونزي': 'Bronze',
+  'فضي': 'Silver',
+  'ذهبي': 'Gold',
+  'بلاتيني': 'Platinum',
+}
+
+const matchesTier = (apiTier: string | undefined | null, arTier: string): boolean =>
+  !!apiTier && (apiTier === arTier || apiTier === TIER_AR_TO_EN[arTier])
 
 const STATUS_COLORS: Record<string, string> = {
   'تم':    'bg-green-100 text-green-800',
@@ -1042,16 +1056,16 @@ export default function CRMView({ role }: CRMViewProps) {
                   <h3 className="text-sm font-bold text-gray-700 mb-3">⭐ مستوى العميل</h3>
                   <div className="flex gap-2 mb-3">
                     {(['برونزي', 'فضي', 'ذهبي', 'بلاتيني'] as const).map((t) => (
-                      <div key={t} className={`flex-1 text-center py-2 rounded-lg text-xs font-medium ${profile.insights.tier === t ? TIER_COLORS[t] + ' ring-2 ring-offset-1 ring-gray-400' : 'bg-gray-100 text-gray-400'}`}>
+                      <div key={t} className={`flex-1 text-center py-2 rounded-lg text-xs font-medium ${matchesTier(profile.insights.tier, t) ? TIER_COLORS[t] + ' ring-2 ring-offset-1 ring-gray-400' : 'bg-gray-100 text-gray-400'}`}>
                         {t}
                       </div>
                     ))}
                   </div>
                   <p className="text-xs text-gray-500 text-center">
-                    {profile.insights.tier === 'برونزي' && `${5 - profile.stats.completedOrders} طلب حتى الفضي`}
-                    {profile.insights.tier === 'فضي' && `${10 - profile.stats.completedOrders} طلب حتى الذهبي`}
-                    {profile.insights.tier === 'ذهبي' && `${20 - profile.stats.completedOrders} طلب حتى البلاتيني`}
-                    {profile.insights.tier === 'بلاتيني' && '🏆 أعلى مستوى — عميل VIP'}
+                    {(matchesTier(profile.insights.tier, 'برونزي')) && `${Math.max(0, 5 - profile.stats.completedOrders)} طلب حتى الفضي`}
+                    {(matchesTier(profile.insights.tier, 'فضي')) && `${Math.max(0, 10 - profile.stats.completedOrders)} طلب حتى الذهبي`}
+                    {(matchesTier(profile.insights.tier, 'ذهبي')) && `${Math.max(0, 20 - profile.stats.completedOrders)} طلب حتى البلاتيني`}
+                    {(matchesTier(profile.insights.tier, 'بلاتيني')) && '🏆 أعلى مستوى — عميل VIP'}
                   </p>
                 </div>
               </div>

@@ -88,6 +88,9 @@ type OrderFormModel = {
   notes: string
   followUp: boolean
   followUpNotes: string
+  scheduledDate: string
+  scheduledTimeSlot: '' | 'صباحي' | 'مسائي' | 'ساعة محددة'
+  scheduledSpecificTime: string
 }
 
 type DeliveryData = {
@@ -134,6 +137,9 @@ function getDefaultOrderModel(): OrderFormModel {
     notes: '',
     followUp: false,
     followUpNotes: '',
+    scheduledDate: '',
+    scheduledTimeSlot: '',
+    scheduledSpecificTime: '',
   }
 }
 
@@ -273,6 +279,9 @@ export default function OrderForm({ mode, orderId }: Props) {
             notes: order.notes || '',
             followUp: Boolean(order.followUp),
             followUpNotes: order.followUpNotes || '',
+            scheduledDate: order.scheduledDate || '',
+            scheduledTimeSlot: (order.scheduledTimeSlot as OrderFormModel['scheduledTimeSlot']) || '',
+            scheduledSpecificTime: order.scheduledSpecificTime || '',
           })
 
           // Best-effort: load other addresses for this customer (non-fatal).
@@ -552,11 +561,16 @@ export default function OrderForm({ mode, orderId }: Props) {
       return toast.error('اختر سبب الإلغاء')
     }
 
+    if (form.orderStatus === 'حجز' && !form.scheduledDate) {
+      return toast.error('اختر تاريخ الحجز')
+    }
+
     setIsSaving(true)
 
     try {
       const payload = {
         ...form,
+        isScheduled: form.orderStatus === 'حجز',
         deliveryArea: resolvedDeliveryArea,
         deliverySubArea: form.deliverySubArea || '',
         items: validItems,
@@ -926,6 +940,39 @@ export default function OrderForm({ mode, orderId }: Props) {
               onChange={(v) => updateForm('cancellationReason', v as OrderFormModel['cancellationReason'])}
               options={CANCELLATION_REASONS}
             />
+          )}
+
+          {form.orderStatus === 'حجز' && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1 text-right">تاريخ الحجز</label>
+                <input
+                  type="date"
+                  value={form.scheduledDate}
+                  onChange={(e) => updateForm('scheduledDate', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  dir="ltr"
+                />
+              </div>
+              <FieldSelect
+                label="فترة التوصيل"
+                value={form.scheduledTimeSlot}
+                onChange={(v) => updateForm('scheduledTimeSlot', v as OrderFormModel['scheduledTimeSlot'])}
+                options={['', 'صباحي', 'مسائي', 'ساعة محددة']}
+              />
+              {form.scheduledTimeSlot === 'ساعة محددة' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1 text-right">الساعة المحددة</label>
+                  <input
+                    type="time"
+                    value={form.scheduledSpecificTime}
+                    onChange={(e) => updateForm('scheduledSpecificTime', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    dir="ltr"
+                  />
+                </div>
+              )}
+            </>
           )}
 
           <div className="md:col-span-2">
