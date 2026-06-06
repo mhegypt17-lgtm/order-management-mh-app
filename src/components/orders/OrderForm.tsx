@@ -807,10 +807,14 @@ export default function OrderForm({ mode, orderId }: Props) {
                 const stock = selectedProduct?.stockStatus || 'available'
                 const isOut = stock === 'out'
                 const isLow = stock === 'low'
-                const rowCls = isOut ? 'border-b border-red-200 bg-red-50/40' : isLow ? 'border-b border-amber-200 bg-amber-50/40' : 'border-b border-gray-200'
+                const rowCls = isOut
+                  ? 'border-b-2 border-red-300 bg-red-50'
+                  : isLow
+                  ? 'border-b-2 border-amber-300 bg-amber-50'
+                  : 'border-b border-gray-200'
                 return (
                   <tr key={index} className={rowCls}>
-                    <td className="p-2">
+                    <td className="p-2 align-top">
                       <div className="flex items-center gap-1">
                         <input
                           list={`products-${index}`}
@@ -830,10 +834,17 @@ export default function OrderForm({ mode, orderId }: Props) {
                         )}
                       </div>
                       {selectedProduct && (isOut || isLow) && (
-                        <div className={`mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold border ${isOut ? 'bg-red-100 text-red-700 border-red-300' : 'bg-amber-100 text-amber-800 border-amber-300'}`}>
+                        <div
+                          className={`mt-1.5 px-2 py-1 rounded-md text-[11px] font-bold border-2 text-center ${
+                            isOut
+                              ? 'bg-red-600 text-white border-red-700'
+                              : 'bg-amber-500 text-white border-amber-600'
+                          }`}
+                          title={isOut ? 'غير متاح' : 'مخزون منخفض'}
+                        >
                           {isOut
                             ? '⛔ غير متاح'
-                            : `⚠️ مخزون منخفض${selectedProduct.stockQuantity != null ? ` (متبقي ${selectedProduct.stockQuantity})` : ''}`}
+                            : `⚠️ مخزون منخفض${selectedProduct.stockQuantity != null ? ` — متبقي ${selectedProduct.stockQuantity}` : ''}`}
                         </div>
                       )}
                       <datalist id={`products-${index}`}>
