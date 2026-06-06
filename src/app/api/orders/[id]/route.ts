@@ -312,7 +312,18 @@ export async function PUT(
       orderTotal,
       updatedAt: now,
     }
-    await supabase.from('orders').update(updatedOrder).eq('id', params.id)
+    const updRes = await supabase.from('orders').update(updatedOrder).eq('id', params.id)
+    if (updRes.error && /scheduled|column .* does not exist/i.test(updRes.error.message || '')) {
+      console.warn('[orders PUT] scheduled columns missing in DB, retrying without them')
+      const {
+        isScheduled: _i,
+        scheduledDate: _d,
+        scheduledTimeSlot: _s,
+        scheduledSpecificTime: _t,
+        ...updateSafe
+      } = updatedOrder
+      await supabase.from('orders').update(updateSafe).eq('id', params.id)
+    }
 
     // Replace order items: delete old, insert new
     await supabase.from('order_items').delete().eq('orderId', params.id)

@@ -296,9 +296,30 @@ export async function POST(request: NextRequest) {
       .select()
       .single()
 
-    if (orderError) {
-      console.error('Error inserting order:', orderError)
-      return NextResponse.json({ error: 'Failed to create order' }, { status: 500 })
+    let finalOrder = createdOrder
+    let finalError = orderError
+
+    // Fallback: DB may not yet have the scheduled columns from the new migration.
+    if (orderError && /scheduled|column .* does not exist/i.test(orderError.message || '')) {
+      console.warn('[orders POST] scheduled columns missing in DB, retrying without them')
+      const {
+        isScheduled: _i,
+        scheduledDate: _d,
+        scheduledTimeSlot: _s,
+        scheduledSpecificTime: _t,
+        ...orderSafe
+      } = order
+      const retry = await supabase.from('orders').insert([orderSafe]).select().single()
+      finalOrder = retry.data
+      finalError = retry.error
+    }
+
+    if (finalError || !finalOrder) {
+      console.error('Error inserting order:', finalError)
+      return NextResponse.json(
+        { error: 'Failed to create order', details: finalError?.message || null },
+        { status: 500 }
+      )
     }
 
     // 4. Insert order items
@@ -359,7 +380,7 @@ export async function POST(request: NextRequest) {
     })
 
     // Return enriched order
-    const enrichedOrder = await enrichOrder(createdOrder || order)
+    const enrichedOrder = await enrichOrder(finalOrder || order)
     return NextResponse.json({ order: enrichedOrder }, { status: 201 })
   } catch (error) {
     console.error('Error creating order:', error)
