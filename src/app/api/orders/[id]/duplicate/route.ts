@@ -3,24 +3,16 @@ import {
   OrderItemRecord,
   OrderRecord,
   appendEditHistory,
-  generateAppOrderNo,
   generateId,
-  readAddresses,
-  readDeliveryZones,
   readOrderItems,
   readOrders,
-  readProducts,
 } from '@/lib/omsData'
 import { supabase } from '@/lib/supabase'
 
-async function computeDeliveryFeeByArea(subtotal: number, area?: string, subArea?: string) {
-  const { computeDeliveryFee } = await import('@/lib/omsData')
-  return computeDeliveryFee(subtotal, area, subArea)
-}
-
 /**
- * One-click duplicate. Creates a new order from the source order's data
- * with fresh date/time, fresh order number, repriced items, default status.
+ * One-click reorder. Exact replica of the source order with ONLY today's
+ * date/time, a fresh id, and a fresh appOrderNo. Everything else - items,
+ * prices, address, payment, status, customerType, notes - is preserved.
  */
 export async function POST(
   request: NextRequest,
@@ -38,78 +30,102 @@ export async function POST(
 
     const allItems = await readOrderItems()
     const sourceItems = allItems.filter((i) => i.orderId === source.id)
-    const products = await readProducts()
-    const addresses = await readAddresses()
-    const address = addresses.find((a) => a.id === source.deliveryAddressId) || null
 
     const now = new Date()
     const orderDate = now.toISOString().slice(0, 10)
     const orderTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
     const nowISO = now.toISOString()
 
-    // Re-price items from current catalog. Skip rows whose product is gone.
-    let inactiveCount = 0
-    let priceChanges = 0
-    const newItems: OrderItemRecord[] = []
     const newOrderId = generateId('ord')
 
-    for (const it of sourceItems) {
-      const product = products.find((p: any) => p.id === it.productId)
-      if (!product) continue
-      const unitPrice = Number(product.offerPrice ?? product.basePrice) || Number(it.unitPrice) || 0
-      const quantity = Number(it.quantity) || 1
-      if (!product.isActive) inactiveCount += 1
-      if (Math.abs(Number(it.unitPrice || 0) - unitPrice) > 0.001) priceChanges += 1
-      newItems.push({
-        id: generateId('item'),
-        orderId: newOrderId,
-        productId: it.productId,
-        quantity,
-        weightGrams: Number(it.weightGrams) || 0,
-        unitPrice,
-        lineTotal: quantity * unitPrice,
-        specialInstructions: it.specialInstructions || '',
-        createdAt: nowISO,
-      })
-    }
+    const newItems: OrderItemRecord[] = sourceItems.map((it) => ({
+      id: generateId('item'),
+      orderId: newOrderId,
+      productId: it.productId,
+      quantity: Number(it.quantity) || 1,
+      weightGrams: Number(it.weightGrams) || 0,
+      unitPrice: Number(it.unitPrice) || 0,
+      lineTotal: (Number(it.quantity) || 1) * (Number(it.unitPrice) || 0),
+      specialInstructions: it.specialInstructions || '',
+      createdAt: nowISO,
+    }))
 
-    const subtotal = newItems.reduce((sum, i) => sum + i.lineTotal, 0)
-    const deliveryFee = await computeDeliveryFeeByArea(subtotal, address?.area, (address as any)?.subArea)
-    const orderTotal = subtotal + deliveryFee
-    const appOrderNo = await generateAppOrderNo(orderDate, source.orderType, orders)
+    const dateKey = (() => {
+      const [y, m, d] = orderDate.split('-')
+      return `${d}${m}${y.slice(-2)}`
+    })()
+    const typeSlug = String(source.orderType || '').toLowerCase()
+    const { data: sameBucket = [] } = await supabase
+      .from('orders')
+      .select('appOrderNo')
+      .ilike('appOrderNo', `${dateKey}${typeSlug}%`)
+    const usedSuffixes = (sameBucket as { appOrderNo: string }[])
+      .map((r) => {
+        const m = (r.appOrderNo || '').match(/(\d+)$/)
+        return m ? parseInt(m[1], 10) : 0
+      })
+      .filter((n) => Number.isFinite(n))
+    let suffix = (usedSuffixes.length ? Math.max(...usedSuffixes) : 0) + 1
+    let appOrderNo = `${dateKey}${typeSlug}${suffix}`
+
+    const baseStatus = source.orderStatus === 'لاغي' ? 'تم' : source.orderStatus
 
     const newOrder: OrderRecord = {
+      ...source,
       id: newOrderId,
       appOrderNo,
       orderDate,
       orderTime,
-      orderType: source.orderType,
-      orderReceiver: source.orderReceiver,
-      orderMethod: source.orderMethod,
-      customerType: 'عائد',
-      customerSource: source.customerSource,
-      orderStatus: 'ساري',
-      cancellationReason: null,
-      paymentMethod: source.paymentMethod,
-      customerId: source.customerId,
-      deliveryAddressId: source.deliveryAddressId,
-      notes: '',
-      followUp: false,
-      followUpNotes: '',
-      subtotal,
-      deliveryFee,
-      orderTotal,
+      orderStatus: baseStatus,
+      cancellationReason: baseStatus === 'لاغي' ? source.cancellationReason : null,
       createdBy,
       createdAt: nowISO,
       updatedAt: nowISO,
     }
 
-    orders.push(newOrder)
-    const { error: orderErr } = await supabase.from('orders').insert([newOrder])
-    if (orderErr) {
-      console.error('Error inserting duplicate order:', orderErr)
-      return NextResponse.json({ error: 'Failed to duplicate order' }, { status: 500 })
+    let { data: inserted, error: orderErr } = await supabase
+      .from('orders')
+      .insert([newOrder])
+      .select()
+      .single()
+
+    let attempts = 0
+    while (
+      orderErr &&
+      /unique constraint|duplicate key|orders_apporderno/i.test(orderErr.message || '') &&
+      attempts < 10
+    ) {
+      attempts++
+      suffix++
+      appOrderNo = `${dateKey}${typeSlug}${suffix}`
+      newOrder.appOrderNo = appOrderNo
+      const retry = await supabase.from('orders').insert([newOrder]).select().single()
+      inserted = retry.data
+      orderErr = retry.error
     }
+
+    if (orderErr && /scheduled|column .* does not exist/i.test(orderErr.message || '')) {
+      console.warn('[orders duplicate] scheduled columns missing, retrying without them')
+      const {
+        isScheduled: _i,
+        scheduledDate: _d,
+        scheduledTimeSlot: _s,
+        scheduledSpecificTime: _t,
+        ...orderSafe
+      } = newOrder as any
+      const r = await supabase.from('orders').insert([orderSafe]).select().single()
+      inserted = r.data
+      orderErr = r.error
+    }
+
+    if (orderErr || !inserted) {
+      console.error('Error inserting duplicate order:', orderErr)
+      return NextResponse.json(
+        { error: 'Failed to duplicate order', details: orderErr?.message || null },
+        { status: 500 }
+      )
+    }
+
     if (newItems.length > 0) {
       const { error: itemsErr } = await supabase.from('order_items').insert(newItems)
       if (itemsErr) {
@@ -128,25 +144,26 @@ export async function POST(
         duplicatedFromOrderId: source.id,
         duplicatedFromAppOrderNo: source.appOrderNo,
         itemCount: newItems.length,
-        inactiveProductCount: inactiveCount,
-        priceChangedCount: priceChanges,
-        orderTotal,
+        orderTotal: newOrder.orderTotal,
       },
     })
 
     return NextResponse.json(
       {
-        order: newOrder,
+        order: inserted,
         warnings: {
-          inactiveProductCount: inactiveCount,
-          priceChangedCount: priceChanges,
-          skippedItemCount: sourceItems.length - newItems.length,
+          inactiveProductCount: 0,
+          priceChangedCount: 0,
+          skippedItemCount: 0,
         },
       },
       { status: 201 }
     )
-  } catch (err) {
+  } catch (err: any) {
     console.error('duplicate order error', err)
-    return NextResponse.json({ error: 'Failed to duplicate order' }, { status: 500 })
+    return NextResponse.json(
+      { error: 'Failed to duplicate order', details: err?.message || null },
+      { status: 500 }
+    )
   }
 }
