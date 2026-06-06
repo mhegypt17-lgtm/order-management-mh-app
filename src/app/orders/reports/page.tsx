@@ -135,14 +135,6 @@ export default function ReportsPage() {
   const customerTypeStats = useMemo(() => countBy(rangeOrders.map((o) => o.customerType)), [rangeOrders])
   const deliveryStats = useMemo(() => countBy(rangeOrders.map((o) => o.delivery?.deliveryStatus || 'لم يخرج بعد')), [rangeOrders])
 
-  const rangeRevenue = useMemo(() => {
-    return rangeOrders.reduce((sum, o) => sum + Number(o.orderTotal || 0), 0)
-  }, [rangeOrders])
-
-  const avgOrderValue = useMemo(() => {
-    return rangeOrders.length ? rangeRevenue / rangeOrders.length : 0
-  }, [rangeOrders, rangeRevenue])
-
   const topProducts = useMemo(() => {
     const map = new Map<string, number>()
     rangeOrders.forEach((order) => {
@@ -184,11 +176,9 @@ export default function ReportsPage() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <StatCard label="طلبات هذا الشهر" value={thisMonthOrders.length.toLocaleString()} />
         <StatCard label="طلبات اليوم" value={todayOrders.length.toLocaleString()} />
-        <StatCard label="إيراد الفترة المحددة" value={`${rangeRevenue.toLocaleString()} ج.م`} />
-        <StatCard label="متوسط قيمة الطلب" value={`${avgOrderValue.toFixed(0)} ج.م`} />
       </div>
 
       {/* 🎯 Targeted products report */}
