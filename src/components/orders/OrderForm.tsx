@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
 
@@ -155,6 +155,7 @@ type Props = {
 
 export default function OrderForm({ mode, orderId }: Props) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { user } = useAuthStore()
 
   const [isLoading, setIsLoading] = useState(true)
@@ -337,6 +338,68 @@ export default function OrderForm({ mode, orderId }: Props) {
 
     loadBase()
   }, [mode, orderId])
+
+  // Prefill from URL when launching new order from a customer profile.
+  // Supports ?phone=...&name=...&customerId=...
+  useEffect(() => {
+    if (mode !== 'create' || isLoading) return
+    const phoneParam = (searchParams.get('phone') || '').trim()
+    const nameParam = (searchParams.get('name') || '').trim()
+    if (!phoneParam && !nameParam) return
+
+    let cancelled = false
+    const run = async () => {
+      try {
+        setIsLookupLoading(true)
+        const qs = new URLSearchParams()
+        if (phoneParam) qs.set('phone', phoneParam)
+        if (nameParam) qs.set('name', nameParam)
+        const res = await fetch(`/api/customers?${qs.toString()}`)
+        const data = await res.json()
+        if (cancelled) return
+
+        if (!data?.customer) {
+          // No match — just seed the phone/name so the agent sees the prefill.
+          setForm((prev) => ({
+            ...prev,
+            phone: phoneParam || prev.phone,
+            customerName: nameParam || prev.customerName,
+            customerType: 'جديد',
+          }))
+          toast('عميل جديد — لم يتم العثور على بيانات سابقة')
+          return
+        }
+
+        setAddresses(Array.isArray(data.addresses) ? data.addresses : [])
+        const firstAddress = data.addresses?.[0]
+        const lookedUpStatus = (data.customer?.status as 'active' | 'warning' | 'suspended') || 'active'
+        setCustomerStatus({ status: lookedUpStatus, reason: data.customer?.statusReason || null })
+
+        setForm((prev) => ({
+          ...prev,
+          phone: data.customer.phone || phoneParam || prev.phone,
+          customerName: data.customer.customerName || nameParam || prev.customerName,
+          customerType: 'قديم',
+          deliveryAddressId: firstAddress?.id || '__new',
+          addressLabel: firstAddress?.addressLabel || 'Home',
+          deliveryArea: firstAddress?.area || '',
+          deliverySubArea: firstAddress?.subArea || '',
+          streetAddress: firstAddress?.streetAddress || '',
+          googleMapsLink: firstAddress?.googleMapsLink || '',
+        }))
+        toast.success('تم تعبئة بيانات العميل')
+      } catch (err) {
+        console.warn('[OrderForm] prefill from URL failed', err)
+      } finally {
+        if (!cancelled) setIsLookupLoading(false)
+      }
+    }
+    run()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, isLoading])
 
   useEffect(() => {
     setDirtyFlag(false)

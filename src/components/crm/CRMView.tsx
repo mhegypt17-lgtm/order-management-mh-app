@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
 
@@ -153,6 +154,7 @@ interface CRMViewProps {
 
 export default function CRMView({ role }: CRMViewProps) {
   const { user } = useAuthStore()
+  const router = useRouter()
   const [customers, setCustomers] = useState<CustomerSummary[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
@@ -690,6 +692,23 @@ export default function CRMView({ role }: CRMViewProps) {
                       ⚠️ {profile.insights.activityAlert}
                     </div>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const phone = (profile.customer.phone || '').trim()
+                      const name = (profile.customer.customerName || '').trim()
+                      const qs = new URLSearchParams()
+                      if (phone) qs.set('phone', phone)
+                      if (name) qs.set('name', name)
+                      qs.set('customerId', profile.customer.id)
+                      qs.set('reset', String(Date.now()))
+                      router.push(`/orders/new?${qs.toString()}`)
+                    }}
+                    className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-2 rounded"
+                    title="إنشاء طلب جديد لهذا العميل مع تعبئة البيانات"
+                  >
+                    🧾 طلب جديد
+                  </button>
                   <button
                     type="button"
                     onClick={openEditModal}
