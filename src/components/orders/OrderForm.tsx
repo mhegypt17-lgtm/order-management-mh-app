@@ -17,6 +17,8 @@ type Product = {
   productCondition: 'فريش' | 'مبردة' | 'مجمد'
   isActive: boolean
   isTargeted?: boolean
+  stockStatus?: 'available' | 'low' | 'out'
+  stockQuantity?: number | null
 }
 
 type CustomerAddress = {
@@ -55,15 +57,9 @@ const findProductByName = (products: Product[], productNameInput: string) => {
   const normalizedInput = normalizeProductName(productNameInput)
   if (!normalizedInput) return null
 
-  const exact = products.find((p) => normalizeProductName(p.productName) === normalizedInput)
-  if (exact) return exact
-
-  return (
-    products.find((p) => {
-      const normalizedProductName = normalizeProductName(p.productName)
-      return normalizedProductName.includes(normalizedInput) || normalizedInput.includes(normalizedProductName)
-    }) || null
-  )
+  // Strict equality only — fuzzy substring matching caused the field to keep
+  // snapping back to the previously selected product when typing a new name.
+  return products.find((p) => normalizeProductName(p.productName) === normalizedInput) || null
 }
 
 type OrderFormModel = {
@@ -500,7 +496,12 @@ export default function OrderForm({ mode, orderId }: Props) {
   }
   const removeItem = (index: number) => {
     setDirtyFlag(true)
-    setItems((prev) => (prev.length <= 1 ? prev : prev.filter((_, idx) => idx !== index)))
+    setItems((prev) => {
+      // If it's the last remaining row, reset it instead of removing —
+      // so the agent can clear/start over the single line.
+      if (prev.length <= 1) return [emptyItem()]
+      return prev.filter((_, idx) => idx !== index)
+    })
   }
 
   const handleAddressSelection = (addressId: string) => {
@@ -556,6 +557,32 @@ export default function OrderForm({ mode, orderId }: Props) {
 
     const validItems = normalizedItems
     if (validItems.length === 0) return toast.error('أضف منتجاً واحداً على الأقل')
+
+    // Block out-of-stock items (lookup latest stock from products list).
+    const outOfStockNames = validItems
+      .map((i) => {
+        const p = products.find((pp) => pp.id === i.productId)
+        return p && p.stockStatus === 'out' ? p.productName : null
+      })
+      .filter(Boolean) as string[]
+    if (outOfStockNames.length > 0) {
+      return toast.error(`⛔ منتج غير متاح: ${outOfStockNames.join('، ')}`)
+    }
+
+    // Warn (but allow) low-stock items where quantity would exceed remaining stock.
+    const lowStockBreaches = validItems
+      .map((i) => {
+        const p = products.find((pp) => pp.id === i.productId)
+        if (!p || p.stockStatus !== 'low') return null
+        if (p.stockQuantity != null && Number(i.quantity) > Number(p.stockQuantity)) {
+          return `${p.productName} (متبقي ${p.stockQuantity})`
+        }
+        return null
+      })
+      .filter(Boolean) as string[]
+    if (lowStockBreaches.length > 0) {
+      return toast.error(`⚠️ الكمية تتجاوز المتاح: ${lowStockBreaches.join('، ')}`)
+    }
 
     if (form.orderStatus === 'لاغي' && !form.cancellationReason) {
       return toast.error('اختر سبب الإلغاء')
@@ -777,8 +804,12 @@ export default function OrderForm({ mode, orderId }: Props) {
               {items.map((item, index) => {
                 const selectedProduct = findProductByName(products, item.productNameInput)
                 const lineTotal = (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0)
+                const stock = selectedProduct?.stockStatus || 'available'
+                const isOut = stock === 'out'
+                const isLow = stock === 'low'
+                const rowCls = isOut ? 'border-b border-red-200 bg-red-50/40' : isLow ? 'border-b border-amber-200 bg-amber-50/40' : 'border-b border-gray-200'
                 return (
-                  <tr key={index} className="border-b border-gray-200">
+                  <tr key={index} className={rowCls}>
                     <td className="p-2">
                       <div className="flex items-center gap-1">
                         <input
@@ -798,6 +829,13 @@ export default function OrderForm({ mode, orderId }: Props) {
                           </span>
                         )}
                       </div>
+                      {selectedProduct && (isOut || isLow) && (
+                        <div className={`mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold border ${isOut ? 'bg-red-100 text-red-700 border-red-300' : 'bg-amber-100 text-amber-800 border-amber-300'}`}>
+                          {isOut
+                            ? '⛔ غير متاح'
+                            : `⚠️ مخزون منخفض${selectedProduct.stockQuantity != null ? ` (متبقي ${selectedProduct.stockQuantity})` : ''}`}
+                        </div>
+                      )}
                       <datalist id={`products-${index}`}>
                         {products.map((p) => (
                           <option key={p.id} value={p.productName} />
