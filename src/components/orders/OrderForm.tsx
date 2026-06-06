@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
+import WhatsAppShare from './WhatsAppShare'
 
 type Product = {
   id: string
@@ -178,6 +179,7 @@ export default function OrderForm({ mode, orderId }: Props) {
   const [form, setForm] = useState<OrderFormModel>(getDefaultOrderModel())
   const [items, setItems] = useState<OrderItemForm[]>([emptyItem()])
   const [deliveryData, setDeliveryData] = useState<DeliveryData | null>(null)
+  const [loadedOrderInfo, setLoadedOrderInfo] = useState<{ appOrderNo: string } | null>(null)
 
   const setDirtyFlag = (dirty: boolean) => {
     if (typeof window === 'undefined' || mode !== 'create') return
@@ -322,6 +324,8 @@ export default function OrderForm({ mode, orderId }: Props) {
           }))
 
           setItems(mappedItems.length > 0 ? mappedItems : [emptyItem()])
+
+          setLoadedOrderInfo({ appOrderNo: order.appOrderNo || '' })
 
           // Load delivery data if available
           if (order.delivery) {
@@ -729,6 +733,7 @@ export default function OrderForm({ mode, orderId }: Props) {
     user?.role !== 'admin'
 
   return (
+    <>
     <form onSubmit={handleSubmit} className="space-y-4">
       {isLocked && (
         <div className="bg-amber-50 border border-amber-300 rounded-lg p-4 text-amber-900">
@@ -1279,6 +1284,34 @@ export default function OrderForm({ mode, orderId }: Props) {
         )}
       </div>
     </form>
+
+    {mode === 'edit' && loadedOrderInfo && (
+      <div className="mt-4">
+        <WhatsAppShare
+          appOrderNo={loadedOrderInfo.appOrderNo}
+          orderDate={form.orderDate}
+          orderTime={form.orderTime}
+          customerName={form.customerName}
+          customerPhone={form.phone}
+          deliveryArea={form.deliveryArea}
+          streetAddress={form.streetAddress}
+          googleMapsLink={form.googleMapsLink}
+          orderStatus={form.orderStatus}
+          paymentMethod={form.paymentMethod}
+          orderTotal={netTotal}
+          notes={form.notes}
+          items={items
+            .filter((i) => i.productNameInput && Number(i.quantity) > 0)
+            .map((i) => ({
+              productName: i.productNameInput,
+              quantity: Number(i.quantity) || 0,
+              unitPrice: Number(i.unitPrice) || 0,
+            }))}
+          delivery={deliveryData}
+        />
+      </div>
+    )}
+    </>
   )
 }
 
