@@ -807,10 +807,19 @@ export default function OrderForm({ mode, orderId }: Props) {
                     <td className="p-2 text-sm text-gray-700 whitespace-nowrap">
                       {selectedProduct ? `${Number(selectedProduct.basePrice || 0).toLocaleString()} ج.م` : '--'}
                     </td>
-                    <td className="p-2 text-sm text-gray-700 whitespace-nowrap">
-                      {selectedProduct?.offerPrice != null
-                        ? `${Number(selectedProduct.offerPrice || 0).toLocaleString()} ج.م`
-                        : '--'}
+                    <td className="p-2 text-sm whitespace-nowrap">
+                      {selectedProduct?.offerPrice != null && Number(selectedProduct.offerPrice) > 0 && Number(selectedProduct.offerPrice) < Number(selectedProduct.basePrice || 0) ? (
+                        <span className="inline-flex items-center gap-1">
+                          <span className="text-red-600 font-bold">
+                            {Number(selectedProduct.offerPrice).toLocaleString()} ج.م
+                          </span>
+                          <span className="text-xs text-red-600 font-semibold">
+                            -{(((Number(selectedProduct.basePrice) - Number(selectedProduct.offerPrice)) / Number(selectedProduct.basePrice)) * 100).toFixed(0)}%
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">--</span>
+                      )}
                     </td>
                     <td className="p-2">
                       <input
