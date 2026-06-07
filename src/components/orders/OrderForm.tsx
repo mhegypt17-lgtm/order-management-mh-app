@@ -20,6 +20,8 @@ type Product = {
   isTargeted?: boolean
   stockStatus?: 'available' | 'low' | 'out'
   stockQuantity?: number | null
+  /** 'weight' = sold per kg; basePrice/offerPrice are interpreted as price-per-kg. */
+  pricingMode?: 'unit' | 'weight'
 }
 
 type CustomerAddress = {
@@ -562,11 +564,21 @@ export default function OrderForm({ mode, orderId }: Props) {
       return
     }
 
+    const isWeight = selected.pricingMode === 'weight'
+    const pricePerUnit = Number(selected.offerPrice ?? selected.basePrice ?? 0)
+    // For weight products, basePrice is price-per-kg. Use the product's
+    // configured estimated weight (or default to 1000g) and compute the
+    // per-piece price = pricePerKg * estimatedKg.
+    const estimatedGrams = Number(selected.weightGrams) > 0 ? Number(selected.weightGrams) : 1000
+    const unitPrice = isWeight
+      ? Math.round(pricePerUnit * (estimatedGrams / 1000) * 100) / 100
+      : pricePerUnit
+
     updateItem(index, {
       productNameInput: productName,
       productId: selected.id,
-      weightGrams: Number(selected.weightGrams) || 0,
-      unitPrice: Number(selected.offerPrice ?? selected.basePrice ?? 0),
+      weightGrams: isWeight ? estimatedGrams : Number(selected.weightGrams) || 0,
+      unitPrice,
     })
   }
 
@@ -893,6 +905,8 @@ export default function OrderForm({ mode, orderId }: Props) {
               {items.map((item, index) => {
                 const selectedProduct = findProductByName(products, item.productNameInput)
                 const lineTotal = (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0)
+                const isWeightMode = selectedProduct?.pricingMode === 'weight'
+                const pricePerKg = isWeightMode ? Number(selectedProduct?.offerPrice ?? selectedProduct?.basePrice ?? 0) : 0
                 const stockRaw = String((selectedProduct?.stockStatus as any) || 'available').toLowerCase().trim()
                 const stockQty = selectedProduct?.stockQuantity
                 const isOut =
@@ -933,6 +947,14 @@ export default function OrderForm({ mode, orderId }: Props) {
                             🎯
                           </span>
                         )}
+                        {isWeightMode && (
+                          <span
+                            className="shrink-0 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold border border-amber-300"
+                            title="هذا المنتج يُسعّر بالوزن (السعر للكيلو)"
+                          >
+                            بالكيلو
+                          </span>
+                        )}
                       </div>
                       {selectedProduct && (isOut || isLow) && (
                         <div
@@ -955,7 +977,9 @@ export default function OrderForm({ mode, orderId }: Props) {
                       </datalist>
                     </td>
                     <td className="p-2 text-sm text-gray-700 whitespace-nowrap">
-                      {selectedProduct ? `${Number(selectedProduct.basePrice || 0).toLocaleString()} ج.م` : '--'}
+                      {selectedProduct
+                        ? `${Number(selectedProduct.basePrice || 0).toLocaleString()} ج.م${isWeightMode ? ' / كج' : ''}`
+                        : '--'}
                     </td>
                     <td className="p-2 text-sm whitespace-nowrap">
                       {selectedProduct?.offerPrice != null && Number(selectedProduct.offerPrice) > 0 && Number(selectedProduct.offerPrice) < Number(selectedProduct.basePrice || 0) ? (
@@ -982,20 +1006,47 @@ export default function OrderForm({ mode, orderId }: Props) {
                       />
                     </td>
                     <td className="p-2">
-                      <input
-                        type="number"
-                        value={item.weightGrams}
-                        onChange={(e) => updateItem(index, { weightGrams: Number(e.target.value) || 0 })}
-                        className="w-24 px-2 py-1 border rounded text-left"
-                        dir="ltr"
-                      />
+                      {isWeightMode ? (
+                        <div className="flex flex-col items-stretch gap-1">
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              step={0.01}
+                              min={0}
+                              value={item.weightGrams ? (item.weightGrams / 1000).toString() : ''}
+                              onChange={(e) => {
+                                const kg = Number(e.target.value) || 0
+                                const grams = Math.round(kg * 1000)
+                                const newUnitPrice = Math.round(pricePerKg * kg * 100) / 100
+                                updateItem(index, { weightGrams: grams, unitPrice: newUnitPrice })
+                              }}
+                              onFocus={(e) => e.currentTarget.select()}
+                              className="w-24 px-2 py-1 border rounded text-left"
+                              dir="ltr"
+                              placeholder="كج"
+                            />
+                            <span className="text-[11px] text-gray-600">كج</span>
+                          </div>
+                          <span className="text-[10px] text-amber-700 font-semibold">تقديري، يُحدد بعد الوزن</span>
+                        </div>
+                      ) : (
+                        <input
+                          type="number"
+                          value={item.weightGrams}
+                          onChange={(e) => updateItem(index, { weightGrams: Number(e.target.value) || 0 })}
+                          className="w-24 px-2 py-1 border rounded text-left"
+                          dir="ltr"
+                        />
+                      )}
                     </td>
                     <td className="p-2">
                       <input
                         type="number"
                         value={item.unitPrice}
                         onChange={(e) => updateItem(index, { unitPrice: Number(e.target.value) || 0 })}
-                        className="w-24 px-2 py-1 border rounded text-left"
+                        readOnly={isWeightMode}
+                        title={isWeightMode ? 'يُحتسب تلقائياً: سعر الكيلو × الوزن المقدر' : undefined}
+                        className={`w-24 px-2 py-1 border rounded text-left ${isWeightMode ? 'bg-gray-50 text-gray-700' : ''}`}
                         dir="ltr"
                       />
                     </td>
