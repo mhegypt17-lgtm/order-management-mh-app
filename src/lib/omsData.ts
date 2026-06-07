@@ -237,6 +237,12 @@ export interface ProductRecord {
   packagingType?: string
   isActive: boolean
   isTargeted?: boolean
+  /**
+   * 'unit' (default) = sold per piece at fixed price (`basePrice`).
+   * 'weight' = sold per kilogram; `basePrice` is interpreted as price per kg
+   * and the line total is computed from the actual weighed amount.
+   */
+  pricingMode?: 'unit' | 'weight'
   createdAt: string
   updatedAt: string
 }
