@@ -21,6 +21,8 @@ export interface Product {
   productCondition: 'فريش' | 'مبردة' | 'مجمد'
   isActive: boolean
   isTargeted?: boolean
+  /** 'unit' = sold per piece (basePrice is price per piece). 'weight' = sold per kilo (basePrice is price per kg, branch weighs each piece). */
+  pricingMode?: 'unit' | 'weight'
 }
 
 export default function ProductCatalogPage() {
@@ -47,6 +49,7 @@ export default function ProductCatalogPage() {
     productCondition: 'فريش',
     isActive: true,
     isTargeted: false,
+    pricingMode: 'unit',
   })
 
   useEffect(() => {
@@ -69,6 +72,7 @@ export default function ProductCatalogPage() {
         hasDailyPriceChange: Boolean(product.hasDailyPriceChange),
         isByReservation: Boolean(product.isByReservation),
         isTargeted: Boolean(product.isTargeted),
+        pricingMode: product.pricingMode === 'weight' ? 'weight' : 'unit',
       }))
       setProducts(normalizedProducts)
     } catch (error) {
@@ -97,6 +101,7 @@ export default function ProductCatalogPage() {
         productCondition: 'فريش',
         isActive: true,
         isTargeted: false,
+        pricingMode: 'unit',
         ...product,
       })
       setEditingId(product.id || null)
@@ -117,6 +122,7 @@ export default function ProductCatalogPage() {
         productCondition: 'فريش',
         isActive: true,
         isTargeted: false,
+        pricingMode: 'unit',
       })
       setEditingId(null)
     }
@@ -399,6 +405,9 @@ export default function ProductCatalogPage() {
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-900 font-semibold">
                     {product.basePrice} ج.م
+                    {product.pricingMode === 'weight' && (
+                      <span className="mr-1 inline-flex items-center rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold px-1.5 py-0.5">بالكيلو</span>
+                    )}
                   </td>
                   <td className="px-6 py-4 text-sm text-green-600 font-semibold">
                     {product.offerPrice && product.offerPrice < product.basePrice ? (
@@ -545,10 +554,44 @@ export default function ProductCatalogPage() {
                 </select>
               </div>
 
+              {/* Pricing Mode */}
+              <div className="rounded-lg border border-gray-200 p-3">
+                <label className="block text-sm font-medium text-gray-700 mb-2 text-right">
+                  طريقة التسعير
+                </label>
+                <div className="flex flex-wrap gap-3 text-sm" dir="rtl">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="pricingMode"
+                      value="unit"
+                      checked={(formData.pricingMode || 'unit') === 'unit'}
+                      onChange={() => setFormData((prev) => ({ ...prev, pricingMode: 'unit' }))}
+                    />
+                    <span>بالقطعة (سعر ثابت)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="pricingMode"
+                      value="weight"
+                      checked={formData.pricingMode === 'weight'}
+                      onChange={() => setFormData((prev) => ({ ...prev, pricingMode: 'weight' }))}
+                    />
+                    <span>بالوزن (السعر للكيلو)</span>
+                  </label>
+                </div>
+                <p className="text-xs text-gray-500 mt-2 text-right">
+                  {formData.pricingMode === 'weight'
+                    ? 'سيتم احتساب سعر المنتج حسب الوزن الفعلي الذي يوزنه الفرع. أدخل سعر الكيلو في خانة السعر.'
+                    : 'سعر ثابت لكل قطعة (الوضع الافتراضي).'}
+                </p>
+              </div>
+
               {/* Base Price */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1 text-right">
-                  السعر *
+                  {formData.pricingMode === 'weight' ? 'السعر للكيلو *' : 'السعر *'}
                 </label>
                 <input
                   type="number"
