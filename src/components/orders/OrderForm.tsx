@@ -151,6 +151,57 @@ const emptyItem = (): OrderItemForm => ({
   specialInstructions: '',
 })
 
+/**
+ * Decimal kg input that keeps its own draft string so the user can type
+ * "1.", "1.2", "0.5" naturally without the value being clipped by Number()
+ * round-tripping on every keystroke.
+ */
+function WeightKgInput({
+  grams,
+  pricePerKg,
+  onChange,
+}: {
+  grams: number
+  pricePerKg: number
+  onChange: (next: { weightGrams: number; unitPrice: number }) => void
+}) {
+  const [draft, setDraft] = useState<string>(grams ? (grams / 1000).toString() : '')
+
+  // Sync from outside (e.g. product change) only when the numeric value
+  // diverges — so typing "1." (grams=1000) doesn't get clobbered back to "1".
+  useEffect(() => {
+    const expected = grams ? grams / 1000 : 0
+    const draftNum = Number(draft)
+    if (Number.isNaN(draftNum) || draftNum !== expected) {
+      setDraft(grams ? (grams / 1000).toString() : '')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [grams])
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={draft}
+      onChange={(e) => {
+        const raw = e.target.value
+        // Allow empty, digits, and a single decimal point (Western or Arabic).
+        const normalized = raw.replace(/٫/g, '.')
+        if (normalized !== '' && !/^\d*\.?\d*$/.test(normalized)) return
+        setDraft(normalized)
+        const kg = Number(normalized) || 0
+        const nextGrams = Math.round(kg * 1000)
+        const nextUnitPrice = Math.round(pricePerKg * kg * 100) / 100
+        onChange({ weightGrams: nextGrams, unitPrice: nextUnitPrice })
+      }}
+      onFocus={(e) => e.currentTarget.select()}
+      className="w-24 px-2 py-1 border rounded text-left"
+      dir="ltr"
+      placeholder="كج"
+    />
+  )
+}
+
 type Props = {
   mode: 'create' | 'edit'
   orderId?: string
@@ -1009,34 +1060,23 @@ export default function OrderForm({ mode, orderId }: Props) {
                       {isWeightMode ? (
                         <div className="flex flex-col items-stretch gap-1">
                           <div className="flex items-center gap-1">
-                            <input
-                              type="number"
-                              step={0.01}
-                              min={0}
-                              value={item.weightGrams ? (item.weightGrams / 1000).toString() : ''}
-                              onChange={(e) => {
-                                const kg = Number(e.target.value) || 0
-                                const grams = Math.round(kg * 1000)
-                                const newUnitPrice = Math.round(pricePerKg * kg * 100) / 100
-                                updateItem(index, { weightGrams: grams, unitPrice: newUnitPrice })
-                              }}
-                              onFocus={(e) => e.currentTarget.select()}
-                              className="w-24 px-2 py-1 border rounded text-left"
-                              dir="ltr"
-                              placeholder="كج"
+                            <WeightKgInput
+                              grams={item.weightGrams}
+                              pricePerKg={pricePerKg}
+                              onChange={(next) => updateItem(index, next)}
                             />
                             <span className="text-[11px] text-gray-600">كج</span>
                           </div>
                           <span className="text-[10px] text-amber-700 font-semibold">تقديري، يُحدد بعد الوزن</span>
                         </div>
                       ) : (
-                        <input
-                          type="number"
-                          value={item.weightGrams}
-                          onChange={(e) => updateItem(index, { weightGrams: Number(e.target.value) || 0 })}
-                          className="w-24 px-2 py-1 border rounded text-left"
+                        <div
+                          className="w-24 px-2 py-1 text-sm text-gray-700 text-left bg-gray-50 border border-gray-200 rounded"
                           dir="ltr"
-                        />
+                          title="الوزن القياسي للمنتج"
+                        >
+                          {item.weightGrams ? `${item.weightGrams} جم` : '--'}
+                        </div>
                       )}
                     </td>
                     <td className="p-2">
