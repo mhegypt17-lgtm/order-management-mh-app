@@ -248,6 +248,39 @@ export default function ProductCatalogPage() {
     }
   }
 
+  /**
+   * Inline-update a single field (price/offer) on a product without opening
+   * the full edit modal. Optimistically mutates local state so the UI reflects
+   * the new value instantly; rolls back + toasts on server error.
+   */
+  const saveProductField = async (
+    product: Product,
+    patch: Partial<Pick<Product, 'basePrice' | 'offerPrice'>>,
+  ): Promise<boolean> => {
+    const before = { ...product }
+    const updated: Product = { ...product, ...patch }
+    setProducts((prev) =>
+      prev.map((p) => (p.id === product.id ? updated : p)),
+    )
+    try {
+      const res = await fetch('/api/products', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated),
+      })
+      if (!res.ok) throw new Error('Failed to update')
+      toast.success('💰 تم تحديث السعر')
+      return true
+    } catch (err) {
+      console.error(err)
+      setProducts((prev) =>
+        prev.map((p) => (p.id === product.id ? before : p)),
+      )
+      toast.error('تعذر حفظ السعر — تم التراجع')
+      return false
+    }
+  }
+
   const filteredProducts = (() => {
     const list = products.filter((p) => {
       if (showTargetedOnly && !p.isTargeted) return false
@@ -403,22 +436,34 @@ export default function ProductCatalogPage() {
                   <td className="px-6 py-4 text-sm text-gray-700 font-medium">
                     {product.productCategory || '-'}
                   </td>
-                  <td className="px-6 py-4 text-sm text-gray-900 font-semibold">
-                    {product.basePrice} ج.م
+                  <td
+                    className="px-6 py-4 text-sm text-gray-900 font-semibold"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <InlinePriceCell
+                      value={product.basePrice}
+                      allowNull={false}
+                      onSave={(v) =>
+                        saveProductField(product, { basePrice: v ?? 0 })
+                      }
+                    />
                     {product.pricingMode === 'weight' && (
                       <span className="mr-1 inline-flex items-center rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold px-1.5 py-0.5">بالكيلو</span>
                     )}
                   </td>
-                  <td className="px-6 py-4 text-sm text-green-600 font-semibold">
-                    {product.offerPrice && product.offerPrice < product.basePrice ? (
-                      <div>
-                        <div>{product.offerPrice} ج.م</div>
-                        <div className="text-xs text-gray-500">
-                          -{(((product.basePrice - product.offerPrice) / product.basePrice) * 100).toFixed(0)}%
-                        </div>
+                  <td
+                    className="px-6 py-4 text-sm text-green-600 font-semibold"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <InlinePriceCell
+                      value={product.offerPrice}
+                      allowNull
+                      onSave={(v) => saveProductField(product, { offerPrice: v })}
+                    />
+                    {product.offerPrice && product.offerPrice < product.basePrice && (
+                      <div className="text-xs text-gray-500 mt-1">
+                        -{(((product.basePrice - product.offerPrice) / product.basePrice) * 100).toFixed(0)}%
                       </div>
-                    ) : (
-                      '-'
                     )}
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-700 max-w-[180px] truncate" title={product.fatRatioComments || '-'}>
@@ -809,5 +854,97 @@ export default function ProductCatalogPage() {
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * Click-to-edit price cell for the admin products table. Renders as a clean
+ * text label by default; turns into a number input on click. Saves on blur or
+ * Enter, cancels on Escape. Supports nullable values (offer price).
+ */
+function InlinePriceCell({
+  value,
+  onSave,
+  allowNull,
+}: {
+  value: number | null
+  onSave: (next: number | null) => Promise<boolean>
+  allowNull: boolean
+}) {
+  const [isEditing, setIsEditing] = useState(false)
+  const [draft, setDraft] = useState<string>(value != null ? String(value) : '')
+  const [isSaving, setIsSaving] = useState(false)
+
+  useEffect(() => {
+    if (!isEditing) setDraft(value != null ? String(value) : '')
+  }, [value, isEditing])
+
+  const commit = async () => {
+    setIsEditing(false)
+    const trimmed = draft.trim()
+    let parsed: number | null
+    if (trimmed === '' || trimmed === '-') {
+      if (!allowNull) {
+        // basePrice cannot be cleared — revert silently.
+        setDraft(value != null ? String(value) : '')
+        return
+      }
+      parsed = null
+    } else {
+      const n = Number(trimmed)
+      if (!Number.isFinite(n) || n < 0) {
+        toast.error('قيمة غير صالحة')
+        setDraft(value != null ? String(value) : '')
+        return
+      }
+      parsed = n
+    }
+    // No-op if value didn't actually change.
+    if ((parsed ?? null) === (value ?? null)) return
+    setIsSaving(true)
+    await onSave(parsed)
+    setIsSaving(false)
+  }
+
+  if (!isEditing) {
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          setIsEditing(true)
+        }}
+        className="text-right hover:bg-yellow-50 px-2 py-1 -mx-1 rounded border border-transparent hover:border-yellow-300 transition cursor-text"
+        title="اضغط للتعديل"
+      >
+        {value != null && value > 0 ? `${value} ج.م` : '-'}
+        {isSaving && <span className="text-[10px] text-gray-400 mr-1">💾</span>}
+      </button>
+    )
+  }
+
+  return (
+    <input
+      autoFocus
+      type="number"
+      inputMode="decimal"
+      step="0.01"
+      min={0}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onFocus={(e) => e.currentTarget.select()}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          ;(e.currentTarget as HTMLInputElement).blur()
+        } else if (e.key === 'Escape') {
+          setDraft(value != null ? String(value) : '')
+          setIsEditing(false)
+        }
+      }}
+      className="w-24 px-2 py-1 border-2 border-red-400 rounded text-left bg-white"
+      dir="ltr"
+    />
   )
 }
