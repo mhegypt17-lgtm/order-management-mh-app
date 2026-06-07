@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import {
   OrderDeliveryRecord,
+  OrderItemRecord,
   appendEditHistory,
+  computeDeliveryFee,
   generateId,
   readAddresses,
   readCustomers,
@@ -46,9 +48,19 @@ async function enrich(orderId: string) {
     .filter((i) => i.orderId === order.id)
     .map((item) => {
       const product = products.find((p: any) => p.id === item.productId)
+      const pricingMode: 'unit' | 'weight' =
+        product?.pricingMode === 'weight' ? 'weight' : 'unit'
+      const pricePerKg =
+        pricingMode === 'weight'
+          ? Number(product?.offerPrice && Number(product.offerPrice) > 0
+              ? product.offerPrice
+              : product?.basePrice || 0)
+          : 0
       return {
         ...item,
         productName: product?.productName || 'منتج محذوف',
+        pricingMode,
+        pricePerKg,
       }
     })
 
@@ -120,6 +132,169 @@ export async function PUT(
           }
 
     const nextStatus = body.deliveryStatus || existing.deliveryStatus
+
+    // ── Branch line edits (qty/weight) ──────────────────────────────────────
+    // The branch can amend each line's quantity, and — for weight-mode lines
+    // — the actual weighed grams once the product is weighed. We snapshot the
+    // original CS-entered values into originalQuantity/originalWeightGrams
+    // the first time each is changed so CS can still see what was ordered.
+    //
+    // Edits are locked once the order is "في الطريق" or "تم التوصيل".
+    let itemsRecomputed = false
+    let recomputedSubtotal = 0
+    let recomputedDeliveryFee = 0
+    let recomputedOrderTotal = 0
+    let branchLineSummary = ''
+    const branchLineDetails: Array<Record<string, unknown>> = []
+
+    if (Array.isArray(body.items) && body.items.length > 0) {
+      const lockedStatuses = new Set(['في الطريق', 'تم التوصيل'])
+      if (lockedStatuses.has(existing.deliveryStatus)) {
+        return NextResponse.json(
+          { error: 'لا يمكن تعديل الطلب بعد خروجه للتوصيل' },
+          { status: 409 }
+        )
+      }
+
+      const allItems = await readOrderItems()
+      const orderItemRows = allItems.filter((i) => i.orderId === params.id)
+
+      // Pull products for pricingMode + pricePerKg.
+      const { data: productRows } = await supabase.from('products').select('*')
+      const products: any[] = Array.isArray(productRows) ? productRows : []
+
+      for (const edit of body.items) {
+        const existingItem = orderItemRows.find((r) => r.id === edit.id)
+        if (!existingItem) continue
+
+        const product = products.find((p) => p.id === existingItem.productId)
+        const pricingMode: 'unit' | 'weight' =
+          product?.pricingMode === 'weight' ? 'weight' : 'unit'
+        const pricePerKg =
+          pricingMode === 'weight'
+            ? Number(
+                product?.offerPrice && Number(product.offerPrice) > 0
+                  ? product.offerPrice
+                  : product?.basePrice || 0
+              )
+            : 0
+
+        const nextQty = Number(edit.quantity)
+        const nextWeightGrams = Number(edit.weightGrams)
+
+        const qtyChanged =
+          Number.isFinite(nextQty) && nextQty > 0 && nextQty !== Number(existingItem.quantity)
+        const weightChanged =
+          pricingMode === 'weight' &&
+          Number.isFinite(nextWeightGrams) &&
+          nextWeightGrams >= 0 &&
+          nextWeightGrams !== Number(existingItem.weightGrams || 0)
+
+        if (!qtyChanged && !weightChanged) continue
+
+        const updatedItem: OrderItemRecord = { ...existingItem }
+
+        if (qtyChanged) {
+          if (updatedItem.originalQuantity == null) {
+            updatedItem.originalQuantity = Number(existingItem.quantity)
+          }
+          updatedItem.quantity = nextQty
+        }
+        if (weightChanged) {
+          if (updatedItem.originalWeightGrams == null) {
+            updatedItem.originalWeightGrams = Number(existingItem.weightGrams || 0)
+          }
+          updatedItem.weightGrams = nextWeightGrams
+          // Recompute unitPrice from pricePerKg × new weight (kg).
+          const kg = nextWeightGrams / 1000
+          updatedItem.unitPrice = Math.round(pricePerKg * kg * 100) / 100
+        }
+        updatedItem.lineTotal =
+          Math.round(Number(updatedItem.quantity) * Number(updatedItem.unitPrice) * 100) / 100
+
+        const { error: updErr } = await supabase
+          .from('order_items')
+          .update({
+            quantity: updatedItem.quantity,
+            weightGrams: updatedItem.weightGrams,
+            unitPrice: updatedItem.unitPrice,
+            lineTotal: updatedItem.lineTotal,
+            originalQuantity: updatedItem.originalQuantity ?? null,
+            originalWeightGrams: updatedItem.originalWeightGrams ?? null,
+          })
+          .eq('id', updatedItem.id)
+
+        if (updErr) {
+          console.error('branch PUT: order_items update failed', updErr)
+          continue
+        }
+
+        // Mirror change into local cache so subtotal calc reflects the edit.
+        const idx = orderItemRows.findIndex((r) => r.id === updatedItem.id)
+        if (idx >= 0) orderItemRows[idx] = updatedItem
+
+        branchLineDetails.push({
+          itemId: updatedItem.id,
+          productName: product?.productName || '?',
+          pricingMode,
+          qtyChange: qtyChanged
+            ? { from: existingItem.quantity, to: updatedItem.quantity }
+            : undefined,
+          weightChange: weightChanged
+            ? {
+                fromGrams: existingItem.weightGrams,
+                toGrams: updatedItem.weightGrams,
+                newUnitPrice: updatedItem.unitPrice,
+              }
+            : undefined,
+        })
+      }
+
+      if (branchLineDetails.length > 0) {
+        itemsRecomputed = true
+        recomputedSubtotal = orderItemRows.reduce(
+          (sum, r) => sum + Number(r.lineTotal || 0),
+          0
+        )
+        const ordersAll = await readOrders()
+        const orderRow = ordersAll.find((o) => o.id === params.id)
+        const addressesAll = await readAddresses()
+        const addr = addressesAll.find((a) => a.id === orderRow?.deliveryAddressId)
+        recomputedDeliveryFee = await computeDeliveryFee(
+          recomputedSubtotal,
+          addr?.area,
+          addr?.subArea
+        )
+        recomputedOrderTotal = recomputedSubtotal + recomputedDeliveryFee
+
+        await supabase
+          .from('orders')
+          .update({
+            subtotal: recomputedSubtotal,
+            deliveryFee: recomputedDeliveryFee,
+            orderTotal: recomputedOrderTotal,
+            updatedAt: now,
+          })
+          .eq('id', params.id)
+
+        branchLineSummary = `تم تعديل ${branchLineDetails.length} بند من الفرع`
+        await appendEditHistory({
+          entityType: 'order',
+          entityId: params.id,
+          orderId: params.id,
+          action: 'updated',
+          changedBy: body.updatedBy || 'branch',
+          summary: branchLineSummary,
+          details: {
+            source: 'branch',
+            changes: branchLineDetails,
+            newSubtotal: recomputedSubtotal,
+            newDeliveryFee: recomputedDeliveryFee,
+            newOrderTotal: recomputedOrderTotal,
+          },
+        })
+      }
+    }
 
     const updated: OrderDeliveryRecord = {
       ...existing,

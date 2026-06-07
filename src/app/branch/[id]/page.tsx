@@ -5,6 +5,20 @@ import { useParams, useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
 
+type OrderItemDetail = {
+  id: string
+  productName: string
+  quantity: number
+  weightGrams: number
+  unitPrice: number
+  lineTotal: number
+  specialInstructions: string
+  pricingMode: 'unit' | 'weight'
+  pricePerKg: number
+  originalQuantity?: number | null
+  originalWeightGrams?: number | null
+}
+
 type OrderDetail = {
   id: string
   appOrderNo: string
@@ -12,9 +26,12 @@ type OrderDetail = {
   orderTime: string
   paymentMethod: string
   notes: string
+  subtotal?: number
+  deliveryFee?: number
+  orderTotal?: number
   customer: { customerName: string; phone: string } | null
   address: { streetAddress: string; googleMapsLink: string } | null
-  items: Array<{ id: string; productName: string; quantity: number; specialInstructions: string }>
+  items: OrderItemDetail[]
   delivery: {
     deliveryStatus: 'لم يخرج بعد' | 'جاهز' | 'في الطريق' | 'تم التوصيل'
     branchComments: string
@@ -40,6 +57,14 @@ export default function BranchOrderDetailPage() {
   const [productPhotos, setProductPhotos] = useState<string[]>([])
   const [invoicePhoto, setInvoicePhoto] = useState('')
 
+  /** Per-line draft edits keyed by item id. */
+  const [itemEdits, setItemEdits] = useState<
+    Record<string, { quantity: number; weightGrams: number; weightDraft: string }>
+  >({})
+  const [isSavingItems, setIsSavingItems] = useState(false)
+
+  const isLocked = deliveryStatus === 'في الطريق' || deliveryStatus === 'تم التوصيل'
+
   const statusClass = useMemo(() => {
     return {
       'لم يخرج بعد': 'bg-gray-100 text-gray-700',
@@ -62,6 +87,15 @@ export default function BranchOrderDetailPage() {
         setBranchComments(loaded.delivery.branchComments || '')
         setProductPhotos(loaded.delivery.productPhotos || [])
         setInvoicePhoto(loaded.delivery.invoicePhoto || '')
+        const drafts: Record<string, { quantity: number; weightGrams: number; weightDraft: string }> = {}
+        for (const it of loaded.items || []) {
+          drafts[it.id] = {
+            quantity: Number(it.quantity) || 1,
+            weightGrams: Number(it.weightGrams) || 0,
+            weightDraft: it.weightGrams ? (Number(it.weightGrams) / 1000).toString() : '',
+          }
+        }
+        setItemEdits(drafts)
       } catch {
         toast.error('تعذر تحميل الطلب')
       } finally {
@@ -149,6 +183,55 @@ export default function BranchOrderDetailPage() {
     }
   }
 
+  /** Push branch line edits (qty/weight) to the server. */
+  const handleSaveItems = async () => {
+    if (!order) return
+    if (isLocked) {
+      toast.error('لا يمكن تعديل الطلب بعد خروجه للتوصيل')
+      return
+    }
+    const payloadItems = order.items.map((it) => {
+      const draft = itemEdits[it.id]
+      return {
+        id: it.id,
+        quantity: draft ? draft.quantity : it.quantity,
+        weightGrams: draft ? draft.weightGrams : it.weightGrams,
+      }
+    })
+    setIsSavingItems(true)
+    try {
+      const res = await fetch(`/api/branch/orders/${order.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: payloadItems,
+          updatedBy: user?.id || 'branch',
+        }),
+      })
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}))
+        throw new Error(errBody?.error || 'Failed')
+      }
+      const data = await res.json()
+      const refreshed = data.order as OrderDetail
+      setOrder(refreshed)
+      const drafts: Record<string, { quantity: number; weightGrams: number; weightDraft: string }> = {}
+      for (const it of refreshed.items || []) {
+        drafts[it.id] = {
+          quantity: Number(it.quantity) || 1,
+          weightGrams: Number(it.weightGrams) || 0,
+          weightDraft: it.weightGrams ? (Number(it.weightGrams) / 1000).toString() : '',
+        }
+      }
+      setItemEdits(drafts)
+      toast.success('✅ تم حفظ تعديلات البنود')
+    } catch (err: any) {
+      toast.error(err?.message || 'تعذر حفظ التعديلات')
+    } finally {
+      setIsSavingItems(false)
+    }
+  }
+
   if (isLoading || !order) {
     return <div className="p-8 text-center text-gray-500">⏳ جاري تحميل التفاصيل...</div>
   }
@@ -183,17 +266,152 @@ export default function BranchOrderDetailPage() {
         </section>
 
         <section className="bg-white rounded-lg border border-gray-200 p-4 space-y-2">
-          <h2 className="font-bold text-gray-900">محتويات الطلب (قراءة فقط)</h2>
+          <h2 className="font-bold text-gray-900">محتويات الطلب</h2>
           <p><span className="font-semibold">الدفع:</span> {order.paymentMethod}</p>
           <p><span className="font-semibold">ملاحظات CS:</span> {order.notes || '-'}</p>
-          <ul className="space-y-1">
-            {order.items.map((item) => (
-              <li key={item.id} className="text-sm text-gray-700">
-                • {item.productName} × {item.quantity}
-                {item.specialInstructions ? ` - ${item.specialInstructions}` : ''}
-              </li>
-            ))}
-          </ul>
+          {isLocked && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+              🔒 الطلب خرج للتوصيل — لا يمكن تعديل الكميات/الأوزان
+            </p>
+          )}
+          <div className="overflow-x-auto mt-2">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="text-right text-gray-600 border-b">
+                  <th className="py-2 pr-2">المنتج</th>
+                  <th className="py-2 px-2">الكمية</th>
+                  <th className="py-2 px-2">الوزن</th>
+                  <th className="py-2 px-2">سعر الوحدة</th>
+                  <th className="py-2 pl-2">الإجمالي</th>
+                </tr>
+              </thead>
+              <tbody>
+                {order.items.map((item) => {
+                  const draft = itemEdits[item.id] || {
+                    quantity: item.quantity,
+                    weightGrams: item.weightGrams,
+                    weightDraft: item.weightGrams ? (item.weightGrams / 1000).toString() : '',
+                  }
+                  const isWeight = item.pricingMode === 'weight'
+                  const liveUnitPrice = isWeight
+                    ? Math.round(item.pricePerKg * (draft.weightGrams / 1000) * 100) / 100
+                    : item.unitPrice
+                  const liveLineTotal =
+                    Math.round(draft.quantity * liveUnitPrice * 100) / 100
+                  const qtyChanged =
+                    item.originalQuantity != null && Number(item.originalQuantity) !== item.quantity
+                  const weightChanged =
+                    item.originalWeightGrams != null &&
+                    Number(item.originalWeightGrams) !== item.weightGrams
+                  return (
+                    <tr key={item.id} className="border-b last:border-b-0 align-top">
+                      <td className="py-2 pr-2">
+                        <div className="flex flex-col gap-1">
+                          <span className="font-semibold text-gray-900">{item.productName}</span>
+                          {isWeight && (
+                            <span className="inline-flex w-fit items-center px-1.5 py-0.5 text-[10px] font-semibold rounded bg-amber-100 text-amber-800 border border-amber-200">
+                              بالكيلو · {item.pricePerKg} ج.م / كج
+                            </span>
+                          )}
+                          {item.specialInstructions && (
+                            <span className="text-[11px] text-gray-500">{item.specialInstructions}</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-2 px-2">
+                        <input
+                          type="number"
+                          min={1}
+                          value={draft.quantity}
+                          disabled={isLocked}
+                          onChange={(e) => {
+                            const q = Math.max(1, Number(e.target.value) || 1)
+                            setItemEdits((prev) => ({
+                              ...prev,
+                              [item.id]: { ...draft, quantity: q },
+                            }))
+                          }}
+                          className="w-20 px-2 py-1 border rounded text-left disabled:bg-gray-100"
+                          dir="ltr"
+                        />
+                        {qtyChanged && (
+                          <div className="text-[10px] text-blue-700 mt-1">أصلي: {item.originalQuantity}</div>
+                        )}
+                      </td>
+                      <td className="py-2 px-2">
+                        {isWeight ? (
+                          <div className="flex flex-col items-stretch">
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={draft.weightDraft}
+                                disabled={isLocked}
+                                onChange={(e) => {
+                                  const raw = e.target.value.replace(/٫/g, '.')
+                                  if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return
+                                  const kg = Number(raw) || 0
+                                  const grams = Math.round(kg * 1000)
+                                  setItemEdits((prev) => ({
+                                    ...prev,
+                                    [item.id]: { ...draft, weightDraft: raw, weightGrams: grams },
+                                  }))
+                                }}
+                                className="w-24 px-2 py-1 border rounded text-left disabled:bg-gray-100"
+                                dir="ltr"
+                                placeholder="كج"
+                              />
+                              <span className="text-[11px] text-gray-600">كج</span>
+                            </div>
+                            {weightChanged && (
+                              <div className="text-[10px] text-blue-700 mt-1">
+                                أصلي: {(Number(item.originalWeightGrams) / 1000).toFixed(2)} كج
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-500" dir="ltr">
+                            {item.weightGrams ? `${item.weightGrams} جم` : '—'}
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2 px-2 text-gray-700">{liveUnitPrice} ج.م</td>
+                      <td className="py-2 pl-2 font-semibold text-gray-900">{liveLineTotal} ج.م</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center justify-between pt-2 border-t mt-2">
+            <div className="text-xs text-gray-500">
+              {!isLocked && 'تعديل الكمية أو وزن المنتجات بالكيلو واضغط حفظ'}
+            </div>
+            <button
+              type="button"
+              onClick={handleSaveItems}
+              disabled={isLocked || isSavingItems}
+              className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-sm font-semibold"
+            >
+              {isSavingItems ? '... جاري الحفظ' : 'حفظ تعديلات البنود'}
+            </button>
+          </div>
+          {(order.subtotal != null || order.deliveryFee != null || order.orderTotal != null) && (
+            <div className="grid grid-cols-3 gap-2 text-xs mt-2">
+              <div className="bg-gray-50 border border-gray-200 rounded px-2 py-1">
+                <div className="text-gray-500">الإجمالي الفرعي</div>
+                <div className="font-semibold text-gray-900">{order.subtotal ?? 0} ج.م</div>
+              </div>
+              <div className="bg-gray-50 border border-gray-200 rounded px-2 py-1">
+                <div className="text-gray-500">رسوم التوصيل</div>
+                <div className="font-semibold text-gray-900">{order.deliveryFee ?? 0} ج.م</div>
+              </div>
+              <div className="bg-red-50 border border-red-200 rounded px-2 py-1">
+                <div className="text-red-700">الإجمالي الكلي</div>
+                <div className="font-bold text-red-700">{order.orderTotal ?? 0} ج.م</div>
+              </div>
+            </div>
+          )}
         </section>
       </div>
 
