@@ -7,6 +7,12 @@ type Item = {
   productName: string
   quantity: number
   unitPrice: number
+  /** 'weight' = sold per kg; render the actual kg in the message. */
+  pricingMode?: 'unit' | 'weight'
+  /** Current weight in grams (only meaningful when pricingMode === 'weight'). */
+  weightGrams?: number
+  /** Whether the branch has logged the actual weighed value yet. */
+  weightConfirmed?: boolean
 }
 
 type Delivery = {
@@ -72,7 +78,18 @@ export function WhatsAppShare(props: Props) {
       lines.push('')
       lines.push('🛒 *المنتجات:*')
       for (const it of validItems) {
-        const line = `• ${it.productName} × ${it.quantity}${it.unitPrice ? ` — ${(it.quantity * it.unitPrice).toLocaleString()} ج.م` : ''}`
+        const isWeight = it.pricingMode === 'weight'
+        const kg = isWeight && it.weightGrams ? (it.weightGrams / 1000) : 0
+        const lineTotal = (it.quantity || 0) * (it.unitPrice || 0)
+        // For weight-mode lines, show the actual kg per piece and an "فعلي/تقديري"
+        // tag so the customer knows whether the weight is the final weighed
+        // value or still an estimate from the order entry stage.
+        const weightTag = isWeight
+          ? ` · ${kg.toFixed(2)} كج ${it.weightConfirmed ? '(فعلي)' : '(تقديري)'}`
+          : ''
+        const line = `• ${it.productName} × ${it.quantity}${weightTag}${
+          it.unitPrice ? ` — ${lineTotal.toLocaleString()} ج.م` : ''
+        }`
         lines.push(line)
       }
     }

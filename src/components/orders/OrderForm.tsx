@@ -1411,11 +1411,20 @@ export default function OrderForm({ mode, orderId }: Props) {
           notes={form.notes}
           items={items
             .filter((i) => i.productNameInput && Number(i.quantity) > 0)
-            .map((i) => ({
-              productName: i.productNameInput,
-              quantity: Number(i.quantity) || 0,
-              unitPrice: Number(i.unitPrice) || 0,
-            }))}
+            .map((i) => {
+              const prod = findProductByName(products, i.productNameInput)
+              const isWeight = prod?.pricingMode === 'weight'
+              return {
+                productName: i.productNameInput,
+                quantity: Number(i.quantity) || 0,
+                unitPrice: Number(i.unitPrice) || 0,
+                pricingMode: (isWeight ? 'weight' : 'unit') as 'unit' | 'weight',
+                weightGrams: Number(i.weightGrams) || 0,
+                // If the branch has logged the original (pre-amend) value,
+                // the current weight is the final weighed weight.
+                weightConfirmed: i.originalWeightGrams != null,
+              }
+            })}
           delivery={deliveryData}
         />
       </div>
