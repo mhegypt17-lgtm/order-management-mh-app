@@ -68,6 +68,17 @@ export interface OrderItemRecord {
   lineTotal: number
   specialInstructions: string
   createdAt: string
+  /**
+   * Snapshot of the CS-entered quantity, captured the first time the branch
+   * amends it. `null` means quantity has never been changed by the branch.
+   */
+  originalQuantity?: number | null
+  /**
+   * Snapshot of the CS-entered weight (grams), captured the first time the
+   * branch amends the weighed value on a weight-mode line. `null` means
+   * weight has never been changed by the branch.
+   */
+  originalWeightGrams?: number | null
 }
 
 export interface OrderDeliveryRecord {
