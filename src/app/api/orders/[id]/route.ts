@@ -274,17 +274,28 @@ export async function PUT(
     if ((existing.notes || '') !== (body.notes || '')) changedFields.push('notes')
 
     const remainingItems = orderItems.filter((i) => i.orderId !== params.id)
-    const rewrittenItems: OrderItemRecord[] = normalizedItems.map((i) => ({
-      id: generateId('item'),
-      orderId: params.id,
-      productId: i.productId,
-      quantity: i.quantity,
-      weightGrams: i.weightGrams,
-      unitPrice: i.unitPrice,
-      lineTotal: i.lineTotal,
-      specialInstructions: i.specialInstructions || '',
-      createdAt: now,
-    }))
+    // Existing items for this order, used to preserve branch-amend snapshots
+    // (originalQuantity / originalWeightGrams) across a CS save. We match
+    // surviving lines by productId since CS regenerates item ids on save.
+    const existingForOrder = orderItems.filter((i) => i.orderId === params.id)
+    const rewrittenItems: OrderItemRecord[] = normalizedItems.map((i) => {
+      const prior = existingForOrder.find((p) => p.productId === i.productId)
+      return {
+        id: generateId('item'),
+        orderId: params.id,
+        productId: i.productId,
+        quantity: i.quantity,
+        weightGrams: i.weightGrams,
+        unitPrice: i.unitPrice,
+        lineTotal: i.lineTotal,
+        specialInstructions: i.specialInstructions || '',
+        createdAt: now,
+        // Preserve branch's "original CS value" snapshot if branch had
+        // amended this line before — otherwise stay null.
+        originalQuantity: prior?.originalQuantity ?? null,
+        originalWeightGrams: prior?.originalWeightGrams ?? null,
+      }
+    })
 
     // Update order in Supabase
     const updatedOrder = {

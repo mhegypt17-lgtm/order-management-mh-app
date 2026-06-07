@@ -48,6 +48,10 @@ type OrderItemForm = {
   weightGrams: number
   unitPrice: number
   specialInstructions: string
+  /** CS-entered quantity snapshot, set by branch on first amend. */
+  originalQuantity?: number | null
+  /** CS-entered weight (grams) snapshot, set by branch on first amend. */
+  originalWeightGrams?: number | null
 }
 
 const normalizeProductName = (value: string) =>
@@ -149,6 +153,8 @@ const emptyItem = (): OrderItemForm => ({
   weightGrams: 0,
   unitPrice: 0,
   specialInstructions: '',
+  originalQuantity: null,
+  originalWeightGrams: null,
 })
 
 /**
@@ -374,6 +380,8 @@ export default function OrderForm({ mode, orderId }: Props) {
             weightGrams: item.weightGrams,
             unitPrice: item.unitPrice,
             specialInstructions: item.specialInstructions || '',
+            originalQuantity: item.originalQuantity ?? null,
+            originalWeightGrams: item.originalWeightGrams ?? null,
           }))
 
           setItems(mappedItems.length > 0 ? mappedItems : [emptyItem()])
@@ -1055,6 +1063,11 @@ export default function OrderForm({ mode, orderId }: Props) {
                         className="w-20 px-2 py-1 border rounded text-left"
                         dir="ltr"
                       />
+                      {item.originalQuantity != null && Number(item.originalQuantity) !== Number(item.quantity) && (
+                        <div className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-blue-50 text-blue-700 border border-blue-200" title="تم تعديل الكمية من الفرع">
+                          فرع: {item.originalQuantity} → {item.quantity}
+                        </div>
+                      )}
                     </td>
                     <td className="p-2">
                       {isWeightMode ? (
@@ -1068,6 +1081,11 @@ export default function OrderForm({ mode, orderId }: Props) {
                             <span className="text-[11px] text-gray-600">كج</span>
                           </div>
                           <span className="text-[10px] text-amber-700 font-semibold">تقديري، يُحدد بعد الوزن</span>
+                          {item.originalWeightGrams != null && Number(item.originalWeightGrams) !== Number(item.weightGrams) && (
+                            <span className="inline-flex w-fit items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-blue-50 text-blue-700 border border-blue-200" title="تم تحديث الوزن بعد الوزن الفعلي بالفرع">
+                              فرع: {(Number(item.originalWeightGrams) / 1000).toFixed(2)} → {(Number(item.weightGrams) / 1000).toFixed(2)} كج
+                            </span>
+                          )}
                         </div>
                       ) : (
                         <div
