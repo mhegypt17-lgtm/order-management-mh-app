@@ -37,8 +37,34 @@ export default function OnDutyBadge() {
       } catch { /* silent */ }
     }
     load()
-    const id = setInterval(load, POLL_MS)
-    return () => { alive = false; clearInterval(id) }
+
+    // Only poll while the tab is visible. Hidden tabs were burning egress
+    // every 60s for data nobody could see.
+    let id: ReturnType<typeof setInterval> | null = null
+    const startPoll = () => {
+      if (id != null) return
+      id = setInterval(() => {
+        if (document.visibilityState === 'visible') load()
+      }, POLL_MS)
+    }
+    const stopPoll = () => {
+      if (id == null) return
+      clearInterval(id)
+      id = null
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') { load(); startPoll() } else { stopPoll() }
+    }
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible') startPoll()
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('focus', onVisibility)
+
+    return () => {
+      alive = false
+      stopPoll()
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('focus', onVisibility)
+    }
   }, [])
 
   if (!data) return null

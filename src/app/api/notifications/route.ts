@@ -1,18 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
   createTask,
-  readTasks,
-  readDailyBriefings,
-  readComplaints,
-  readOrders,
-  readCustomers,
-  readEditHistory,
   readOrderSettings,
   DEFAULT_RETENTION_CONFIG,
   type TaskRecord,
   type RetentionConfig,
   type RetentionStageConfig,
 } from '@/lib/omsData'
+import { supabase } from '@/lib/supabase'
+import { cairoDateString, addDays } from '@/lib/cairoTime'
+
+// Make this endpoint short-cached at the edge so a burst of bell pollers
+// in the same role share one DB read.
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
+// Narrow projections — the full Supabase rows include large fields
+// (notes, productPhotos arrays, addresses, etc.) that this endpoint
+// never uses. We were reading 50–100× the bytes we needed.
+const TASK_COLS = 'id,title,assignedTo,status,priority,createdBy,createdAt,source,linkedCustomerId'
+const BRIEFING_COLS = 'id,authorName,message,type,priority,createdAt'
+const COMPLAINT_COLS = 'id,ticketNumber,channel,status,assignedTo,createdBy,openedAt,closedAt,createdAt,comments'
+const ORDER_COLS = 'id,appOrderNo,orderStatus,customerId,createdBy,createdAt,updatedAt,isScheduled,scheduledDate,scheduledTimeSlot,scheduledSpecificTime,isPriority,priorityReason'
+const ORDER_INACTIVITY_COLS = 'id,customerId,orderStatus,createdAt'
+const CUSTOMER_COLS = 'id,customerName,phone'
+const HISTORY_COLS = 'id,entityType,entityId,orderId,action,changedBy,changedAt,details'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 export type NotificationType =
@@ -131,11 +143,63 @@ export async function GET(req: NextRequest) {
 
     // Look back 7 days for recent activity
     const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
+    const cutoffISO = new Date(cutoff).toISOString()
+    // Inactive-customer logic needs orders going back further than 7 days
+    // but bounded — anyone whose last order is older than ~13 months is
+    // already beyond every retention stage in use.
+    const inactivityCutoffISO = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000).toISOString()
+    const todayCairo = cairoDateString()
+    const tomorrowCairo = addDays(todayCairo, 1)
 
     const items: NotificationItem[] = []
 
+    // ── Fetch everything in parallel with narrow projections + SQL filters ──
+    // This replaces 8 full-table SELECT *s with 7 targeted queries.
+    const [
+      tasksRes,
+      briefingsRes,
+      complaintsRes,
+      recentOrdersRes,
+      scheduledOrdersRes,
+      inactivityOrdersRes,
+      customersRes,
+      historyRes,
+      settings,
+    ] = await Promise.all([
+      supabase.from('tasks').select(TASK_COLS).gte('createdAt', cutoffISO),
+      supabase.from('daily_briefings').select(BRIEFING_COLS).gte('createdAt', cutoffISO),
+      // Need recent complaints (last 7 days) AND any still-open complaint
+      // (for SLA breach detection). Combined OR keeps this to one query.
+      supabase.from('complaints').select(COMPLAINT_COLS).or(`createdAt.gte.${cutoffISO},status.neq.closed`),
+      // Recent + recently-updated orders (covers new, status-changed,
+      // priority toggled — all flow through updatedAt).
+      supabase.from('orders').select(ORDER_COLS).or(`createdAt.gte.${cutoffISO},updatedAt.gte.${cutoffISO}`),
+      // Scheduled orders for today/tomorrow (any age).
+      supabase.from('orders').select(ORDER_COLS).eq('isScheduled', true).in('scheduledDate', [todayCairo, tomorrowCairo]),
+      // Trimmed projection for inactivity computation — only need id+customerId+status+date.
+      supabase.from('orders').select(ORDER_INACTIVITY_COLS).gte('createdAt', inactivityCutoffISO).not('customerId', 'is', null),
+      supabase.from('customers').select(CUSTOMER_COLS),
+      // Edit history is the worst offender — was reading up to 100k rows
+      // every poll. Now filtered to 7 days + only status_changed action.
+      supabase.from('edit_history').select(HISTORY_COLS).eq('action', 'status_changed').gte('changedAt', cutoffISO),
+      readOrderSettings(),
+    ])
+
+    const tasks: TaskRec[] = (tasksRes.data as TaskRec[]) || []
+    const briefings: BriefingRec[] = (briefingsRes.data as BriefingRec[]) || []
+    const complaints: ComplaintRec[] = (complaintsRes.data as ComplaintRec[]) || []
+    // Merge recent + scheduled (de-dup by id) for the orders list used by notifications
+    const recentOrders: OrderRec[] = (recentOrdersRes.data as OrderRec[]) || []
+    const scheduledOrders: OrderRec[] = (scheduledOrdersRes.data as OrderRec[]) || []
+    const orderById = new Map<string, OrderRec>()
+    for (const o of recentOrders) orderById.set(o.id, o)
+    for (const o of scheduledOrders) if (!orderById.has(o.id)) orderById.set(o.id, o)
+    const orders: OrderRec[] = Array.from(orderById.values())
+    const inactivityOrders = (inactivityOrdersRes.data as Array<{ id: string; customerId: string | null; orderStatus: string; createdAt: string }>) || []
+    const customers: CustomerRec[] = (customersRes.data as CustomerRec[]) || []
+    const history: HistoryRec[] = (historyRes.data as HistoryRec[]) || []
+
     // ── Tasks ─────────────────────────────────────────────────────────────
-    const tasks = await readTasks()
     for (const t of tasks) {
       const created = new Date(t.createdAt).getTime()
       if (!isFinite(created) || created < cutoff) continue
@@ -158,7 +222,7 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Daily briefings ───────────────────────────────────────────────────
-    const briefings = await readDailyBriefings()
+
     for (const b of briefings) {
       const created = new Date(b.createdAt).getTime()
       if (!isFinite(created) || created < cutoff) continue
@@ -177,14 +241,12 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Complaints ────────────────────────────────────────────────────────
-    const complaints = await readComplaints()
     // SLA threshold from settings (default 4h)
-    const _settingsForSla = await readOrderSettings()
-    const slaHours = Number(_settingsForSla?.slaHours) || 4
+    const slaHours = Number(settings?.slaHours) || 4
     const slaMs = slaHours * 60 * 60 * 1000
     const nowMsForSla = Date.now()
 
-    for (const c of complaints as ComplaintRec[]) {
+    for (const c of complaints) {
       const created = new Date(c.createdAt).getTime()
       if (isFinite(created) && created >= cutoff && c.createdBy !== userName) {
         items.push({
@@ -235,8 +297,6 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Order & delivery activity (drives CS ↔ branch notifications) ─────
-    const orders = await readOrders()
-    const customers = await readCustomers()
     const customerMap = new Map(customers.map((c) => [c.id, c]))
     const orderMap = new Map(orders.map((o) => [o.id, o]))
 
@@ -289,7 +349,6 @@ export async function GET(req: NextRequest) {
     }
 
     // Status-change history → role-targeted notifications
-    const history = await readEditHistory()
     for (const h of history) {
       if (h.action !== 'status_changed') continue
       const ts = new Date(h.changedAt).getTime()
@@ -330,11 +389,8 @@ export async function GET(req: NextRequest) {
     // ── Scheduled order reminders (day-before + day-of) ──────────────────
     // CS gets notified about upcoming scheduled orders.
     if (role === 'cs' || role === 'admin' || role === 'branch') {
-      const _now = new Date()
-      const todayStr = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-${String(_now.getDate()).padStart(2, '0')}`
-      const _tomorrow = new Date(_now)
-      _tomorrow.setDate(_tomorrow.getDate() + 1)
-      const tomorrowStr = `${_tomorrow.getFullYear()}-${String(_tomorrow.getMonth() + 1).padStart(2, '0')}-${String(_tomorrow.getDate()).padStart(2, '0')}`
+      const todayStr = todayCairo
+      const tomorrowStr = tomorrowCairo
       for (const o of orders) {
         if (!o.isScheduled || !o.scheduledDate) continue
         if (o.orderStatus === 'لاغي' || o.orderStatus === 'تم') continue
@@ -361,12 +417,12 @@ export async function GET(req: NextRequest) {
     // ── Inactive customer follow-ups (CS / admin) ────────────────────────
     // Stages and per-stage action/agent are configured in admin settings (retention).
     if (role === 'cs' || role === 'admin') {
-      const settings = await readOrderSettings()
       const retention: RetentionConfig = settings.retention || DEFAULT_RETENTION_CONFIG
       const nowMs = Date.now()
-      // Build last-order map per customer (any non-cancelled order)
+      // Build last-order map per customer (any non-cancelled order) using
+      // the narrow inactivityOrders projection — covers up to 400 days back.
       const lastOrderMs = new Map<string, number>()
-      for (const o of orders) {
+      for (const o of inactivityOrders) {
         if (!o.customerId) continue
         if (o.orderStatus === 'لاغي') continue
         const ts = new Date(o.createdAt).getTime()
@@ -375,14 +431,17 @@ export async function GET(req: NextRequest) {
         if (ts > prev) lastOrderMs.set(o.customerId, ts)
       }
 
-      // Existing open auto-followup tasks per customer (idempotency guard)
-      const existingAutoTasks = new Map<string, TaskRecord>()
+      // Existing open auto-followup tasks per customer (idempotency guard).
+      // Narrow projection — only the fields used for the dedupe check.
+      const existingAutoTasks = new Map<string, { id: string; linkedCustomerId: string | null; status?: string }>()
       try {
-        const allTasks = await readTasks()
-        for (const t of allTasks) {
-          if (t.source !== 'auto-followup') continue
+        const { data: autoTasks } = await supabase
+          .from('tasks')
+          .select('id,linkedCustomerId,status,source')
+          .eq('source', 'auto-followup')
+          .neq('status', 'مكتملة')
+        for (const t of (autoTasks || []) as Array<{ id: string; linkedCustomerId: string | null; status?: string; source?: string }>) {
           if (!t.linkedCustomerId) continue
-          if (t.status === 'مكتملة') continue
           existingAutoTasks.set(t.linkedCustomerId, t)
         }
       } catch {}
@@ -433,7 +492,7 @@ export async function GET(req: NextRequest) {
               createdBy: 'النظام (متابعة آلية)',
               source: 'auto-followup',
             })
-            existingAutoTasks.set(c.id, task)
+            existingAutoTasks.set(c.id, { id: task.id, linkedCustomerId: task.linkedCustomerId ?? null, status: task.status })
           } catch (e) {
             console.error('auto-followup task creation failed', e)
           }

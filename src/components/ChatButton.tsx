@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import toast from 'react-hot-toast'
 import type { User } from '@/lib/auth'
+import { supabase } from '@/lib/supabase'
 
 interface ChatMessage {
   id: string
@@ -16,7 +17,10 @@ interface ChatButtonProps {
   user: User
 }
 
-const POLL_MS = 5_000
+// Polling fallback when Realtime is unavailable / disconnected. Set high
+// because Realtime should normally cover us; this is just a safety net.
+const FALLBACK_POLL_MS = 60_000
+const MAX_MESSAGES = 200
 const lastSeenKey = (userId: string) => `chat:lastSeen:${userId}`
 
 function formatTime(iso: string): string {
@@ -52,39 +56,123 @@ export default function ChatButton({ user }: ChatButtonProps) {
   const listRef = useRef<HTMLDivElement | null>(null)
   const knownIdsRef = useRef<Set<string>>(new Set())
   const initialLoadRef = useRef(true)
+  // Highest createdAt seen — used as the `since` cursor for incremental
+  // fetches so we never re-download the same 200 messages.
+  const sinceTsRef = useRef<number>(0)
+  // Latest user.role available to the fetcher without forcing a re-create.
+  const userRoleRef = useRef(user.role)
+  useEffect(() => { userRoleRef.current = user.role }, [user.role])
+  const openRef = useRef(open)
+  useEffect(() => { openRef.current = open }, [open])
 
-  const fetchMessages = useCallback(async () => {
-    try {
-      const res = await fetch('/api/chat', { cache: 'no-store' })
-      if (!res.ok) return
-      const data = await res.json()
-      const next: ChatMessage[] = Array.isArray(data.messages) ? data.messages : []
-      setMessages(next)
-
-      if (!initialLoadRef.current) {
-        const fresh = next.filter(
-          (m) => !knownIdsRef.current.has(m.id) && m.role !== user.role,
-        )
-        if (fresh.length > 0 && !open) {
-          const top = fresh[fresh.length - 1]
+  const mergeMessages = useCallback((incoming: ChatMessage[]) => {
+    if (!incoming.length) return
+    setMessages((prev) => {
+      const existing = new Set(prev.map((m) => m.id))
+      const fresh = incoming.filter((m) => !existing.has(m.id))
+      if (fresh.length === 0) return prev
+      const merged = [...prev, ...fresh].slice(-MAX_MESSAGES)
+      // Update since cursor
+      for (const m of fresh) {
+        const ts = new Date(m.createdAt).getTime()
+        if (ts > sinceTsRef.current) sinceTsRef.current = ts
+      }
+      // Toast for messages from another role when panel is closed
+      if (!initialLoadRef.current && !openRef.current) {
+        const externals = fresh.filter((m) => m.role !== userRoleRef.current)
+        if (externals.length > 0) {
+          const top = externals[externals.length - 1]
           toast(`💬 ${top.author}: ${top.text.slice(0, 60)}`, {
             duration: 4000,
             style: { textAlign: 'right', direction: 'rtl' },
           })
         }
       }
-      knownIdsRef.current = new Set(next.map((m) => m.id))
-      initialLoadRef.current = false
+      for (const m of fresh) knownIdsRef.current.add(m.id)
+      return merged
+    })
+  }, [])
+
+  const fetchMessages = useCallback(async () => {
+    try {
+      const url = sinceTsRef.current
+        ? `/api/chat?since=${sinceTsRef.current}`
+        : '/api/chat'
+      const res = await fetch(url, { cache: 'no-store' })
+      if (!res.ok) return
+      const data = await res.json()
+      const next: ChatMessage[] = Array.isArray(data.messages) ? data.messages : []
+      if (sinceTsRef.current === 0) {
+        // Initial load — hydrate full set without merge dedupe overhead.
+        setMessages(next)
+        knownIdsRef.current = new Set(next.map((m) => m.id))
+        for (const m of next) {
+          const ts = new Date(m.createdAt).getTime()
+          if (ts > sinceTsRef.current) sinceTsRef.current = ts
+        }
+        initialLoadRef.current = false
+      } else {
+        mergeMessages(next)
+      }
     } catch {
       /* silent */
     }
-  }, [open, user.role])
+  }, [mergeMessages])
 
+  // Initial fetch + Realtime subscription + visibility-aware fallback poll.
   useEffect(() => {
+    // 1) Initial load (last 200 messages).
     fetchMessages()
-    const id = setInterval(fetchMessages, POLL_MS)
-    return () => clearInterval(id)
-  }, [fetchMessages])
+
+    // 2) Realtime: push new INSERTs straight to the merge buffer.
+    const channel = supabase
+      .channel('chat-messages-rt')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'chat_messages' },
+        (payload) => {
+          const row = payload.new as ChatMessage
+          if (row && row.id) mergeMessages([row])
+        },
+      )
+      .subscribe()
+
+    // 3) Fallback poll — only when the tab is visible. When hidden we
+    //    rely entirely on Realtime (which keeps its websocket alive).
+    let intervalId: ReturnType<typeof setInterval> | null = null
+    const startPoll = () => {
+      if (intervalId != null) return
+      intervalId = setInterval(() => {
+        if (document.visibilityState === 'visible') fetchMessages()
+      }, FALLBACK_POLL_MS)
+    }
+    const stopPoll = () => {
+      if (intervalId == null) return
+      clearInterval(intervalId)
+      intervalId = null
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        // Tab regained focus — catch up immediately, then resume polling.
+        fetchMessages()
+        startPoll()
+      } else {
+        stopPoll()
+      }
+    }
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible') startPoll()
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('focus', onVisibility)
+
+    return () => {
+      stopPoll()
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('focus', onVisibility)
+      supabase.removeChannel(channel)
+    }
+    // fetchMessages is stable thanks to refs; mergeMessages too.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Outside click to close
   useEffect(() => {

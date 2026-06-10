@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
 import type { User } from '@/lib/auth'
+import { supabase } from '@/lib/supabase'
 
 interface NotificationItem {
   id: string
@@ -20,7 +21,14 @@ interface NotificationBellProps {
   user: User
 }
 
-const POLL_INTERVAL_MS = 20_000
+// Fallback poll when Realtime is unavailable / tab regains focus.
+// Was 20s on every page — the single biggest egress source.
+// Realtime subscriptions to orders/tasks/etc. now provide near-instant
+// updates, so the poll is just a safety net.
+const FALLBACK_POLL_MS = 90_000
+// Debounce window after a Realtime event — collapses bursts (e.g. when
+// CS rapidly updates multiple orders) into a single refetch.
+const REALTIME_DEBOUNCE_MS = 2_500
 
 function lastSeenKey(userId: string) {
   return `notif:lastSeen:${userId}`
@@ -50,6 +58,11 @@ export default function NotificationBell({ user }: NotificationBellProps) {
   const initialLoadRef = useRef(true)
   const dropdownRef = useRef<HTMLDivElement | null>(null)
   const audioCtxRef = useRef<AudioContext | null>(null)
+  // Read lastSeen from a ref inside fetchNotifications so the callback
+  // stays stable — was being re-created (and re-firing the effect)
+  // every time the bell was opened. Net effect: redundant requests.
+  const lastSeenRef = useRef(lastSeen)
+  useEffect(() => { lastSeenRef.current = lastSeen }, [lastSeen])
 
   // Play a short two-tone chime via Web Audio API (no asset file needed)
   const playChime = useCallback(() => {
@@ -132,7 +145,7 @@ export default function NotificationBell({ user }: NotificationBellProps) {
         const fresh = next.filter((n) => !knownIdsRef.current.has(n.id))
         // Show toast & chime only for items newer than lastSeen and not in this session yet
         const reallyNew = fresh.filter(
-          (n) => new Date(n.createdAt).getTime() > lastSeen
+          (n) => new Date(n.createdAt).getTime() > lastSeenRef.current
         )
         if (reallyNew.length > 0) {
           const urgent = reallyNew.find((n) => n.priority === 'urgent' || n.type === 'priority-order')
@@ -161,12 +174,62 @@ export default function NotificationBell({ user }: NotificationBellProps) {
     } catch {
       /* network errors silenced — bell just won't update */
     }
-  }, [user.role, user.name, lastSeen, playChime, playAlarm])
+  }, [user.role, user.name, playChime, playAlarm])
 
+  // Initial fetch + Realtime triggers + visibility-aware fallback poll.
+  // The five subscribed tables cover every notification source. When any
+  // of them changes we debounce a single refetch — so a CS agent updating
+  // 10 orders in 30 seconds triggers ~1 refetch instead of 90 polls.
   useEffect(() => {
     fetchNotifications()
-    const interval = setInterval(fetchNotifications, POLL_INTERVAL_MS)
-    return () => clearInterval(interval)
+
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null
+    const scheduleRefetch = () => {
+      if (document.visibilityState !== 'visible') return // skip while hidden
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(() => fetchNotifications(), REALTIME_DEBOUNCE_MS)
+    }
+
+    const channel = supabase
+      .channel('notifications-rt')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, scheduleRefetch)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, scheduleRefetch)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'complaints' }, scheduleRefetch)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'daily_briefings' }, scheduleRefetch)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'edit_history' }, scheduleRefetch)
+      .subscribe()
+
+    let intervalId: ReturnType<typeof setInterval> | null = null
+    const startPoll = () => {
+      if (intervalId != null) return
+      intervalId = setInterval(() => {
+        if (document.visibilityState === 'visible') fetchNotifications()
+      }, FALLBACK_POLL_MS)
+    }
+    const stopPoll = () => {
+      if (intervalId == null) return
+      clearInterval(intervalId)
+      intervalId = null
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchNotifications()
+        startPoll()
+      } else {
+        stopPoll()
+      }
+    }
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible') startPoll()
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('focus', onVisibility)
+
+    return () => {
+      stopPoll()
+      if (debounceTimer) clearTimeout(debounceTimer)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('focus', onVisibility)
+      supabase.removeChannel(channel)
+    }
   }, [fetchNotifications])
 
   // Close on outside click
@@ -286,7 +349,7 @@ export default function NotificationBell({ user }: NotificationBellProps) {
 
           <div className="px-4 py-2 text-center border-t border-gray-100 bg-gray-50">
             <span className="text-[10px] text-gray-400">
-              يتم التحديث تلقائياً كل {POLL_INTERVAL_MS / 1000} ثانية
+              تحديث فوري عبر Realtime
             </span>
           </div>
         </div>
