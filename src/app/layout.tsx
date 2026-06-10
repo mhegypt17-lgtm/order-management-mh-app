@@ -1,16 +1,14 @@
-import type { Metadata, Viewport } from 'next'
+import type { Metadata } from 'next'
 import { Toaster } from 'react-hot-toast'
 import './globals.css'
+import SingleTabGuard from '@/components/SingleTabGuard'
 
 export const metadata: Metadata = {
   title: 'نظام إدارة الطلبات',
   description: 'Order Management System - نظام متكامل لإدارة الطلبات والعملاء',
-}
-
-export const viewport: Viewport = {
-  width: 'device-width',
-  initialScale: 1,
-  maximumScale: 5,
+  charset: 'utf-8',
+  viewport: 'width=device-width, initial-scale=1',
+  language: 'ar-EG',
 }
 
 export default function RootLayout({
@@ -25,7 +23,9 @@ export default function RootLayout({
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </head>
       <body className="bg-gray-50">
-        {children}
+        <SingleTabGuard>
+          {children}
+        </SingleTabGuard>
         <Toaster
           position="top-center"
           toastOptions={{
