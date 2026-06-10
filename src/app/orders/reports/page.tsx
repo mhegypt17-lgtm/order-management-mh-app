@@ -60,8 +60,15 @@ export default function ReportsPage() {
   const fetchOrders = async () => {
     setIsLoading(true)
     try {
+      // Pass the report's date range to /api/orders so the server only
+      // returns rows inside the window (default would be 90 days otherwise).
+      const params = new URLSearchParams()
+      if (dateFrom) params.set('from', dateFrom)
+      if (dateTo) params.set('to', dateTo)
+      const ordersUrl = params.toString() ? `/api/orders?${params.toString()}` : '/api/orders'
+
       const [ordersRes, complaintsRes, settingsRes, productsRes] = await Promise.all([
-        fetch('/api/orders'),
+        fetch(ordersUrl),
         fetch('/api/complaints'),
         fetch('/api/order-settings'),
         fetch('/api/products'),
@@ -88,7 +95,10 @@ export default function ReportsPage() {
 
   useEffect(() => {
     fetchOrders()
-  }, [])
+    // Re-fetch from the server when the report's date window changes so
+    // we only pull rows in range (instead of relying on a client-side filter).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateFrom, dateTo])
 
   useEffect(() => {
     const loadTargeted = async () => {

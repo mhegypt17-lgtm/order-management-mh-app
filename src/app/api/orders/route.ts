@@ -67,27 +67,28 @@ async function computeDeliveryFeeByArea(subtotal: number, area?: string, subArea
   return computeDeliveryFee(subtotal, area, subArea)
 }
 
-async function enrichOrder(order: OrderRecord) {
-  const customers = await readCustomers()
-  const addresses = await readAddresses()
-  const orderItems = await readOrderItems()
-  const orderDelivery = await readOrderDelivery()
-  const products = await readProducts()
-
-  const customer = customers.find((c) => c.id === order.customerId) || null
-  const address = addresses.find((a) => a.id === order.deliveryAddressId) || null
-  const items = orderItems
-    .filter((i) => i.orderId === order.id)
-    .map((item) => {
-      const product = products.find((p: any) => p.id === item.productId)
-      return {
-        ...item,
-        productName: product?.productName || 'منتج محذوف',
-      }
-    })
+async function enrichOrder(
+  order: OrderRecord,
+  ctx: {
+    customersById: Map<string, any>
+    addressesById: Map<string, any>
+    itemsByOrderId: Map<string, OrderItemRecord[]>
+    deliveryByOrderId: Map<string, any>
+    productsById: Map<string, any>
+  },
+) {
+  const customer = ctx.customersById.get(order.customerId) || null
+  const address = ctx.addressesById.get(order.deliveryAddressId) || null
+  const items = (ctx.itemsByOrderId.get(order.id) || []).map((item) => {
+    const product = ctx.productsById.get(item.productId)
+    return {
+      ...item,
+      productName: product?.productName || 'منتج محذوف',
+    }
+  })
 
   const delivery =
-    orderDelivery.find((d) => d.orderId === order.id) ||
+    ctx.deliveryByOrderId.get(order.id) ||
     {
       id: '',
       orderId: order.id,
@@ -109,15 +110,75 @@ async function enrichOrder(order: OrderRecord) {
   }
 }
 
-export async function GET() {
+// Default to a 90-day rolling window unless caller specifies from/to/all.
+// This keeps the per-request payload bounded as the orders table grows.
+const DEFAULT_WINDOW_DAYS = 90
+
+export async function GET(request: NextRequest) {
   try {
-    const { data: orders, error } = await supabase.from('orders').select('*').order('createdAt', { ascending: false })
-    
+    const url = new URL(request.url)
+    const all = url.searchParams.get('all') === '1'
+    const from = url.searchParams.get('from') // YYYY-MM-DD (orderDate)
+    const to = url.searchParams.get('to') // YYYY-MM-DD (orderDate)
+
+    let query = supabase
+      .from('orders')
+      .select('*')
+      .order('createdAt', { ascending: false })
+
+    if (!all) {
+      if (from) query = query.gte('orderDate', from)
+      else {
+        // Default rolling window — orderDate >= today − 90 days (UTC ok; granularity is days)
+        const cutoff = new Date(Date.now() - DEFAULT_WINDOW_DAYS * 24 * 60 * 60 * 1000)
+          .toISOString()
+          .slice(0, 10)
+        query = query.gte('orderDate', cutoff)
+      }
+      if (to) query = query.lte('orderDate', to)
+    }
+
+    const { data: orders, error } = await query
+
     if (error) {
       return NextResponse.json({ error: 'Failed to fetch orders' }, { status: 500 })
     }
-    
-    const enriched = await Promise.all((orders || []).map(enrichOrder))
+
+    const orderList = (orders || []) as OrderRecord[]
+
+    // Hoist enrichment lookups OUT of the per-order loop. Previously
+    // enrichOrder ran 5 full-table reads PER ORDER (N×5 redundant reads).
+    // Load each lookup table once, index by id, then enrich in-memory.
+    const [customers, addresses, orderItems, orderDelivery, products] = await Promise.all([
+      readCustomers(),
+      readAddresses(),
+      readOrderItems(),
+      readOrderDelivery(),
+      readProducts(),
+    ])
+
+    const customersById = new Map<string, any>()
+    for (const c of customers) customersById.set(c.id, c)
+
+    const addressesById = new Map<string, any>()
+    for (const a of addresses) addressesById.set(a.id, a)
+
+    const itemsByOrderId = new Map<string, OrderItemRecord[]>()
+    for (const it of orderItems) {
+      const arr = itemsByOrderId.get(it.orderId)
+      if (arr) arr.push(it)
+      else itemsByOrderId.set(it.orderId, [it])
+    }
+
+    const deliveryByOrderId = new Map<string, any>()
+    for (const d of orderDelivery) deliveryByOrderId.set(d.orderId, d)
+
+    const productsById = new Map<string, any>()
+    for (const p of products) productsById.set(p.id, p)
+
+    const ctx = { customersById, addressesById, itemsByOrderId, deliveryByOrderId, productsById }
+    const enriched = await Promise.all(orderList.map((o) => enrichOrder(o, ctx)))
+
     return NextResponse.json({ orders: enriched }, { status: 200 })
   } catch {
     return NextResponse.json({ error: 'Failed to fetch orders' }, { status: 500 })
@@ -446,8 +507,31 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // Return enriched order
-    const enrichedOrder = await enrichOrder(finalOrder || order)
+    // Return enriched order — build a one-shot context for this single row.
+    const [allCustomers, allAddresses, allOrderItems, allDelivery, allProducts] = await Promise.all([
+      readCustomers(),
+      readAddresses(),
+      readOrderItems(),
+      readOrderDelivery(),
+      readProducts(),
+    ])
+    const customersById = new Map<string, any>(allCustomers.map((c) => [c.id, c]))
+    const addressesById = new Map<string, any>(allAddresses.map((a) => [a.id, a]))
+    const itemsByOrderId = new Map<string, OrderItemRecord[]>()
+    for (const it of allOrderItems) {
+      const arr = itemsByOrderId.get(it.orderId)
+      if (arr) arr.push(it)
+      else itemsByOrderId.set(it.orderId, [it])
+    }
+    const deliveryByOrderId = new Map<string, any>(allDelivery.map((d) => [d.orderId, d]))
+    const productsById = new Map<string, any>(allProducts.map((p: any) => [p.id, p]))
+    const enrichedOrder = await enrichOrder(finalOrder || order, {
+      customersById,
+      addressesById,
+      itemsByOrderId,
+      deliveryByOrderId,
+      productsById,
+    })
     return NextResponse.json({ order: enrichedOrder }, { status: 201 })
   } catch (error) {
     console.error('Error creating order:', error)
