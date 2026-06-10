@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import { compareCategories } from '@/lib/omsData'
 
@@ -23,7 +23,11 @@ export interface Product {
   isTargeted?: boolean
   /** 'unit' = sold per piece (basePrice is price per piece). 'weight' = sold per kilo (basePrice is price per kg, branch weighs each piece). */
   pricingMode?: 'unit' | 'weight'
+  stockStatus?: 'available' | 'low' | 'out'
+  stockQuantity?: number | null
 }
+
+type StockStatus = 'available' | 'low' | 'out'
 
 export default function ProductCatalogPage() {
   const [products, setProducts] = useState<Product[]>([])
@@ -32,12 +36,15 @@ export default function ProductCatalogPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [showTargetedOnly, setShowTargetedOnly] = useState(false)
+  const [showWeightOnly, setShowWeightOnly] = useState(false)
+  const [selectedCategory, setSelectedCategory] = useState<string>('')
+  const [stockFilter, setStockFilter] = useState<'all' | StockStatus>('all')
   const [sortBy, setSortBy] = useState<'default' | 'category' | 'name' | 'priceAsc' | 'priceDesc'>('default')
   const [formData, setFormData] = useState<Product>({
     productName: '',
     productDescription: '',
     bestRecipes: '',
-    productCategory: 'لحوم',
+    productCategory: '',
     fatRatioComments: '',
     isStandardPackage: false,
     packagingType: 'فاكيوم',
@@ -89,7 +96,7 @@ export default function ProductCatalogPage() {
         productName: '',
         productDescription: '',
         bestRecipes: '',
-        productCategory: 'لحوم',
+        productCategory: '',
         fatRatioComments: '',
         isStandardPackage: false,
         packagingType: 'فاكيوم',
@@ -110,7 +117,7 @@ export default function ProductCatalogPage() {
         productName: '',
         productDescription: '',
         bestRecipes: '',
-        productCategory: 'لحوم',
+        productCategory: '',
         fatRatioComments: '',
         isStandardPackage: false,
         packagingType: 'فاكيوم',
@@ -158,6 +165,11 @@ export default function ProductCatalogPage() {
 
     if (!formData.productName.trim()) {
       toast.error('اسم المنتج مطلوب')
+      return
+    }
+
+    if (!formData.productCategory || !formData.productCategory.trim()) {
+      toast.error('يرجى اختيار التصنيف')
       return
     }
 
@@ -281,10 +293,19 @@ export default function ProductCatalogPage() {
     }
   }
 
-  const filteredProducts = (() => {
+  const filteredProducts = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase()
     const list = products.filter((p) => {
       if (showTargetedOnly && !p.isTargeted) return false
-      return p.productName.includes(searchTerm)
+      if (showWeightOnly && p.pricingMode !== 'weight') return false
+      if (selectedCategory && p.productCategory !== selectedCategory) return false
+      if (stockFilter !== 'all' && (p.stockStatus || 'available') !== stockFilter) return false
+      if (!term) return true
+      return (
+        String(p.productName || '').toLowerCase().includes(term) ||
+        String(p.productCategory || '').toLowerCase().includes(term) ||
+        String(p.packagingType || '').toLowerCase().includes(term)
+      )
     })
     const priceOf = (p: Product) => (p.offerPrice && p.offerPrice > 0 ? p.offerPrice : p.basePrice)
     const cmp = (a: string, b: string) => a.localeCompare(b, 'ar')
@@ -295,9 +316,22 @@ export default function ProductCatalogPage() {
     if (sortBy === 'priceAsc') return [...list].sort((a, b) => priceOf(a) - priceOf(b))
     if (sortBy === 'priceDesc') return [...list].sort((a, b) => priceOf(b) - priceOf(a))
     return list
-  })()
+  }, [products, searchTerm, showTargetedOnly, showWeightOnly, selectedCategory, stockFilter, sortBy])
 
-  const targetedCount = products.filter((p) => p.isTargeted).length
+  const targetedCount = useMemo(() => products.filter((p) => p.isTargeted).length, [products])
+  const weightCount = useMemo(() => products.filter((p) => p.pricingMode === 'weight').length, [products])
+  const categories = useMemo(() => {
+    const cats = new Set<string>()
+    products.forEach((p) => { if (p.productCategory) cats.add(p.productCategory) })
+    return Array.from(cats).sort(compareCategories)
+  }, [products])
+  const stockCounts = useMemo(() => ({
+    all: products.length,
+    available: products.filter((p) => (p.stockStatus || 'available') === 'available').length,
+    low: products.filter((p) => p.stockStatus === 'low').length,
+    out: products.filter((p) => p.stockStatus === 'out').length,
+  }), [products])
+  const stats = { total: products.length, active: filteredProducts.length }
 
   return (
     <div className="space-y-6">
@@ -316,46 +350,122 @@ export default function ProductCatalogPage() {
         </button>
       </div>
 
-      {/* Search Bar */}
-      <div className="flex items-center space-x-2 rtl:space-x-reverse">
-        <div className="relative flex-1 max-w-md">
+      {/* Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <div className="bg-white rounded-lg shadow p-4 text-center">
+          <div className="text-2xl font-bold text-gray-900">{stats.total}</div>
+          <div className="text-sm text-gray-600">المجموع</div>
+        </div>
+        <div className="bg-blue-50 rounded-lg shadow p-4 text-center">
+          <div className="text-2xl font-bold text-blue-600">{stats.active}</div>
+          <div className="text-sm text-gray-600">معروضة</div>
+        </div>
+        <div className="bg-purple-50 rounded-lg shadow p-4 text-center">
+          <div className="text-2xl font-bold text-purple-600">{categories.length}</div>
+          <div className="text-sm text-gray-600">تصنيفات</div>
+        </div>
+      </div>
+
+      {/* Search / Sort / Filters */}
+      <div className="bg-white rounded-lg shadow p-4 space-y-3">
+        <div className="flex flex-col md:flex-row gap-3">
           <input
             type="text"
-            placeholder="ابحث عن منتج..."
+            placeholder="بحث باسم المنتج أو التصنيف أو التغليف"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 text-right"
+            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 text-right"
             dir="rtl"
           />
-          <span className="absolute left-3 rtl:left-auto rtl:right-3 top-2 text-gray-400">
-            🔍
-          </span>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-red-500"
+            dir="rtl"
+            title="ترتيب المنتجات"
+          >
+            <option value="default">↕️ الترتيب الافتراضي</option>
+            <option value="category">📂 حسب التصنيف</option>
+            <option value="name">🔤 حسب الاسم</option>
+            <option value="priceAsc">💰 السعر تصاعدي</option>
+            <option value="priceDesc">💰 السعر تنازلي</option>
+          </select>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowTargetedOnly((v) => !v)}
-          className={`px-4 py-2 rounded-lg border text-sm font-semibold transition whitespace-nowrap ${
-            showTargetedOnly
-              ? 'bg-amber-500 border-amber-500 text-white shadow'
-              : 'bg-white border-amber-300 text-amber-700 hover:bg-amber-50'
-          }`}
-          title="عرض المنتجات المستهدفة فقط"
-        >
-          🎯 المستهدفة فقط ({targetedCount})
-        </button>
-        <select
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-          className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-red-500"
-          dir="rtl"
-          title="ترتيب المنتجات"
-        >
-          <option value="default">↕️ الترتيب الافتراضي</option>
-          <option value="category">📂 حسب التصنيف</option>
-          <option value="name">🔤 حسب الاسم</option>
-          <option value="priceAsc">💰 السعر تصاعدي</option>
-          <option value="priceDesc">💰 السعر تنازلي</option>
-        </select>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setShowTargetedOnly((v) => !v)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-bold transition border ${
+              showTargetedOnly
+                ? 'bg-amber-500 text-white border-amber-500'
+                : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+            }`}
+            title="عرض المنتجات المستهدفة فقط"
+          >
+            🎯 المستهدفة فقط ({targetedCount})
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowWeightOnly((v) => !v)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-bold transition border ${
+              showWeightOnly
+                ? 'bg-orange-500 text-white border-orange-500'
+                : 'bg-orange-50 text-orange-800 border-orange-300 hover:bg-orange-100'
+            }`}
+            title="عرض المنتجات التي تُسعّر بالوزن فقط"
+          >
+            ⚖️ بالوزن فقط ({weightCount})
+          </button>
+        </div>
+
+        {categories.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setSelectedCategory('')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                selectedCategory === ''
+                  ? 'bg-red-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              الكل ({products.length})
+            </button>
+            {categories.map((cat) => {
+              const count = products.filter((p) => p.productCategory === cat).length
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                    selectedCategory === cat
+                      ? 'bg-red-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {cat} ({count})
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2">
+          {([
+            { key: 'all', label: `الكل (${stockCounts.all})`, cls: 'bg-gray-100 text-gray-700' },
+            { key: 'available', label: `✅ متاح (${stockCounts.available})`, cls: 'bg-green-100 text-green-700' },
+            { key: 'low', label: `⚠️ منخفض (${stockCounts.low})`, cls: 'bg-amber-100 text-amber-800' },
+            { key: 'out', label: `⛔ غير متاح (${stockCounts.out})`, cls: 'bg-red-100 text-red-700' },
+          ] as const).map((b) => (
+            <button
+              key={b.key}
+              onClick={() => setStockFilter(b.key)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold border-2 transition ${stockFilter === b.key ? `${b.cls} border-current` : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}
+            >
+              {b.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Products Table */}
@@ -581,7 +691,7 @@ export default function ProductCatalogPage() {
               {/* Product Category */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1 text-right">
-                  الفئة
+                  الفئة <span className="text-red-600">*</span>
                 </label>
                 <select
                   name="productCategory"
@@ -589,7 +699,9 @@ export default function ProductCatalogPage() {
                   onChange={handleInputChange}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 text-right"
                   dir="rtl"
+                  required
                 >
+                  <option value="" disabled>-- اختر التصنيف --</option>
                   <option value="دواجن">دواجن</option>
                   <option value="لحوم">لحوم</option>
                   <option value="أسماك">أسماك</option>

@@ -23,7 +23,10 @@ type Product = {
   stockStatus?: 'available' | 'low' | 'out'
   stockQuantity?: number | null
   stockUpdatedAt?: string | null
+  pricingMode?: 'unit' | 'weight'
 }
+
+type StockStatus = 'available' | 'low' | 'out'
 
 function stockBadge(p: Product) {
   const s = p.stockStatus || 'available'
@@ -38,6 +41,8 @@ export default function CSProductsPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<string>('')
   const [showTargetedOnly, setShowTargetedOnly] = useState(false)
+  const [showWeightOnly, setShowWeightOnly] = useState(false)
+  const [stockFilter, setStockFilter] = useState<'all' | StockStatus>('all')
   const [sortBy, setSortBy] = useState<'default' | 'category' | 'name' | 'priceAsc' | 'priceDesc'>('default')
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
 
@@ -77,8 +82,10 @@ export default function CSProductsPage() {
       
       const matchesCategory = !selectedCategory || p.productCategory === selectedCategory
       const matchesTargeted = !showTargetedOnly || Boolean(p.isTargeted)
+      const matchesWeight = !showWeightOnly || p.pricingMode === 'weight'
+      const matchesStock = stockFilter === 'all' || (p.stockStatus || 'available') === stockFilter
 
-      return matchesSearch && matchesCategory && matchesTargeted
+      return matchesSearch && matchesCategory && matchesTargeted && matchesWeight && matchesStock
     })
 
     const priceOf = (p: Product) => (p.offerPrice && p.offerPrice > 0 ? p.offerPrice : p.basePrice)
@@ -88,9 +95,16 @@ export default function CSProductsPage() {
     if (sortBy === 'priceAsc') return [...list].sort((a, b) => priceOf(a) - priceOf(b))
     if (sortBy === 'priceDesc') return [...list].sort((a, b) => priceOf(b) - priceOf(a))
     return list
-  }, [products, searchTerm, selectedCategory, showTargetedOnly, sortBy])
+  }, [products, searchTerm, selectedCategory, showTargetedOnly, showWeightOnly, stockFilter, sortBy])
 
   const targetedCount = useMemo(() => products.filter((p) => p.isTargeted).length, [products])
+  const weightCount = useMemo(() => products.filter((p) => p.pricingMode === 'weight').length, [products])
+  const stockCounts = useMemo(() => ({
+    all: products.length,
+    available: products.filter((p) => (p.stockStatus || 'available') === 'available').length,
+    low: products.filter((p) => p.stockStatus === 'low').length,
+    out: products.filter((p) => p.stockStatus === 'out').length,
+  }), [products])
 
   const stats = {
     total: products.length,
@@ -169,6 +183,17 @@ export default function CSProductsPage() {
                 🎯 المستهدفة فقط ({targetedCount})
               </button>
               <button
+                onClick={() => setShowWeightOnly((v) => !v)}
+                className={`px-3 py-1.5 rounded-lg text-sm font-bold transition border ${
+                  showWeightOnly
+                    ? 'bg-orange-500 text-white border-orange-500'
+                    : 'bg-orange-50 text-orange-800 border-orange-300 hover:bg-orange-100'
+                }`}
+                title="عرض المنتجات التي تُسعّر بالوزن فقط"
+              >
+                ⚖️ بالوزن فقط ({weightCount})
+              </button>
+              <button
                 onClick={() => setSelectedCategory('')}
                 className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
                   selectedCategory === ''
@@ -196,6 +221,23 @@ export default function CSProductsPage() {
               })}
             </div>
           )}
+
+          <div className="flex flex-wrap gap-2">
+            {([
+              { key: 'all', label: `الكل (${stockCounts.all})`, cls: 'bg-gray-100 text-gray-700' },
+              { key: 'available', label: `✅ متاح (${stockCounts.available})`, cls: 'bg-green-100 text-green-700' },
+              { key: 'low', label: `⚠️ منخفض (${stockCounts.low})`, cls: 'bg-amber-100 text-amber-800' },
+              { key: 'out', label: `⛔ غير متاح (${stockCounts.out})`, cls: 'bg-red-100 text-red-700' },
+            ] as const).map((b) => (
+              <button
+                key={b.key}
+                onClick={() => setStockFilter(b.key)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold border-2 transition ${stockFilter === b.key ? `${b.cls} border-current` : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}
+              >
+                {b.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Products Table */}

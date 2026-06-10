@@ -161,6 +161,12 @@ const emptyItem = (): OrderItemForm => ({
  * Decimal kg input that keeps its own draft string so the user can type
  * "1.", "1.2", "0.5" naturally without the value being clipped by Number()
  * round-tripping on every keystroke.
+ *
+ * UX guardrails (to avoid grams/kg confusion):
+ * - Placeholder shows an example in kg (e.g. "1.5").
+ * - A live "= NNN جم" hint appears below so the user always sees the gram equivalent.
+ * - If the value looks like grams entered by mistake (≥ 10 kg, e.g. "1150"),
+ *   a one-click warning lets the user convert it (÷ 1000).
  */
 function WeightKgInput({
   grams,
@@ -184,27 +190,58 @@ function WeightKgInput({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [grams])
 
+  const kgNum = Number(draft) || 0
+  const gramsPreview = Math.round(kgNum * 1000)
+  // Likely-grams-by-mistake when the user types an integer >= 10 (kg)
+  const looksLikeGrams = kgNum >= 10 && /^\d+$/.test(draft.trim())
+
+  const applyDivideByThousand = () => {
+    const correctedKg = kgNum / 1000
+    const nextGrams = Math.round(correctedKg * 1000)
+    const nextUnitPrice = Math.round(pricePerKg * correctedKg * 100) / 100
+    setDraft(String(correctedKg))
+    onChange({ weightGrams: nextGrams, unitPrice: nextUnitPrice })
+  }
+
   return (
-    <input
-      type="text"
-      inputMode="decimal"
-      value={draft}
-      onChange={(e) => {
-        const raw = e.target.value
-        // Allow empty, digits, and a single decimal point (Western or Arabic).
-        const normalized = raw.replace(/٫/g, '.')
-        if (normalized !== '' && !/^\d*\.?\d*$/.test(normalized)) return
-        setDraft(normalized)
-        const kg = Number(normalized) || 0
-        const nextGrams = Math.round(kg * 1000)
-        const nextUnitPrice = Math.round(pricePerKg * kg * 100) / 100
-        onChange({ weightGrams: nextGrams, unitPrice: nextUnitPrice })
-      }}
-      onFocus={(e) => e.currentTarget.select()}
-      className="w-24 px-2 py-1 border rounded text-left"
-      dir="ltr"
-      placeholder="كج"
-    />
+    <div className="flex flex-col gap-1">
+      <input
+        type="text"
+        inputMode="decimal"
+        value={draft}
+        onChange={(e) => {
+          const raw = e.target.value
+          // Allow empty, digits, and a single decimal point (Western or Arabic).
+          const normalized = raw.replace(/٫/g, '.')
+          if (normalized !== '' && !/^\d*\.?\d*$/.test(normalized)) return
+          setDraft(normalized)
+          const kg = Number(normalized) || 0
+          const nextGrams = Math.round(kg * 1000)
+          const nextUnitPrice = Math.round(pricePerKg * kg * 100) / 100
+          onChange({ weightGrams: nextGrams, unitPrice: nextUnitPrice })
+        }}
+        onFocus={(e) => e.currentTarget.select()}
+        className={`w-24 px-2 py-1 border rounded text-left ${looksLikeGrams ? 'border-red-400 bg-red-50' : ''}`}
+        dir="ltr"
+        placeholder="1.5"
+        title="أدخل الوزن بالكيلوجرام (مثال: 1.5 لـ 1500 جم)"
+      />
+      {kgNum > 0 && (
+        <span className="text-[10px] text-gray-500 ltr text-left" dir="ltr">
+          = {gramsPreview.toLocaleString()} جم
+        </span>
+      )}
+      {looksLikeGrams && (
+        <button
+          type="button"
+          onClick={applyDivideByThousand}
+          className="text-[10px] font-bold text-red-700 bg-red-50 border border-red-300 rounded px-1.5 py-0.5 hover:bg-red-100 text-right leading-tight"
+          title={`القيمة بالكيلو وليس بالجرام — هل قصدت ${(kgNum / 1000).toString()} كج؟`}
+        >
+          ⚠️ {kgNum} كج؟ اضغط لتحويلها إلى {(kgNum / 1000).toString()} كج
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -971,7 +1008,7 @@ export default function OrderForm({ mode, orderId }: Props) {
                 <th className="p-2 text-right text-sm">السعر</th>
                 <th className="p-2 text-right text-sm">سعر البرومو</th>
                 <th className="p-2 text-right text-sm">الكمية</th>
-                <th className="p-2 text-right text-sm">الوزن</th>
+                <th className="p-2 text-right text-sm">الوزن (كج / جم)</th>
                 <th className="p-2 text-right text-sm">سعر الوحدة</th>
                 <th className="p-2 text-right text-sm">الإجمالي</th>
                 <th className="p-2 text-right text-sm">تعليمات خاصة</th>

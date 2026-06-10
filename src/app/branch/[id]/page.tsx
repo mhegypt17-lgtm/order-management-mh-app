@@ -358,7 +358,7 @@ export default function BranchOrderDetailPage() {
                       </td>
                       <td className="py-2 px-2">
                         {isWeight ? (
-                          <div className="flex flex-col items-stretch">
+                          <div className="flex flex-col items-stretch gap-1">
                             <div className="flex items-center gap-1">
                               <input
                                 type="text"
@@ -375,12 +375,47 @@ export default function BranchOrderDetailPage() {
                                     [item.id]: { ...draft, weightDraft: raw, weightGrams: grams },
                                   }))
                                 }}
-                                className="w-24 px-2 py-1 border rounded text-left disabled:bg-gray-100"
+                                className={`w-24 px-2 py-1 border rounded text-left disabled:bg-gray-100 ${(() => {
+                                  const v = Number(draft.weightDraft) || 0
+                                  return v >= 10 && /^\d+$/.test(String(draft.weightDraft).trim()) ? 'border-red-400 bg-red-50' : ''
+                                })()}`}
                                 dir="ltr"
-                                placeholder="كج"
+                                placeholder="1.5"
+                                title="أدخل الوزن بالكيلوجرام (مثال: 1.5 لـ 1500 جم)"
                               />
                               <span className="text-[11px] text-gray-600">كج</span>
                             </div>
+                            {(() => {
+                              const kg = Number(draft.weightDraft) || 0
+                              if (kg <= 0) return null
+                              return (
+                                <span className="text-[10px] text-gray-500 text-left" dir="ltr">
+                                  = {Math.round(kg * 1000).toLocaleString()} جم
+                                </span>
+                              )
+                            })()}
+                            {(() => {
+                              const kg = Number(draft.weightDraft) || 0
+                              const looksLikeGrams = kg >= 10 && /^\d+$/.test(String(draft.weightDraft).trim())
+                              if (!looksLikeGrams || isLocked) return null
+                              const correctedKg = kg / 1000
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const grams = Math.round(correctedKg * 1000)
+                                    setItemEdits((prev) => ({
+                                      ...prev,
+                                      [item.id]: { ...draft, weightDraft: String(correctedKg), weightGrams: grams },
+                                    }))
+                                  }}
+                                  className="text-[10px] font-bold text-red-700 bg-red-50 border border-red-300 rounded px-1.5 py-0.5 hover:bg-red-100 text-right leading-tight"
+                                  title={`القيمة بالكيلو وليس بالجرام — هل قصدت ${correctedKg} كج؟`}
+                                >
+                                  ⚠️ {kg} كج؟ اضغط لتحويلها إلى {correctedKg} كج
+                                </button>
+                              )
+                            })()}
                             {weightChanged && (
                               <div className="text-[10px] text-blue-700 mt-1">
                                 أصلي: {(Number(item.originalWeightGrams) / 1000).toFixed(2)} كج

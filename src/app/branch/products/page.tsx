@@ -28,6 +28,7 @@ type Product = {
   stockQuantity?: number | null
   stockUpdatedAt?: string | null
   stockUpdatedBy?: string | null
+  pricingMode?: 'unit' | 'weight'
 }
 
 function stockBadge(p: Product) {
@@ -44,6 +45,9 @@ export default function BranchProductsPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [stockFilter, setStockFilter] = useState<'all' | StockStatus>('all')
+  const [selectedCategory, setSelectedCategory] = useState<string>('')
+  const [showTargetedOnly, setShowTargetedOnly] = useState(false)
+  const [showWeightOnly, setShowWeightOnly] = useState(false)
   const [sortBy, setSortBy] = useState<'default' | 'category' | 'name' | 'priceAsc' | 'priceDesc'>('default')
   const [stockEditStatus, setStockEditStatus] = useState<StockStatus>('available')
   const [stockEditQty, setStockEditQty] = useState<string>('')
@@ -77,7 +81,10 @@ export default function BranchProductsPage() {
         String(p.packagingType || '').toLowerCase().includes(term)
       )
       const matchesStock = stockFilter === 'all' || (p.stockStatus || 'available') === stockFilter
-      return matchesSearch && matchesStock
+      const matchesCategory = !selectedCategory || p.productCategory === selectedCategory
+      const matchesTargeted = !showTargetedOnly || Boolean(p.isTargeted)
+      const matchesWeight = !showWeightOnly || p.pricingMode === 'weight'
+      return matchesSearch && matchesStock && matchesCategory && matchesTargeted && matchesWeight
     })
     const priceOf = (p: Product) => (p.offerPrice && p.offerPrice > 0 ? p.offerPrice : p.basePrice)
     const cmp = (a: string, b: string) => a.localeCompare(b, 'ar')
@@ -86,7 +93,7 @@ export default function BranchProductsPage() {
     if (sortBy === 'priceAsc') return [...list].sort((a, b) => priceOf(a) - priceOf(b))
     if (sortBy === 'priceDesc') return [...list].sort((a, b) => priceOf(b) - priceOf(a))
     return list
-  }, [products, searchTerm, stockFilter, sortBy])
+  }, [products, searchTerm, stockFilter, selectedCategory, showTargetedOnly, showWeightOnly, sortBy])
 
   // Sync modal edit fields when a product is opened
   useEffect(() => {
@@ -102,6 +109,20 @@ export default function BranchProductsPage() {
     low: products.filter((p) => p.stockStatus === 'low').length,
     out: products.filter((p) => p.stockStatus === 'out').length,
   }), [products])
+
+  const categories = useMemo(() => {
+    const cats = new Set<string>()
+    products.forEach((p) => { if (p.productCategory) cats.add(p.productCategory) })
+    return Array.from(cats).sort(compareCategories)
+  }, [products])
+
+  const targetedCount = useMemo(() => products.filter((p) => p.isTargeted).length, [products])
+  const weightCount = useMemo(() => products.filter((p) => p.pricingMode === 'weight').length, [products])
+
+  const stats = {
+    total: products.length,
+    active: filteredProducts.length,
+  }
 
   const saveStock = async () => {
     if (!selectedProduct) return
@@ -153,6 +174,21 @@ export default function BranchProductsPage() {
         </button>
       </div>
 
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <div className="bg-white rounded-lg shadow p-4 text-center">
+          <div className="text-2xl font-bold text-gray-900">{stats.total}</div>
+          <div className="text-sm text-gray-600">المجموع</div>
+        </div>
+        <div className="bg-blue-50 rounded-lg shadow p-4 text-center">
+          <div className="text-2xl font-bold text-blue-600">{stats.active}</div>
+          <div className="text-sm text-gray-600">معروضة</div>
+        </div>
+        <div className="bg-purple-50 rounded-lg shadow p-4 text-center">
+          <div className="text-2xl font-bold text-purple-600">{categories.length}</div>
+          <div className="text-sm text-gray-600">تصنيفات</div>
+        </div>
+      </div>
+
       <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
         <div className="flex flex-col md:flex-row gap-3">
           <input
@@ -176,6 +212,65 @@ export default function BranchProductsPage() {
             <option value="priceDesc">💰 السعر تنازلي</option>
           </select>
         </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setShowTargetedOnly((v) => !v)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-bold transition border ${
+              showTargetedOnly
+                ? 'bg-amber-500 text-white border-amber-500'
+                : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+            }`}
+            title="عرض المنتجات المستهدفة فقط"
+          >
+            🎯 المستهدفة فقط ({targetedCount})
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowWeightOnly((v) => !v)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-bold transition border ${
+              showWeightOnly
+                ? 'bg-orange-500 text-white border-orange-500'
+                : 'bg-orange-50 text-orange-800 border-orange-300 hover:bg-orange-100'
+            }`}
+            title="عرض المنتجات التي تُسعّر بالوزن فقط"
+          >
+            ⚖️ بالوزن فقط ({weightCount})
+          </button>
+        </div>
+
+        {categories.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setSelectedCategory('')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                selectedCategory === ''
+                  ? 'bg-red-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              الكل ({products.length})
+            </button>
+            {categories.map((cat) => {
+              const count = products.filter((p) => p.productCategory === cat).length
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                    selectedCategory === cat
+                      ? 'bg-red-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {cat} ({count})
+                </button>
+              )
+            })}
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-2">
           {([
             { key: 'all', label: `الكل (${stockCounts.all})`, cls: 'bg-gray-100 text-gray-700' },
