@@ -29,6 +29,9 @@ type OrderDetail = {
   subtotal?: number
   deliveryFee?: number
   orderTotal?: number
+  discountCode?: string | null
+  discountAmount?: number | null
+  netTotal?: number | null
   customer: { customerName: string; phone: string } | null
   address: { streetAddress: string; googleMapsLink: string } | null
   items: OrderItemDetail[]
@@ -412,20 +415,56 @@ export default function BranchOrderDetailPage() {
             </button>
           </div>
           {(order.subtotal != null || order.deliveryFee != null || order.orderTotal != null) && (
-            <div className="grid grid-cols-3 gap-2 text-xs mt-2">
-              <div className="bg-gray-50 border border-gray-200 rounded px-2 py-1">
-                <div className="text-gray-500">الإجمالي الفرعي</div>
-                <div className="font-semibold text-gray-900">{order.subtotal ?? 0} ج.م</div>
+            <>
+              {order.discountCode && Number(order.discountAmount) > 0 && (
+                <div className="mt-3 rounded-lg border-2 border-amber-300 bg-amber-50 p-3 text-right">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div>
+                      <div className="text-xs font-semibold text-amber-800">🏷️ كود خصم مطبَّق</div>
+                      <div className="font-mono text-lg font-bold text-amber-900 tracking-wider" dir="ltr">
+                        {order.discountCode}
+                      </div>
+                    </div>
+                    <div className="text-left">
+                      <div className="text-xs text-amber-800">قيمة الخصم</div>
+                      <div className="text-lg font-bold text-amber-900">
+                        −{Number(order.discountAmount).toLocaleString()} ج.م
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-2 text-[12px] text-amber-900 bg-amber-100 border border-amber-200 rounded px-2 py-1.5">
+                    ⚠️ <strong>تنبيه للفرع:</strong> طبِّق هذا الخصم عند التحصيل من العميل. اقبض المبلغ <strong>بعد الخصم</strong> الموضح أدناه باللون الأخضر.
+                  </div>
+                </div>
+              )}
+              <div className={`grid ${order.discountCode && Number(order.discountAmount) > 0 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'} gap-2 text-xs mt-2`}>
+                <div className="bg-gray-50 border border-gray-200 rounded px-2 py-1">
+                  <div className="text-gray-500">الإجمالي الفرعي</div>
+                  <div className="font-semibold text-gray-900">{order.subtotal ?? 0} ج.م</div>
+                </div>
+                <div className="bg-gray-50 border border-gray-200 rounded px-2 py-1">
+                  <div className="text-gray-500">رسوم التوصيل</div>
+                  <div className="font-semibold text-gray-900">{order.deliveryFee ?? 0} ج.م</div>
+                </div>
+                {order.discountCode && Number(order.discountAmount) > 0 ? (
+                  <>
+                    <div className="bg-gray-50 border border-gray-200 rounded px-2 py-1">
+                      <div className="text-gray-500">قبل الخصم</div>
+                      <div className="font-semibold text-gray-500 line-through">{order.orderTotal ?? 0} ج.م</div>
+                    </div>
+                    <div className="bg-green-50 border-2 border-green-400 rounded px-2 py-1">
+                      <div className="text-green-800 font-bold">💰 المطلوب تحصيله</div>
+                      <div className="font-bold text-green-800 text-base">{Number(order.netTotal ?? order.orderTotal ?? 0).toLocaleString()} ج.م</div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="bg-red-50 border border-red-200 rounded px-2 py-1">
+                    <div className="text-red-700">الإجمالي الكلي</div>
+                    <div className="font-bold text-red-700">{order.orderTotal ?? 0} ج.م</div>
+                  </div>
+                )}
               </div>
-              <div className="bg-gray-50 border border-gray-200 rounded px-2 py-1">
-                <div className="text-gray-500">رسوم التوصيل</div>
-                <div className="font-semibold text-gray-900">{order.deliveryFee ?? 0} ج.م</div>
-              </div>
-              <div className="bg-red-50 border border-red-200 rounded px-2 py-1">
-                <div className="text-red-700">الإجمالي الكلي</div>
-                <div className="font-bold text-red-700">{order.orderTotal ?? 0} ج.م</div>
-              </div>
-            </div>
+            </>
           )}
         </section>
       </div>

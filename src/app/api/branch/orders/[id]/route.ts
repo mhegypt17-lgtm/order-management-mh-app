@@ -5,6 +5,7 @@ import {
   OrderItemRecord,
   appendEditHistory,
   computeDeliveryFee,
+  evaluateDiscountCode,
   generateId,
   readAddresses,
   readCustomers,
@@ -267,15 +268,43 @@ export async function PUT(
         )
         recomputedOrderTotal = recomputedSubtotal + recomputedDeliveryFee
 
-        await supabase
+        // Re-apply the saved voucher against the new gross so the customer
+        // still gets the same code's discount on the amended basket.
+        let nextDiscountAmount = Number(orderRow?.discountAmount) || 0
+        if (orderRow?.discountCode) {
+          const evald = await evaluateDiscountCode(
+            String(orderRow.discountCode),
+            recomputedOrderTotal,
+          )
+          nextDiscountAmount = evald.ok
+            ? Math.min(Number(evald.discount) || 0, recomputedOrderTotal)
+            : Math.min(nextDiscountAmount, recomputedOrderTotal)
+        }
+        const nextNetTotal = Math.max(0, recomputedOrderTotal - nextDiscountAmount)
+
+        const updRes = await supabase
           .from('orders')
           .update({
             subtotal: recomputedSubtotal,
             deliveryFee: recomputedDeliveryFee,
             orderTotal: recomputedOrderTotal,
+            discountAmount: nextDiscountAmount,
+            netTotal: nextNetTotal,
             updatedAt: now,
           })
           .eq('id', params.id)
+        if (updRes.error && /discountCode|discountAmount|netTotal|column .* does not exist/i.test(updRes.error.message || '')) {
+          console.warn('[branch PUT] discount columns missing in DB, retrying without them')
+          await supabase
+            .from('orders')
+            .update({
+              subtotal: recomputedSubtotal,
+              deliveryFee: recomputedDeliveryFee,
+              orderTotal: recomputedOrderTotal,
+              updatedAt: now,
+            })
+            .eq('id', params.id)
+        }
 
         branchLineSummary = `تم تعديل ${branchLineDetails.length} بند من الفرع`
         await appendEditHistory({

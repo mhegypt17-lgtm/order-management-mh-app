@@ -56,6 +56,15 @@ export interface OrderRecord {
   scheduledSpecificTime?: string | null
   isPriority?: boolean
   priorityReason?: string | null
+  /**
+   * Voucher / discount-code applied at save time. `discountCode` is the
+   * uppercase code, `discountAmount` is the validated EGP discount (≥ 0),
+   * and `netTotal` is `orderTotal - discountAmount` — the amount the
+   * branch collects from the customer.
+   */
+  discountCode?: string | null
+  discountAmount?: number | null
+  netTotal?: number | null
 }
 
 export interface OrderItemRecord {

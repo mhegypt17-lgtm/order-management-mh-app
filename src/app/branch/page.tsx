@@ -13,6 +13,9 @@ type BranchOrder = {
   orderType: string
   orderStatus: 'تم' | 'مؤجل' | 'لاغي' | 'حجز'
   orderTotal: number
+  discountCode?: string | null
+  discountAmount?: number | null
+  netTotal?: number | null
   createdBy: string
   customer: { customerName: string; phone: string } | null
   address: { streetAddress: string; googleMapsLink: string } | null
@@ -297,7 +300,27 @@ export default function BranchPage() {
                       {order.orderStatus}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-sm font-semibold text-gray-900">{Number(order.orderTotal || 0).toLocaleString()} ج.م</td>
+                  <td className="px-4 py-3 text-sm font-semibold text-gray-900">
+                    {order.discountCode && Number(order.discountAmount) > 0 ? (
+                      <div className="flex flex-col items-end gap-0.5">
+                        <span className="text-xs text-gray-400 line-through">
+                          {Number(order.orderTotal || 0).toLocaleString()} ج.م
+                        </span>
+                        <span className="text-green-700 font-bold">
+                          {Number(order.netTotal ?? order.orderTotal ?? 0).toLocaleString()} ج.م
+                        </span>
+                        <span
+                          className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 font-mono"
+                          dir="ltr"
+                          title={`خصم ${Number(order.discountAmount).toLocaleString()} ج.م`}
+                        >
+                          🏷️ {order.discountCode}
+                        </span>
+                      </div>
+                    ) : (
+                      <>{Number(order.orderTotal || 0).toLocaleString()} ج.م</>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-sm text-gray-700">{order.createdBy || '-'}</td>
                   <td className="px-4 py-3 text-sm">
                     <select

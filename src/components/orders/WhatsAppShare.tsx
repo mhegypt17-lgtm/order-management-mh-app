@@ -35,6 +35,9 @@ interface Props {
   orderStatus: string
   paymentMethod: string
   orderTotal: number
+  discountCode?: string | null
+  discountAmount?: number | null
+  netTotal?: number | null
   notes: string
   items: Item[]
   delivery: Delivery
@@ -53,7 +56,7 @@ export function WhatsAppShare(props: Props) {
   const {
     appOrderNo, orderDate, orderTime, customerName, customerPhone,
     deliveryArea, streetAddress, googleMapsLink, orderStatus, paymentMethod,
-    orderTotal, notes, items, delivery,
+    orderTotal, discountCode, discountAmount, netTotal, notes, items, delivery,
   } = props
 
   const [includePhotos, setIncludePhotos] = useState(true)
@@ -96,7 +99,14 @@ export function WhatsAppShare(props: Props) {
 
     lines.push('')
     lines.push(`💳 الدفع: ${paymentMethod || '-'}`)
-    lines.push(`💰 الإجمالي: *${Number(orderTotal || 0).toLocaleString()} ج.م*`)
+    const hasDiscount = !!(discountCode && Number(discountAmount) > 0)
+    if (hasDiscount) {
+      lines.push(`💰 الإجمالي قبل الخصم: ${Number(orderTotal || 0).toLocaleString()} ج.م`)
+      lines.push(`🏷️ كود خصم *${discountCode}*: −${Number(discountAmount).toLocaleString()} ج.م`)
+      lines.push(`✅ *المطلوب تحصيله: ${Number(netTotal ?? orderTotal ?? 0).toLocaleString()} ج.م*`)
+    } else {
+      lines.push(`💰 الإجمالي: *${Number(orderTotal || 0).toLocaleString()} ج.م*`)
+    }
     lines.push(`📦 حالة الطلب: *${orderStatus || '-'}*`)
     if (delivery?.deliveryStatus) lines.push(`🏍️ حالة التوصيل: *${delivery.deliveryStatus}*`)
     if (delivery?.branchComments) lines.push(`📝 ملاحظات الفرع: ${delivery.branchComments}`)
@@ -121,7 +131,7 @@ export function WhatsAppShare(props: Props) {
     }
 
     return lines.join('\n')
-  }, [appOrderNo, orderDate, orderTime, customerName, customerPhone, deliveryArea, streetAddress, googleMapsLink, items, paymentMethod, orderTotal, orderStatus, delivery, notes, includePhotos])
+  }, [appOrderNo, orderDate, orderTime, customerName, customerPhone, deliveryArea, streetAddress, googleMapsLink, items, paymentMethod, orderTotal, discountCode, discountAmount, netTotal, orderStatus, delivery, notes, includePhotos])
 
   const waHref = useMemo(() => {
     const encoded = encodeURIComponent(message)

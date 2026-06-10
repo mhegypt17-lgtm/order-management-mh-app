@@ -5,6 +5,7 @@ import {
   OrderItemRecord,
   OrderRecord,
   appendEditHistory,
+  evaluateDiscountCode,
   generateAppOrderNo,
   normalizePhone,
   readAddresses,
@@ -254,6 +255,20 @@ export async function POST(request: NextRequest) {
     )
     const orderTotal = subtotal + deliveryFee
 
+    // Server-side re-validation of the discount code so the client can't
+    // forge a discount amount. If the code is missing or invalid we just
+    // store no discount (netTotal = orderTotal).
+    let discountCode: string | null = null
+    let discountAmount = 0
+    if (body.discountCode) {
+      const evald = await evaluateDiscountCode(String(body.discountCode), orderTotal)
+      if (evald.ok && evald.code) {
+        discountCode = evald.code.code
+        discountAmount = Math.min(Number(evald.discount) || 0, orderTotal)
+      }
+    }
+    const netTotal = Math.max(0, orderTotal - discountAmount)
+
     // Get existing orders for that same date+type only (cheap & accurate)
     const dateKey = (() => {
       try {
@@ -304,6 +319,9 @@ export async function POST(request: NextRequest) {
       subtotal,
       deliveryFee,
       orderTotal,
+      discountCode,
+      discountAmount,
+      netTotal,
       createdBy: body.createdBy || 'unknown',
       createdAt: now,
       updatedAt: now,
@@ -342,6 +360,20 @@ export async function POST(request: NextRequest) {
         scheduledDate: _d,
         scheduledTimeSlot: _s,
         scheduledSpecificTime: _t,
+        ...orderSafe
+      } = order
+      const retry = await supabase.from('orders').insert([orderSafe]).select().single()
+      finalOrder = retry.data
+      finalError = retry.error
+    }
+
+    // Fallback: DB may not yet have the discount columns from the new migration.
+    if (finalError && /discountCode|discountAmount|netTotal|column .* does not exist/i.test(finalError.message || '')) {
+      console.warn('[orders POST] discount columns missing in DB, retrying without them')
+      const {
+        discountCode: _dc,
+        discountAmount: _da,
+        netTotal: _nt,
         ...orderSafe
       } = order
       const retry = await supabase.from('orders').insert([orderSafe]).select().single()

@@ -388,6 +388,24 @@ export default function OrderForm({ mode, orderId }: Props) {
 
           setLoadedOrderInfo({ appOrderNo: order.appOrderNo || '' })
 
+          // Restore the voucher that CS applied at save time so it survives
+          // close/reopen and is visible to whoever edits the order next.
+          if (order.discountCode && Number(order.discountAmount) > 0) {
+            setAppliedDiscount({
+              code: String(order.discountCode),
+              amount: Number(order.discountAmount) || 0,
+              // We don't persist the original 'percent vs value' flag, so we
+              // display the saved discount as a flat EGP amount which is
+              // accurate regardless of the original rule.
+              type: 'value',
+              value: Number(order.discountAmount) || 0,
+            })
+            setDiscountCodeInput(String(order.discountCode))
+          } else {
+            setAppliedDiscount(null)
+            setDiscountCodeInput('')
+          }
+
           // Load delivery data if available
           if (order.delivery) {
             setDeliveryData(order.delivery)
@@ -1144,9 +1162,8 @@ export default function OrderForm({ mode, orderId }: Props) {
           />
         </div>
 
-        {mode === 'create' && (
-          <div className="mt-3 rounded-lg border-2 border-amber-200 bg-amber-50 p-3">
-            <div className="text-sm font-semibold text-amber-900 mb-2">🏷️ كود الخصم</div>
+        <div className="mt-3 rounded-lg border-2 border-amber-200 bg-amber-50 p-3">
+          <div className="text-sm font-semibold text-amber-900 mb-2">🏷️ كود الخصم</div>
             {appliedDiscount ? (
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div className="text-sm text-amber-900">
@@ -1184,7 +1201,6 @@ export default function OrderForm({ mode, orderId }: Props) {
               </div>
             )}
           </div>
-        )}
 
         {selectedZone && freeDeliveryValue > 0 && (
           <p className="mt-2 text-xs text-gray-600 text-right">
@@ -1407,7 +1423,10 @@ export default function OrderForm({ mode, orderId }: Props) {
           googleMapsLink={form.googleMapsLink}
           orderStatus={form.orderStatus}
           paymentMethod={form.paymentMethod}
-          orderTotal={netTotal}
+          orderTotal={orderTotal}
+          discountCode={appliedDiscount?.code || null}
+          discountAmount={discountAmount}
+          netTotal={netTotal}
           notes={form.notes}
           items={items
             .filter((i) => i.productNameInput && Number(i.quantity) > 0)

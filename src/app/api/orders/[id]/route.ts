@@ -5,6 +5,7 @@ import {
   OrderItemRecord,
   OrderRecord,
   appendEditHistory,
+  evaluateDiscountCode,
   generateId,
   readAddresses,
   readCustomers,
@@ -265,6 +266,39 @@ export async function PUT(
 
     const existing = orders[orderIndex]
 
+    // Re-evaluate the discount against the new gross total. The client sends
+    // `discountCode` only when CS explicitly applies/removes a voucher; when
+    // the field is omitted we preserve whatever was previously saved (so a
+    // partial PUT for branch comments/status doesn't accidentally wipe the
+    // voucher). `discountCode: null` explicitly clears the voucher.
+    let nextDiscountCode: string | null = existing.discountCode ?? null
+    let nextDiscountAmount = Number(existing.discountAmount) || 0
+    if (Object.prototype.hasOwnProperty.call(body, 'discountCode')) {
+      if (body.discountCode) {
+        const evald = await evaluateDiscountCode(String(body.discountCode), orderTotal)
+        if (evald.ok && evald.code) {
+          nextDiscountCode = evald.code.code
+          nextDiscountAmount = Math.min(Number(evald.discount) || 0, orderTotal)
+        } else {
+          nextDiscountCode = null
+          nextDiscountAmount = 0
+        }
+      } else {
+        nextDiscountCode = null
+        nextDiscountAmount = 0
+      }
+    } else if (nextDiscountCode) {
+      // Voucher was unchanged by the client but the basket may have shifted.
+      // Re-validate it against the new gross to keep the saved amount honest.
+      const evald = await evaluateDiscountCode(nextDiscountCode, orderTotal)
+      if (evald.ok) {
+        nextDiscountAmount = Math.min(Number(evald.discount) || 0, orderTotal)
+      } else {
+        nextDiscountAmount = Math.min(nextDiscountAmount, orderTotal)
+      }
+    }
+    const nextNetTotal = Math.max(0, orderTotal - nextDiscountAmount)
+
     const changedFields: string[] = []
     if (existing.orderStatus !== body.orderStatus) changedFields.push('orderStatus')
     if (existing.paymentMethod !== body.paymentMethod) changedFields.push('paymentMethod')
@@ -321,6 +355,9 @@ export async function PUT(
       subtotal,
       deliveryFee,
       orderTotal,
+      discountCode: nextDiscountCode,
+      discountAmount: nextDiscountAmount,
+      netTotal: nextNetTotal,
       updatedAt: now,
     }
     const updRes = await supabase.from('orders').update(updatedOrder).eq('id', params.id)
@@ -331,6 +368,16 @@ export async function PUT(
         scheduledDate: _d,
         scheduledTimeSlot: _s,
         scheduledSpecificTime: _t,
+        ...updateSafe
+      } = updatedOrder
+      await supabase.from('orders').update(updateSafe).eq('id', params.id)
+    }
+    if (updRes.error && /discountCode|discountAmount|netTotal|column .* does not exist/i.test(updRes.error.message || '')) {
+      console.warn('[orders PUT] discount columns missing in DB, retrying without them')
+      const {
+        discountCode: _dc,
+        discountAmount: _da,
+        netTotal: _nt,
         ...updateSafe
       } = updatedOrder
       await supabase.from('orders').update(updateSafe).eq('id', params.id)
