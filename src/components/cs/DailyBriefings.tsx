@@ -345,6 +345,7 @@ export default function DailyBriefings() {
             const formatDate = (date: string) => {
               const d = new Date(date)
               return d.toLocaleString('ar-EG', {
+                timeZone: 'Africa/Cairo',
                 year: 'numeric',
                 month: 'short',
                 day: 'numeric',

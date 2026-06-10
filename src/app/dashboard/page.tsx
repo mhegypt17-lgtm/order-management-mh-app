@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { calculateComplaintAnalytics, type ComplaintAnalyticsRecord } from '@/lib/complaintAnalytics'
+import { cairoDateString, cairoFirstDayOfMonth, addDays, formatCairoDateTime } from '@/lib/cairoTime'
 
 type DashboardOrder = {
   id: string
@@ -58,11 +59,9 @@ function pct(value: number, total: number) {
 
 function getRecentDates(days: number) {
   const arr: string[] = []
-  const now = new Date()
+  const today = cairoDateString()
   for (let i = days - 1; i >= 0; i -= 1) {
-    const d = new Date(now)
-    d.setDate(now.getDate() - i)
-    arr.push(d.toISOString().slice(0, 10))
+    arr.push(addDays(today, -i))
   }
   return arr
 }
@@ -82,9 +81,8 @@ export default function DashboardPage() {
     monthlyGoal: number
     achievementPct: number
   }>({ monthLabel: '', totalUnits: 0, productCount: 0, targetedProducts: [], perAgent: [], monthlyGoal: 0, achievementPct: 0 })
-  const now = new Date()
-  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
-  const today = now.toISOString().slice(0, 10)
+  const firstDayOfMonth = cairoFirstDayOfMonth()
+  const today = cairoDateString()
 
   const [dateFrom, setDateFrom] = useState(firstDayOfMonth)
   const [dateTo, setDateTo] = useState(today)
@@ -781,7 +779,7 @@ export default function DashboardPage() {
         </table>
       </section>
 
-      <div className="text-xs text-gray-500">آخر تحديث: {new Date().toLocaleString('en-GB')}</div>
+      <div className="text-xs text-gray-500">آخر تحديث: {formatCairoDateTime(new Date(), 'en-GB')}</div>
     </div>
   )
 }

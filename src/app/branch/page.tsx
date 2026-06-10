@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { cairoDateString, addDays } from '@/lib/cairoTime'
 
 type DeliveryStatus = 'لم يخرج بعد' | 'جاهز' | 'في الطريق' | 'تم التوصيل'
 
@@ -48,7 +49,7 @@ export default function BranchPage() {
   const [orders, setOrders] = useState<BranchOrder[]>([])
   const [savingId, setSavingId] = useState<string | null>(null)
 
-  const today = new Date().toISOString().slice(0, 10)
+  const today = cairoDateString()
   const [searchTerm, setSearchTerm] = useState('')
   const [fromDate, setFromDate] = useState(today)
   const [toDate, setToDate] = useState(today)
@@ -57,16 +58,12 @@ export default function BranchPage() {
   const [deliveryFilter, setDeliveryFilter] = useState<'all' | DeliveryStatus>('all')
 
   const setPreset = (preset: 'today' | 'week' | 'month' | 'all') => {
-    const now = new Date()
-    const iso = (d: Date) => d.toISOString().slice(0, 10)
     if (preset === 'today') {
       setFromDate(today); setToDate(today)
     } else if (preset === 'week') {
-      const d = new Date(now); d.setDate(d.getDate() - 6)
-      setFromDate(iso(d)); setToDate(today)
+      setFromDate(addDays(today, -6)); setToDate(today)
     } else if (preset === 'month') {
-      const d = new Date(now); d.setDate(d.getDate() - 29)
-      setFromDate(iso(d)); setToDate(today)
+      setFromDate(addDays(today, -29)); setToDate(today)
     } else {
       setFromDate(''); setToDate('')
     }

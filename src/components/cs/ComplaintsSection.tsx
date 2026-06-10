@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useAuthStore } from '@/lib/auth'
 import toast from 'react-hot-toast'
+import { formatCairoDateTime } from '@/lib/cairoTime'
 
 interface Complaint {
   id: string
@@ -1100,7 +1101,7 @@ export default function ComplaintsSection() {
                       <div key={comment.id} className="bg-white border border-gray-200 rounded p-3">
                         <p className="text-sm font-medium text-gray-900">{comment.authorName}</p>
                         <p className="text-xs text-gray-500 mb-1">
-                          {new Date(comment.createdAt).toLocaleString('ar-EG')}
+                          {formatCairoDateTime(comment.createdAt, 'ar-EG')}
                         </p>
                         <p className="text-sm text-gray-700 whitespace-pre-wrap">{comment.text}</p>
                       </div>

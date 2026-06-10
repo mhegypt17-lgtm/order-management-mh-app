@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
+import { cairoDateString, cairoTimeString, cairoYMD, formatCairoDateTime } from '@/lib/cairoTime'
 
 type Role = 'admin' | 'cs' | 'branch'
 
@@ -48,12 +49,11 @@ const ORDER_METHODS_FALLBACK = ['FB', 'Call', 'App', 'WhatsApp', 'B2B', 'W.S']
 const ADAHI_PRODUCTS = ['باكدج صك 5 ك', 'عجل', 'خروف بلدي', 'خروف برقي']
 
 function nowDate() {
-  return new Date().toISOString().slice(0, 10)
+  return cairoDateString()
 }
 
 function nowTime() {
-  const now = new Date()
-  return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+  return cairoTimeString()
 }
 
 function emptyItem(): AdahiItem {
@@ -90,7 +90,7 @@ export default function AdahiOrderView({ role }: { role: Role }) {
   const [orderTime, setOrderTime] = useState(nowTime())
   const [orderReceiver, setOrderReceiver] = useState('رنا')
   const [orderMethod, setOrderMethod] = useState('Call')
-  const [seasonLabel, setSeasonLabel] = useState(`${new Date().getFullYear()} موسم الأضاحي`)
+  const [seasonLabel, setSeasonLabel] = useState(`${cairoYMD().year} موسم الأضاحي`)
 
   const [items, setItems] = useState<AdahiItem[]>([emptyItem()])
   const [paidAmount, setPaidAmount] = useState(0)
@@ -587,7 +587,7 @@ export default function AdahiOrderView({ role }: { role: Role }) {
                     <div className="font-semibold text-gray-900">{order.customerName}</div>
                     <div className="text-sm text-gray-600" dir="ltr">{order.phone}</div>
                   </div>
-                  <div className="text-sm text-gray-700">{new Date(order.createdAt).toLocaleString('ar-EG')}</div>
+                  <div className="text-sm text-gray-700">{formatCairoDateTime(order.createdAt, 'ar-EG')}</div>
                 </div>
                 <div className="mt-2 text-sm text-gray-700">
                   {order.items.map((item, idx) => `${item.productName} x${item.quantity}`).join(' - ')}

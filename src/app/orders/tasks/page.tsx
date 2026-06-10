@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useAuthStore } from '@/lib/auth'
 import toast from 'react-hot-toast'
 import { TaskRecord, OrderRecord } from '@/lib/omsData'
+import { formatCairoDate } from '@/lib/cairoTime'
 
 const AGENTS = ['رنا', 'مى', 'ميرنا', 'أمل'] as const
 const STATUSES = ['جديدة', 'قيد الإنجاز', 'مكتملة', 'معلقة'] as const
@@ -431,7 +432,7 @@ export default function TasksPage() {
                         {task.dueDate && (
                           <div>
                             <span className="font-medium">الاستحقاق:</span>{' '}
-                            {new Date(task.dueDate).toLocaleDateString('ar-EG')}
+                            {formatCairoDate(task.dueDate, 'ar-EG')}
                           </div>
                         )}
                         {linkedOrder && (

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
+import { cairoDateString, cairoTimeString } from '@/lib/cairoTime'
 import WhatsAppShare from './WhatsAppShare'
 
 type Product = {
@@ -114,9 +115,10 @@ const CANCELLATION_REASONS: string[] = ['نفاد المنتج', 'عدم توف�
 const PAYMENT_METHODS_FALLBACK = ['Instapay', 'Cash', 'Visa', 'Credit']
 
 function getDefaultOrderModel(): OrderFormModel {
-  const now = new Date()
-  const orderDate = now.toISOString().slice(0, 10)
-  const orderTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+  // Always use Cairo wall-clock so an order placed just after midnight is
+  // tagged with the new Cairo day (even if the server/browser is in UTC).
+  const orderDate = cairoDateString()
+  const orderTime = cairoTimeString()
 
   return {
     orderDate,

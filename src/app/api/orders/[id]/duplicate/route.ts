@@ -7,6 +7,7 @@ import {
   readOrderItems,
   readOrders,
 } from '@/lib/omsData'
+import { cairoDateString, cairoTimeString } from '@/lib/cairoTime'
 import { supabase } from '@/lib/supabase'
 
 /**
@@ -32,8 +33,8 @@ export async function POST(
     const sourceItems = allItems.filter((i) => i.orderId === source.id)
 
     const now = new Date()
-    const orderDate = now.toISOString().slice(0, 10)
-    const orderTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+    const orderDate = cairoDateString(now)
+    const orderTime = cairoTimeString(now)
     const nowISO = now.toISOString()
 
     const newOrderId = generateId('ord')

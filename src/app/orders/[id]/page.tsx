@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import OrderForm from '@/components/orders/OrderForm'
+import { formatCairoDateTime } from '@/lib/cairoTime'
 
 type HistoryItem = {
   id: string
@@ -60,7 +61,7 @@ export default function EditOrderPage() {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-sm font-semibold text-gray-900">{entry.summary}</p>
                     <span className="text-xs text-gray-500" dir="ltr">
-                      {new Date(entry.changedAt).toLocaleString('en-GB')}
+                      {formatCairoDateTime(entry.changedAt, 'en-GB')}
                     </span>
                   </div>
                   <p className="text-xs text-gray-600 mt-1">بواسطة: {entry.changedBy || '-'}</p>

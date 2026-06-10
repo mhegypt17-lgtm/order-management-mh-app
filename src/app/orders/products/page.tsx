@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { compareCategories } from '@/lib/omsData'
+import { formatCairoDateTime } from '@/lib/cairoTime'
 
 type Product = {
   id: string
@@ -478,7 +479,7 @@ export default function CSProductsPage() {
                   <p className="text-sm text-gray-700">عدد القطع المتاحة: <strong>{selectedProduct.stockQuantity}</strong></p>
                 )}
                 {selectedProduct.stockUpdatedAt && (
-                  <p className="text-[11px] text-gray-500 mt-1">آخر تحديث من الفرع: {new Date(selectedProduct.stockUpdatedAt).toLocaleString('ar-EG')}</p>
+                  <p className="text-[11px] text-gray-500 mt-1">آخر تحديث من الفرع: {formatCairoDateTime(selectedProduct.stockUpdatedAt, 'ar-EG')}</p>
                 )}
               </div>
             </div>

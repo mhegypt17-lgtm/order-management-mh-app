@@ -6,6 +6,7 @@ import {
   readOrderDelivery,
   readOrderSettings,
 } from '@/lib/omsData'
+import { cairoFirstDayOfMonth, cairoLastDayOfMonth, cairoYMD } from '@/lib/cairoTime'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -31,14 +32,10 @@ export async function GET(req: NextRequest) {
     const scope = (searchParams.get('scope') || 'admin').toLowerCase()
     const agent = (searchParams.get('agent') || '').trim()
 
-    const now = new Date()
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
-      .toISOString()
-      .slice(0, 10)
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0)
-      .toISOString()
-      .slice(0, 10)
-    const monthLabel = `${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`
+    const { year, month } = cairoYMD()
+    const firstDay = cairoFirstDayOfMonth()
+    const lastDay = cairoLastDayOfMonth()
+    const monthLabel = `${String(month).padStart(2, '0')}/${year}`
 
     const [products, orders, items, deliveries, settings] = await Promise.all([
       readProducts(),

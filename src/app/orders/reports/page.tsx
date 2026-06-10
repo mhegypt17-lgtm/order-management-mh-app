@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { calculateComplaintAnalytics, type ComplaintAnalyticsRecord } from '@/lib/complaintAnalytics'
+import { cairoDateString, cairoFirstDayOfMonth } from '@/lib/cairoTime'
 type OrderItem = {
   id: string
   productName: string
@@ -50,10 +51,8 @@ export default function ReportsPage() {
     achievementPct: number
   }>({ monthLabel: '', totalUnits: 0, productCount: 0, targetedProducts: [], perAgent: [], monthlyGoal: 0, achievementPct: 0 })
 
-  const today = new Date().toISOString().slice(0, 10)
-  const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
-    .toISOString()
-    .slice(0, 10)
+  const today = cairoDateString()
+  const firstDayOfMonth = cairoFirstDayOfMonth()
 
   const [dateFrom, setDateFrom] = useState(firstDayOfMonth)
   const [dateTo, setDateTo] = useState(today)

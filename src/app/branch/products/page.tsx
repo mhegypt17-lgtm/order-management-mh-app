@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
 import { compareCategories } from '@/lib/omsData'
+import { formatCairoDateTime } from '@/lib/cairoTime'
 
 type StockStatus = 'available' | 'low' | 'out'
 
@@ -538,7 +539,7 @@ export default function BranchProductsPage() {
                     </button>
                     {selectedProduct.stockUpdatedAt && (
                       <p className="text-[11px] text-gray-500 mt-2 text-right">
-                        آخر تحديث: {new Date(selectedProduct.stockUpdatedAt).toLocaleString('ar-EG')}
+                        آخر تحديث: {formatCairoDateTime(selectedProduct.stockUpdatedAt, 'ar-EG')}
                         {selectedProduct.stockUpdatedBy ? ` · بواسطة ${selectedProduct.stockUpdatedBy}` : ''}
                       </p>
                     )}
@@ -550,7 +551,7 @@ export default function BranchProductsPage() {
                     )}
                     {selectedProduct.stockUpdatedAt && (
                       <p className="text-[11px] text-gray-500 mt-1">
-                        آخر تحديث: {new Date(selectedProduct.stockUpdatedAt).toLocaleString('ar-EG')}
+                        آخر تحديث: {formatCairoDateTime(selectedProduct.stockUpdatedAt, 'ar-EG')}
                       </p>
                     )}
                   </div>

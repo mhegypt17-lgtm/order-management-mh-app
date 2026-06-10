@@ -1,21 +1,20 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { cairoMonthString } from '@/lib/cairoTime'
 
 type BranchReportOrder = {
   id: string
   orderDate: string
   orderTotal: number
-  orderStatus: string
+  orderStatus: 'تم' | 'مؤجل' | 'لاغي' | 'حجز'
   delivery: {
-    deliveryStatus: 'قبول' | 'جاهز' | 'في الطريق' | 'تم التوصيل' | 'لم يخرج بعد'
+    deliveryStatus: 'لم يخرج بعد' | 'جاهز' | 'في الطريق' | 'تم التوصيل'
   }
 }
 
 function getCurrentMonth() {
-  const now = new Date()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  return `${now.getFullYear()}-${month}`
+  return cairoMonthString()
 }
 
 export default function BranchReportsPage() {

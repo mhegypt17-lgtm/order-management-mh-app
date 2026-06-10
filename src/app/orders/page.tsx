@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
 import { DeliveryProgressBar } from '@/components/orders/DeliveryProgressBar'
+import { cairoDateString } from '@/lib/cairoTime'
 
 export default function OrdersPage() {
   const router = useRouter()
@@ -71,8 +72,7 @@ export default function OrdersPage() {
   }, [])
 
   const filteredOrders = useMemo(() => {
-    const now = new Date()
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    const today = cairoDateString()
     return orders.filter((order) => {
       const term = searchTerm.trim().toLowerCase()
       const orderDate = order.orderDate || ''
