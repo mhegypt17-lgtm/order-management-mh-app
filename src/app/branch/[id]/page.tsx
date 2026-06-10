@@ -127,6 +127,21 @@ export default function BranchOrderDetailPage() {
     setInvoicePhoto(url)
   }
 
+  const handleRemoveProductPhoto = (idx: number) => {
+    const ok = window.confirm('هل تريد حذف هذه الصورة؟')
+    if (!ok) return
+    setProductPhotos((prev) => prev.filter((_, i) => i !== idx))
+    toast.success('🗑️ تم حذف الصورة. اضغط "حفظ" لتأكيد التغيير')
+  }
+
+  const handleRemoveInvoicePhoto = () => {
+    if (!invoicePhoto) return
+    const ok = window.confirm('هل تريد حذف صورة الفاتورة؟')
+    if (!ok) return
+    setInvoicePhoto('')
+    toast.success('🗑️ تم حذف صورة الفاتورة. اضغط "حفظ" لتأكيد التغيير')
+  }
+
   const handleStatusChange = async (newStatus: OrderDetail['delivery']['deliveryStatus']) => {
     setDeliveryStatus(newStatus)
     setIsSaving(true)
@@ -459,20 +474,42 @@ export default function BranchOrderDetailPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1 text-right">صور المنتجات (متعددة)</label>
-            <input type="file" accept="image/*" multiple onChange={(e) => handleAddProductPhotos(e.target.files)} className="w-full" />
+            <input type="file" accept="image/*" multiple onChange={(e) => { handleAddProductPhotos(e.target.files); e.target.value = '' }} className="w-full" />
             <div className="mt-2 grid grid-cols-3 gap-2">
               {productPhotos.map((photo, idx) => (
-                <img key={idx} src={photo} alt={`product-${idx}`} className="w-full h-20 object-cover rounded border border-gray-200" />
+                <div key={idx} className="relative group">
+                  <img src={photo} alt={`product-${idx}`} className="w-full h-20 object-cover rounded border border-gray-200" />
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveProductPhoto(idx)}
+                    className="absolute top-1 left-1 bg-red-600 hover:bg-red-700 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shadow opacity-90 group-hover:opacity-100 transition"
+                    aria-label="حذف الصورة"
+                    title="حذف الصورة"
+                  >
+                    ✕
+                  </button>
+                </div>
               ))}
             </div>
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1 text-right">صورة الفاتورة (مفردة)</label>
-            <input type="file" accept="image/*" onChange={(e) => handleInvoicePhoto(e.target.files)} className="w-full" />
+            <input type="file" accept="image/*" onChange={(e) => { handleInvoicePhoto(e.target.files); e.target.value = '' }} className="w-full" />
             <div className="mt-2">
               {invoicePhoto ? (
-                <img src={invoicePhoto} alt="invoice" className="w-full h-28 object-cover rounded border border-gray-200" />
+                <div className="relative group">
+                  <img src={invoicePhoto} alt="invoice" className="w-full h-28 object-cover rounded border border-gray-200" />
+                  <button
+                    type="button"
+                    onClick={handleRemoveInvoicePhoto}
+                    className="absolute top-1 left-1 bg-red-600 hover:bg-red-700 text-white w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold shadow opacity-90 group-hover:opacity-100 transition"
+                    aria-label="حذف صورة الفاتورة"
+                    title="حذف صورة الفاتورة"
+                  >
+                    ✕
+                  </button>
+                </div>
               ) : (
                 <div className="w-full h-28 border border-dashed border-gray-300 rounded flex items-center justify-center text-sm text-gray-500">
                   لا توجد صورة فاتورة
