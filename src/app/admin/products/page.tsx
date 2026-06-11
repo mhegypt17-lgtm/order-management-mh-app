@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
-import { compareCategories, PRODUCT_CATEGORY_ORDER } from '@/lib/omsData'
+import { useProductCategories } from '@/lib/useProductCategories'
 
 export interface Product {
   id?: string
@@ -30,6 +30,7 @@ export interface Product {
 type StockStatus = 'available' | 'low' | 'out'
 
 export default function ProductCatalogPage() {
+  const { activeCategories, compareCategories } = useProductCategories()
   const [products, setProducts] = useState<Product[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -702,8 +703,8 @@ export default function ProductCatalogPage() {
                   required
                 >
                   <option value="" disabled>-- اختر التصنيف --</option>
-                  {PRODUCT_CATEGORY_ORDER.map((cat) => (
-                    <option key={cat} value={cat}>{cat}</option>
+                  {activeCategories.map((cat) => (
+                    <option key={cat.id} value={cat.name}>{cat.name}</option>
                   ))}
                 </select>
               </div>

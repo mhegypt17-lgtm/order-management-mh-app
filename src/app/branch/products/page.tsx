@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
-import { compareCategories } from '@/lib/omsData'
+import { useProductCategories } from '@/lib/useProductCategories'
 import { formatCairoDateTime } from '@/lib/cairoTime'
 
 type StockStatus = 'available' | 'low' | 'out'
@@ -41,6 +41,7 @@ function stockBadge(p: Product) {
 
 export default function BranchProductsPage() {
   const { user } = useAuthStore()
+  const { compareCategories } = useProductCategories()
   const [isLoading, setIsLoading] = useState(true)
   const [products, setProducts] = useState<Product[]>([])
   const [searchTerm, setSearchTerm] = useState('')

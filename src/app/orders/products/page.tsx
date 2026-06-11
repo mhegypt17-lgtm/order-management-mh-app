@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { compareCategories } from '@/lib/omsData'
+import { useProductCategories } from '@/lib/useProductCategories'
 import { formatCairoDateTime } from '@/lib/cairoTime'
 
 type Product = {
@@ -37,6 +37,7 @@ function stockBadge(p: Product) {
 }
 
 export default function CSProductsPage() {
+  const { compareCategories } = useProductCategories()
   const [isLoading, setIsLoading] = useState(true)
   const [products, setProducts] = useState<Product[]>([])
   const [searchTerm, setSearchTerm] = useState('')

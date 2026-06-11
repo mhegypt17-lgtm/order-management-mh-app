@@ -276,6 +276,21 @@ export default function OrderSettingsView() {
         <p className="text-sm text-gray-600 mt-1">إدارة القيم المستخدمة في النماذج مثل مصادر العملاء وطرق الطلب.</p>
       </div>
 
+      <a
+        href="/admin/settings/categories"
+        className="block bg-gradient-to-l from-orange-50 to-amber-50 border-2 border-orange-200 rounded-xl p-4 hover:border-orange-400 transition"
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-orange-900">🏷️ تصنيفات المنتجات</h2>
+            <p className="text-xs text-orange-700 mt-1">
+              إضافة، ترتيب، تفعيل أو حذف تصنيفات المنتجات — تظهر في كل صفحات المنتجات مباشرة.
+            </p>
+          </div>
+          <span className="text-orange-600 font-bold">إدارة ←</span>
+        </div>
+      </a>
+
       {SECTION_META.map((meta) => (
         <section key={meta.key} className="bg-white border border-gray-200 rounded-xl p-4">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
