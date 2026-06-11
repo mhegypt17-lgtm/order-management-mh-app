@@ -268,21 +268,26 @@ export interface ProductRecord {
 }
 
 // Preferred display order for product categories.
-// Any category not in this list will be sorted alphabetically AFTER these.
-// Add new entries below to extend the sequence in the future.
+// This is the SINGLE SOURCE OF TRUTH — the admin products dropdown
+// imports from here, sorting uses categoryRank() below, and any future
+// "manage categories" settings UI should read/write this list.
+// To add a new category in the future, append (or insert) an entry here.
 export const PRODUCT_CATEGORY_ORDER: string[] = [
-  'لحوم',
-  'لحوم متبلة',
+  'لحم فريش',
   'لحوم لذيذة',
-  'ضاني',
+  'لحم فريش متبل على التسوية',
+  'لحم ضاني',
+  'قطعيات بلاد مختلفة',
   'دواجن فريش',
   'دواجن لذيذة',
-  'دواجن فريش متبلة',
-  'مقبلات',
-  'بقالة',
-  'خضروات',
-  'اخشاب',
-  'حيوانات اليفة وجبات',
+  'دواجن فريش متبلة على التسوية',
+  'مقبلات وأصناف جانبية',
+  'وجبات للحيوانات الأليفة',
+  'عسل',
+  'بيض',
+  'اخشاب شوي',
+  'البقالة',
+  'خضروات مجمدة',
 ]
 
 const normalizeCategory = (c: string) => (c || '').replace(/\s+/g, ' ').trim()

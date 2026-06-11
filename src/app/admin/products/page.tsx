@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
-import { compareCategories } from '@/lib/omsData'
+import { compareCategories, PRODUCT_CATEGORY_ORDER } from '@/lib/omsData'
 
 export interface Product {
   id?: string
@@ -702,12 +702,9 @@ export default function ProductCatalogPage() {
                   required
                 >
                   <option value="" disabled>-- اختر التصنيف --</option>
-                  <option value="دواجن">دواجن</option>
-                  <option value="لحوم">لحوم</option>
-                  <option value="أسماك">أسماك</option>
-                  <option value="مقبلات">مقبلات</option>
-                  <option value="مجمدات">مجمدات</option>
-                  <option value="أخرى">أخرى</option>
+                  {PRODUCT_CATEGORY_ORDER.map((cat) => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
                 </select>
               </div>
 
