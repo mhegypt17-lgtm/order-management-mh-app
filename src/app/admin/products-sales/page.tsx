@@ -28,6 +28,18 @@ interface ReportResponse {
   totalRevenue: number
   rows: Row[]
   categories: string[]
+  debug?: {
+    totalOrdersInDb: number
+    totalItemsInDb: number
+    totalProductsInDb: number
+    productsAfterFilter: number
+    ordersInRangeAndStatus: number
+    itemsLinkedToRangeOrders: number
+    itemsSkippedBecauseProductFilteredOut: number
+    itemsSkippedBecauseProductMissingFromCatalogue: number
+    sampleOrderDates: string[]
+    sampleOrderStatuses: string[]
+  }
 }
 
 // Quick-range presets. Each returns { from, to } in 'YYYY-MM-DD' Cairo time.
@@ -50,15 +62,19 @@ export default function ProductSalesReportPage() {
   const [to, setTo] = useState(cairoDateString())
   const [category, setCategory] = useState('')
   const [targetedOnly, setTargetedOnly] = useState(false)
-  const [activeOnly, setActiveOnly] = useState(true)
+  // Default: include all products (even deactivated) — owners often hide
+  // products from the catalogue but still want their historical sales to
+  // show up in reports. Tick the box to limit to currently active items.
+  const [activeOnly, setActiveOnly] = useState(false)
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<ReportResponse | null>(null)
+  const [showDebug, setShowDebug] = useState(false)
 
   const load = async () => {
     setLoading(true)
     try {
-      const params = new URLSearchParams({ from, to })
+      const params = new URLSearchParams({ from, to, debug: '1' })
       if (category) params.set('category', category)
       if (targetedOnly) params.set('targetedOnly', '1')
       if (activeOnly) params.set('activeOnly', '1')
@@ -302,6 +318,72 @@ export default function ProductSalesReportPage() {
           </table>
         </div>
       </div>
+
+      {/* Diagnostic panel — surfaces when we got 0 rows so the user can
+          tell whether the issue is filtering, missing products, or a date
+          mismatch. Toggle to inspect counters. */}
+      {data?.debug && (
+        <div className="mt-4">
+          <button
+            type="button"
+            onClick={() => setShowDebug((v) => !v)}
+            className="text-xs text-gray-500 underline"
+          >
+            {showDebug ? 'إخفاء معلومات التشخيص' : 'إظهار معلومات التشخيص'}
+          </button>
+          {showDebug && (
+            <div className="mt-2 bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs text-gray-700">
+              <div className="font-bold mb-2">🔧 معلومات تشخيصية</div>
+              <ul className="space-y-1">
+                <li>
+                  إجمالي الطلبات في قاعدة البيانات:{' '}
+                  <span className="font-mono">{fmt(data.debug.totalOrdersInDb)}</span>
+                </li>
+                <li>
+                  إجمالي بنود الطلبات:{' '}
+                  <span className="font-mono">{fmt(data.debug.totalItemsInDb)}</span>
+                </li>
+                <li>
+                  إجمالي المنتجات في الكتالوج:{' '}
+                  <span className="font-mono">{fmt(data.debug.totalProductsInDb)}</span>
+                </li>
+                <li>
+                  المنتجات بعد تطبيق الفلتر:{' '}
+                  <span className="font-mono">{fmt(data.debug.productsAfterFilter)}</span>
+                </li>
+                <li>
+                  طلبات داخل الفترة وبحالة "تم" / تم التوصيل:{' '}
+                  <span className="font-mono">{fmt(data.debug.ordersInRangeAndStatus)}</span>
+                </li>
+                <li>
+                  بنود مرتبطة بهذه الطلبات:{' '}
+                  <span className="font-mono">{fmt(data.debug.itemsLinkedToRangeOrders)}</span>
+                </li>
+                <li>
+                  بنود تم استبعادها لأن منتجها مفلتر:{' '}
+                  <span className="font-mono">
+                    {fmt(data.debug.itemsSkippedBecauseProductFilteredOut)}
+                  </span>
+                </li>
+                <li>
+                  بنود لا يوجد منتجها في الكتالوج (محذوف):{' '}
+                  <span className="font-mono">
+                    {fmt(data.debug.itemsSkippedBecauseProductMissingFromCatalogue)}
+                  </span>
+                </li>
+                <li>
+                  عينة تواريخ طلبات:{' '}
+                  <span className="font-mono">{data.debug.sampleOrderDates.join(' | ')}</span>
+                </li>
+                <li>
+                  عينة حالات طلبات:{' '}
+                  <span className="font-mono">{data.debug.sampleOrderStatuses.join(' | ')}</span>
+                </li>
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
