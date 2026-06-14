@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
+import { formatCairoFriendly } from '@/lib/cairoTime'
 
 type OrderItemDetail = {
   id: string
@@ -164,6 +165,11 @@ export default function BranchOrderDetailPage() {
       })
 
       if (!res.ok) throw new Error('Failed')
+      // Merge the server's enriched response back into state so the
+      // newly-set deliveredAt / acceptedAt / etc. appear immediately
+      // without a manual page refresh.
+      const data = await res.json().catch(() => null)
+      if (data?.order) setOrder(data.order as OrderDetail)
       toast.success('✅ تم تحديث حالة التوصيل')
     } catch {
       toast.error('خطأ في تحديث الحالة')
@@ -193,6 +199,8 @@ export default function BranchOrderDetailPage() {
 
       if (!res.ok) throw new Error('Failed')
 
+      const data = await res.json().catch(() => null)
+      if (data?.order) setOrder(data.order as OrderDetail)
       toast.success('✅ تم حفظ البيانات')
     } catch {
       toast.error('حدث خطأ أثناء الحفظ')
@@ -529,7 +537,11 @@ export default function BranchOrderDetailPage() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1 text-right">وقت التسليم</label>
             <p className="px-3 py-2 border border-gray-200 rounded-lg text-gray-700" dir="ltr">
-              {deliveryStatus === 'تم التوصيل' ? order.delivery.deliveredAt || 'سيتم تسجيله تلقائياً عند الحفظ' : '-'}
+              {deliveryStatus === 'تم التوصيل'
+                ? order.delivery.deliveredAt
+                  ? formatCairoFriendly(order.delivery.deliveredAt)
+                  : 'سيتم تسجيله تلقائياً عند الحفظ'
+                : '-'}
             </p>
           </div>
         </div>

@@ -6,6 +6,8 @@ import { cairoMonthString } from '@/lib/cairoTime'
 type BranchReportOrder = {
   id: string
   orderDate: string
+  orderTime: string
+  createdAt: string
   orderTotal: number
   orderStatus: 'تم' | 'مؤجل' | 'لاغي' | 'حجز'
   delivery: {
@@ -74,19 +76,30 @@ export default function BranchReportsPage() {
     const deliveryRate = totalOrders > 0 ? (deliveredOrders / totalOrders) * 100 : 0
     const cancelRate = totalOrders > 0 ? (cancelledOrders / totalOrders) * 100 : 0
 
-    // Average delivery duration: only orders that have BOTH timestamps
-    // contribute. Orders accepted before the timing-columns migration ran
-    // will be missing acceptedAt and are silently skipped — that's better
-    // than polluting the average with a falsy "0 minute" entry.
-    const durations: number[] = []
+    // Average delivery duration. Primary signal is acceptedAt → deliveredAt
+    // (the branch's own working window). For older orders that were
+    // delivered BEFORE the timing-columns migration ran, acceptedAt is
+    // null, so we fall back to createdAt → deliveredAt — less precise
+    // (includes any CS-prep delay before the branch saw the order) but
+    // far more useful than showing "—" for an entire month of history.
+    const exactDurations: number[] = []
+    const fallbackDurations: number[] = []
     for (const o of orders) {
       if (o.delivery?.deliveryStatus !== 'تم التوصيل') continue
-      const d = durationMinutes(o.delivery?.acceptedAt, o.delivery?.deliveredAt)
-      if (d !== null) durations.push(d)
+      const end = o.delivery?.deliveredAt
+      if (!end) continue
+      const exact = durationMinutes(o.delivery?.acceptedAt, end)
+      if (exact !== null) {
+        exactDurations.push(exact)
+      } else {
+        const approx = durationMinutes(o.createdAt, end)
+        if (approx !== null) fallbackDurations.push(approx)
+      }
     }
+    const allDurations = [...exactDurations, ...fallbackDurations]
     const avgDeliveryMinutes =
-      durations.length > 0
-        ? durations.reduce((a, b) => a + b, 0) / durations.length
+      allDurations.length > 0
+        ? allDurations.reduce((a, b) => a + b, 0) / allDurations.length
         : null
 
     return {
@@ -97,7 +110,9 @@ export default function BranchReportsPage() {
       deliveryRate,
       cancelRate,
       avgDeliveryMinutes,
-      avgDeliveryCount: durations.length,
+      avgDeliveryCount: allDurations.length,
+      avgDeliveryExactCount: exactDurations.length,
+      avgDeliveryFallbackCount: fallbackDurations.length,
     }
   }, [orders])
 
@@ -182,6 +197,11 @@ export default function BranchReportsPage() {
                   ? `محسوبة من ${stats.avgDeliveryCount} طلب — من وقت قبول الفرع حتى التسليم`
                   : 'لا توجد بيانات كافية لحساب متوسط مدة التوصيل لهذا الشهر'}
               </p>
+              {stats.avgDeliveryFallbackCount > 0 && (
+                <p className="text-xs text-amber-700 mt-1">
+                  ⚠️ {stats.avgDeliveryFallbackCount} من الطلبات تم حساب وقتها تقريبياً من وقت إنشاء الطلب لأنها سابقة لـ migration التوقيتات
+                </p>
+              )}
             </div>
           </div>
 

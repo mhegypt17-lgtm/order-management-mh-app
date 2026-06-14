@@ -13,6 +13,7 @@ type OrderRecord = {
   id: string
   appOrderNo: string
   orderDate: string
+  createdAt: string
   orderStatus: 'تم' | 'مؤجل' | 'لاغي' | 'حجز'
   orderMethod: 'FB' | 'Call' | 'App' | 'WhatsApp' | 'B2B' | 'W.S'
   customerType: 'جديد' | 'قديم' | 'عائد' | 'استكمال' | 'استرجاع' | 'استبدال' | 'تسويق' | 'تعويض' | 'فحص' | 'تحصيل'
@@ -172,19 +173,42 @@ export default function ReportsPage() {
   const deliveryStats = useMemo(() => countBy(rangeOrders.map((o) => o.delivery?.deliveryStatus || 'لم يخرج بعد')), [rangeOrders])
 
   const deliveryDurationStats = useMemo(() => {
-    const durations: number[] = []
+    // Primary signal is acceptedAt → deliveredAt. For orders that pre-date
+    // the timing-columns migration we fall back to createdAt → deliveredAt
+    // (less precise — includes any CS preparation delay before the order
+    // was handed off to the branch) so the average stays meaningful for
+    // historical date ranges instead of showing "—".
+    const exact: number[] = []
+    const fallback: number[] = []
     for (const o of rangeOrders) {
       if (o.delivery?.deliveryStatus !== 'تم التوصيل') continue
-      const d = durationMinutes(o.delivery?.acceptedAt, o.delivery?.deliveredAt)
-      if (d !== null) durations.push(d)
+      const end = o.delivery?.deliveredAt
+      if (!end) continue
+      const ex = durationMinutes(o.delivery?.acceptedAt, end)
+      if (ex !== null) {
+        exact.push(ex)
+      } else {
+        const approx = durationMinutes(o.createdAt, end)
+        if (approx !== null) fallback.push(approx)
+      }
     }
-    if (durations.length === 0) {
-      return { avgMinutes: null as number | null, count: 0, fastest: null as number | null, slowest: null as number | null }
+    const all = [...exact, ...fallback]
+    if (all.length === 0) {
+      return {
+        avgMinutes: null as number | null,
+        count: 0,
+        exactCount: 0,
+        fallbackCount: 0,
+        fastest: null as number | null,
+        slowest: null as number | null,
+      }
     }
-    const sorted = [...durations].sort((a, b) => a - b)
+    const sorted = [...all].sort((a, b) => a - b)
     return {
-      avgMinutes: durations.reduce((a, b) => a + b, 0) / durations.length,
-      count: durations.length,
+      avgMinutes: all.reduce((a, b) => a + b, 0) / all.length,
+      count: all.length,
+      exactCount: exact.length,
+      fallbackCount: fallback.length,
       fastest: sorted[0],
       slowest: sorted[sorted.length - 1],
     }
@@ -512,6 +536,11 @@ export default function ReportsPage() {
                   ? `محسوبة من ${deliveryDurationStats.count} طلب موصل — من وقت قبول الفرع حتى التسليم`
                   : 'لا توجد بيانات كافية في هذا النطاق لحساب متوسط مدة التوصيل'}
               </p>
+              {deliveryDurationStats.fallbackCount > 0 && (
+                <p className="text-xs text-amber-700 mt-1">
+                  ⚠️ {deliveryDurationStats.fallbackCount} من الطلبات تم حساب وقتها تقريبياً من وقت إنشاء الطلب لأنها سابقة لـ migration التوقيتات
+                </p>
+              )}
               {deliveryDurationStats.count > 0 && (
                 <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                   <div className="bg-green-50 rounded p-2 border border-green-100">

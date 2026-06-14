@@ -127,3 +127,44 @@ export function formatCairoDate(
     day: '2-digit',
   }).format(d)
 }
+
+/**
+ * Friendly Cairo timestamp for UI display, e.g. "14/06/2026 — 01:43 م".
+ *
+ * Uses Western digits (en-GB) so it stays compact, but a 12-hour clock
+ * with Arabic ص/م so it reads naturally in the RTL Arabic UI. Prefer
+ * this over `formatCairoDateTime` anywhere a user is going to glance at
+ * a delivery / receipt time.
+ */
+export function formatCairoFriendly(
+  input: Date | string | number | null | undefined,
+): string {
+  if (input == null || input === '') return ''
+  const d = toDate(input)
+  if (Number.isNaN(d.getTime())) return ''
+  const datePart = new Intl.DateTimeFormat('en-GB', {
+    timeZone: CAIRO_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d)
+  // Pull hour/minute and AM/PM separately so we can swap "AM"/"PM" for
+  // Arabic "ص"/"م" — Intl's `ar-EG` would also localise the digits,
+  // which we want to keep Western for compactness.
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: CAIRO_TIME_ZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  }).formatToParts(d)
+  let hh = '12'
+  let mm = '00'
+  let period: 'AM' | 'PM' = 'AM'
+  for (const p of parts) {
+    if (p.type === 'hour') hh = p.value
+    else if (p.type === 'minute') mm = p.value
+    else if (p.type === 'dayPeriod') period = p.value.toUpperCase().includes('P') ? 'PM' : 'AM'
+  }
+  const periodArabic = period === 'PM' ? 'م' : 'ص'
+  return `${datePart} — ${hh}:${mm} ${periodArabic}`
+}
