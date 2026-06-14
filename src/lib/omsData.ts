@@ -553,18 +553,29 @@ export async function writeOrderDelivery(_data: OrderDeliveryRecord[]): Promise<
 // One row per order (enforced by unique constraint on orderId). Captures
 // the customer's post-delivery satisfaction rating + free-text comment as
 // collected by a CS agent. Editable for 30 days; auto-creates a complaint
-// when rating <= 2.
+// when rating <= 2 OR when any of the detailed dimensions hits its
+// negative bucket (see FEEDBACK_DIMENSIONS in lib/feedbackDimensions.ts).
 export interface OrderFeedbackRecord {
   id: string
   orderId: string
   customerId: string | null
-  rating: number // 1..5
+  rating: number // 1..5 (overall, required)
   comment: string
   collectedBy: string
   collectedAt: string
   contactChannel: 'phone' | 'whatsapp' | 'in-person' | 'other' | null
   followUpRequired: boolean
   escalatedComplaintId: string | null
+  // ─── Detailed dimensions (all optional) ──────────────────────────────────
+  productQuality: string | null         // جودة عالية جداً | جودة عالية | جودة منخفضة | جودة منخفضة جداً
+  packaging: string | null              // ممتاز | جيد جداً | جيد | غير مقبول | أخرى
+  packagingOther: string | null         // free text when packaging === 'أخرى'
+  deliveryTimeliness: string | null     // مبكراً | في الوقت المحدد | متأخر | متأخر جداً
+  customerService: string | null        // ممتاز | جيد جداً | جيد | ضعيف | أخرى
+  customerServiceOther: string | null   // free text when customerService === 'أخرى'
+  pricingValue: string | null           // ممتاز | جيد جداً | جيد | ضعيف
+  appUsability: string | null           // سهل الاستخدام | ليس سهلاً ولا صعباً | صعب الاستخدام
+  recommendToFriends: string | null     // نعم | لا
   createdAt: string
   updatedAt: string
 }

@@ -10,6 +10,9 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { formatCairoDateTime } from '@/lib/cairoTime'
+import { FEEDBACK_DIMENSIONS } from '@/lib/feedbackDimensions'
+
+type DimensionAgg = { answered: number; counts: Record<string, number> }
 
 type Summary = {
   from: string
@@ -20,6 +23,7 @@ type Summary = {
   collectionRatePct: number
   satisfactionPct: number
   byRating: Record<1 | 2 | 3 | 4 | 5, number>
+  byDimension: Record<string, DimensionAgg>
   perAgent: Array<{ agent: string; count: number; avgRating: number }>
   recentLowRatings: Array<{
     id: string
@@ -135,7 +139,7 @@ export default function FeedbackSummaryWidget({
 
       {/* Histogram */}
       <div>
-        <div className="text-xs text-gray-500 mb-1">توزيع التقييمات</div>
+        <div className="text-xs text-gray-500 mb-1">توزيع التقييمات العامة</div>
         <div className="space-y-1.5">
           {[5, 4, 3, 2, 1].map((r) => {
             const n = data.byRating[r as 1 | 2 | 3 | 4 | 5] || 0
@@ -153,6 +157,58 @@ export default function FeedbackSummaryWidget({
           })}
         </div>
       </div>
+
+      {/* Detailed dimension distributions */}
+      {data.byDimension && (
+        <div>
+          <div className="text-xs text-gray-500 mb-2 font-bold">📊 توزيع التقييمات التفصيلية</div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {FEEDBACK_DIMENSIONS.map((dim) => {
+              const agg = data.byDimension[dim.key]
+              if (!agg || agg.answered === 0) return null
+              return (
+                <div key={dim.key} className="bg-gray-50 rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-gray-800">
+                      {dim.icon} {dim.label}
+                    </span>
+                    <span className="text-[10px] text-gray-500">{agg.answered} إجابة</span>
+                  </div>
+                  <div className="space-y-1">
+                    {dim.options.map((opt) => {
+                      const n = agg.counts[opt.value] || 0
+                      const pct = agg.answered > 0 ? (n / agg.answered) * 100 : 0
+                      const barTone =
+                        opt.tone === 'positive'
+                          ? 'bg-emerald-500'
+                          : opt.tone === 'good'
+                            ? 'bg-green-500'
+                            : opt.tone === 'neutral'
+                              ? 'bg-yellow-500'
+                              : opt.tone === 'negative'
+                                ? 'bg-red-500'
+                                : 'bg-blue-500'
+                      return (
+                        <div key={opt.value} className="flex items-center gap-2">
+                          <span className="text-[10px] text-gray-700 w-28 truncate text-right" title={opt.value}>
+                            {opt.value}
+                          </span>
+                          <div className="flex-1 h-2.5 bg-white rounded overflow-hidden border border-gray-100">
+                            <div className={`h-full ${barTone}`} style={{ width: `${pct}%` }} />
+                          </div>
+                          <span className="text-[10px] text-gray-600 w-12 text-left">
+                            {n} ({pct.toFixed(0)}%)
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {showPerAgent && data.perAgent.length > 0 && (
         <div>

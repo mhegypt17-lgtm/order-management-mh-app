@@ -7,6 +7,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { formatCairoDateTime, cairoFirstDayOfMonth, cairoDateString } from '@/lib/cairoTime'
+import {
+  FEEDBACK_DIMENSIONS,
+  TONE_BADGE,
+  findOption,
+  type FeedbackDimensionKey,
+} from '@/lib/feedbackDimensions'
 
 type Feedback = {
   id: string
@@ -19,6 +25,15 @@ type Feedback = {
   contactChannel: string | null
   followUpRequired: boolean
   escalatedComplaintId: string | null
+  productQuality: string | null
+  packaging: string | null
+  packagingOther: string | null
+  deliveryTimeliness: string | null
+  customerService: string | null
+  customerServiceOther: string | null
+  pricingValue: string | null
+  appUsability: string | null
+  recommendToFriends: string | null
 }
 
 const RATING_BUCKETS = [
@@ -51,6 +66,8 @@ export default function FeedbackListPage() {
   const [bucket, setBucket] = useState<(typeof RATING_BUCKETS)[number]['value']>('all')
   const [agentFilter, setAgentFilter] = useState('')
   const [search, setSearch] = useState('')
+  // Dimension drill-down: { 'productQuality': 'جودة منخفضة', ... }
+  const [dimFilters, setDimFilters] = useState<Partial<Record<FeedbackDimensionKey, string>>>({})
 
   const load = async () => {
     setLoading(true)
@@ -75,14 +92,22 @@ export default function FeedbackListPage() {
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase()
-    if (!term) return rows
-    return rows.filter(
+    let out = rows
+    // Apply dimension drill-down filters client-side (API doesn't support yet)
+    const activeDims = Object.entries(dimFilters).filter(([, v]) => v) as Array<[FeedbackDimensionKey, string]>
+    if (activeDims.length > 0) {
+      out = out.filter((r) =>
+        activeDims.every(([k, v]) => (r as Record<string, unknown>)[k] === v),
+      )
+    }
+    if (!term) return out
+    return out.filter(
       (r) =>
         r.comment.toLowerCase().includes(term) ||
         r.collectedBy.toLowerCase().includes(term) ||
         r.orderId.toLowerCase().includes(term),
     )
-  }, [rows, search])
+  }, [rows, search, dimFilters])
 
   const stats = useMemo(() => {
     if (rows.length === 0) return { count: 0, avg: 0, positivePct: 0 }
@@ -178,6 +203,41 @@ export default function FeedbackListPage() {
           placeholder="🔍 بحث في التعليقات أو رقم الطلب..."
           className="w-full px-3 py-2 border border-gray-300 rounded-lg"
         />
+
+        {/* Dimension drill-down filters */}
+        <div className="pt-3 border-t border-gray-200">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-bold text-gray-700">تصفية حسب بعد محدد</span>
+            {Object.values(dimFilters).some(Boolean) && (
+              <button
+                type="button"
+                onClick={() => setDimFilters({})}
+                className="text-[11px] text-red-600 hover:text-red-800"
+              >
+                ✕ مسح التصفيات
+              </button>
+            )}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+            {FEEDBACK_DIMENSIONS.map((dim) => (
+              <select
+                key={dim.key}
+                value={dimFilters[dim.key] || ''}
+                onChange={(e) =>
+                  setDimFilters((d) => ({ ...d, [dim.key]: e.target.value || undefined }))
+                }
+                className="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-xs"
+              >
+                <option value="">{dim.icon} {dim.label} — الكل</option>
+                {dim.options.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.value}
+                  </option>
+                ))}
+              </select>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* List */}
@@ -214,6 +274,32 @@ export default function FeedbackListPage() {
               {row.comment && (
                 <p className="text-sm whitespace-pre-wrap leading-relaxed">{row.comment}</p>
               )}
+
+              {/* Dimension badges */}
+              {FEEDBACK_DIMENSIONS.some((d) => (row as Record<string, unknown>)[d.key]) && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {FEEDBACK_DIMENSIONS.map((dim) => {
+                    const v = (row as Record<string, unknown>)[dim.key] as string | null
+                    if (!v) return null
+                    const opt = findOption(dim, v)
+                    const tone = opt ? TONE_BADGE[opt.tone] : 'bg-white text-gray-800 border-gray-300'
+                    const other =
+                      v === 'أخرى' && dim.otherField
+                        ? ((row as Record<string, unknown>)[dim.otherField] as string | null)
+                        : null
+                    return (
+                      <span
+                        key={dim.key}
+                        className={`text-[10px] border rounded-full px-2 py-0.5 ${tone}`}
+                        title={`${dim.label}: ${v}${other ? ` — ${other}` : ''}`}
+                      >
+                        {dim.icon} {v}{other ? ` (${other})` : ''}
+                      </span>
+                    )
+                  })}
+                </div>
+              )}
+
               <div className="mt-2 flex items-center justify-between text-xs">
                 <Link
                   href={`/orders/${row.orderId}`}

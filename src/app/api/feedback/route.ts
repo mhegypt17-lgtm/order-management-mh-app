@@ -4,8 +4,12 @@ import {
   OrderFeedbackRecord,
   createComplaint,
   generateId,
-  readOrderFeedback,
 } from '@/lib/omsData'
+import {
+  FEEDBACK_DIMENSIONS,
+  getEscalationReasons,
+  type FeedbackDimensionKey,
+} from '@/lib/feedbackDimensions'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -15,6 +19,38 @@ const LOW_RATING_THRESHOLD = 2 // ratings ≤ 2 trigger an auto-complaint
 
 // Narrow projection — never fetch huge text comments unless explicitly needed.
 const SUMMARY_COLS = 'id,orderId,customerId,rating,collectedBy,collectedAt,followUpRequired'
+
+// Parse + validate the 7 optional sub-dimensions out of an incoming body.
+// Unknown / disallowed values are rejected with a 400 to keep the data clean.
+function parseDimensions(body: Record<string, unknown>): {
+  ok: true
+  values: Partial<OrderFeedbackRecord>
+} | { ok: false; error: string } {
+  const out: Partial<OrderFeedbackRecord> = {}
+  for (const dim of FEEDBACK_DIMENSIONS) {
+    const key = dim.key as FeedbackDimensionKey
+    if (key in body) {
+      const raw = body[key]
+      if (raw === null || raw === '') {
+        ;(out as Record<string, unknown>)[key] = null
+      } else if (typeof raw === 'string') {
+        const allowed = dim.options.some((o) => o.value === raw)
+        if (!allowed) {
+          return { ok: false, error: `قيمة غير صالحة لـ ${dim.label}` }
+        }
+        ;(out as Record<string, unknown>)[key] = raw
+      } else {
+        return { ok: false, error: `قيمة غير صالحة لـ ${dim.label}` }
+      }
+    }
+    if (dim.otherField && dim.otherField in body) {
+      const raw = body[dim.otherField]
+      ;(out as Record<string, unknown>)[dim.otherField] =
+        raw === null || raw === '' ? null : String(raw).slice(0, 500)
+    }
+  }
+  return { ok: true, values: out }
+}
 
 function isWithinEditWindow(collectedAt: string): boolean {
   const collected = new Date(collectedAt).getTime()
@@ -101,6 +137,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'اسم المسؤول مطلوب' }, { status: 400 })
     }
 
+    // Parse + validate the optional detailed dimensions
+    const dimsResult = parseDimensions(body)
+    if (!dimsResult.ok) {
+      return NextResponse.json({ error: dimsResult.error }, { status: 400 })
+    }
+    const dimensions = dimsResult.values
+
     // 1) Validate order + delivery status
     const { data: order, error: orderErr } = await supabase
       .from('orders')
@@ -142,8 +185,15 @@ export async function POST(req: NextRequest) {
 
     let escalatedComplaintId: string | null = null
 
-    // 3) Auto-escalate low ratings to the existing complaints workflow
-    if (rating <= LOW_RATING_THRESHOLD) {
+    // 3) Decide if we need to auto-escalate. Triggers:
+    //    a) Overall rating <= LOW_RATING_THRESHOLD
+    //    b) Any sub-dimension answered with a value in its escalateOn list
+    //       (e.g. "جودة منخفضة", "متأخر جداً", "لا" for recommend, etc.)
+    const subReasons = getEscalationReasons(dimensions)
+    const lowRating = rating <= LOW_RATING_THRESHOLD
+    const shouldEscalate = lowRating || subReasons.length > 0
+
+    if (shouldEscalate) {
       try {
         // Fetch customer phone/name for the complaint card
         let customerName: string | null = null
@@ -158,13 +208,33 @@ export async function POST(req: NextRequest) {
           customerPhone = (cust as any)?.phone || null
         }
 
+        // Build a human-readable subject + reason listing every trigger
+        const triggers: string[] = []
+        if (lowRating) triggers.push(`تقييم عام منخفض (${rating}/5)`)
+        for (const r of subReasons) triggers.push(`${r.dim.label}: ${r.value}`)
+        const subject = `تقييم سلبي من العميل — ${triggers[0]}${triggers.length > 1 ? ` (+${triggers.length - 1})` : ''}`
+        const reason = triggers.join(' • ')
+
+        // Priority: high if overall rating is 1 OR multiple sub-dim triggers, else medium
+        const priority: 'high' | 'medium' =
+          rating === 1 || subReasons.length >= 2 ? 'high' : 'medium'
+
+        // Description = customer comment + structured trigger summary
+        const descriptionLines: string[] = []
+        if (comment) descriptionLines.push(comment)
+        if (triggers.length) {
+          descriptionLines.push('')
+          descriptionLines.push('— أسباب التصعيد الآلي —')
+          for (const t of triggers) descriptionLines.push(`• ${t}`)
+        }
+
         const complaint = await createComplaint({
           channel: 'App',
-          subject: `تقييم منخفض (${rating}/5) من العميل`,
-          description: comment || '(لم يُسجل تعليق نصي)',
-          reason: 'تقييم منخفض بعد التوصيل',
+          subject,
+          description: descriptionLines.join('\n') || '(لم يُسجل تعليق نصي)',
+          reason,
           status: 'open',
-          priority: rating === 1 ? 'high' : 'medium',
+          priority,
           customerId,
           customerName,
           customerPhone,
@@ -192,8 +262,18 @@ export async function POST(req: NextRequest) {
       collectedBy,
       collectedAt: now,
       contactChannel: contactChannel as OrderFeedbackRecord['contactChannel'],
-      followUpRequired: rating <= LOW_RATING_THRESHOLD,
+      followUpRequired: shouldEscalate,
       escalatedComplaintId,
+      productQuality: null,
+      packaging: null,
+      packagingOther: null,
+      deliveryTimeliness: null,
+      customerService: null,
+      customerServiceOther: null,
+      pricingValue: null,
+      appUsability: null,
+      recommendToFriends: null,
+      ...dimensions,
       createdAt: now,
       updatedAt: now,
     }
@@ -251,12 +331,23 @@ export async function PATCH(req: NextRequest) {
         return NextResponse.json({ error: 'تقييم غير صالح' }, { status: 400 })
       }
       patch.rating = r
-      patch.followUpRequired = r <= LOW_RATING_THRESHOLD
     }
     if (typeof body.comment === 'string') patch.comment = body.comment.trim()
     if (typeof body.contactChannel !== 'undefined') {
       patch.contactChannel = (body.contactChannel || null) as OrderFeedbackRecord['contactChannel']
     }
+
+    // Detailed dimensions — validate against config
+    const dimsResult = parseDimensions(body)
+    if (!dimsResult.ok) {
+      return NextResponse.json({ error: dimsResult.error }, { status: 400 })
+    }
+    Object.assign(patch, dimsResult.values)
+
+    // Recompute followUpRequired from the merged (existing + patch) state
+    const merged = { ...(existing as OrderFeedbackRecord), ...patch }
+    patch.followUpRequired =
+      merged.rating <= LOW_RATING_THRESHOLD || getEscalationReasons(merged).length > 0
 
     const { data: updated, error: updErr } = await supabase
       .from('order_feedback')

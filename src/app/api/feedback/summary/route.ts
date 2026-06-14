@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { FEEDBACK_DIMENSIONS } from '@/lib/feedbackDimensions'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -24,10 +25,13 @@ export async function GET(req: NextRequest) {
     toEnd.setHours(23, 59, 59, 999)
     const toIso = toEnd.toISOString()
 
-    // 1) Pull feedback rows in range — narrow projection.
+    // 1) Pull feedback rows in range — include all 7 dimension columns so
+    //    we can aggregate them server-side. Comments still excluded to keep
+    //    payload small (use /api/feedback?from=&to= to pull full rows).
+    const dimCols = FEEDBACK_DIMENSIONS.map((d) => `"${d.key}"`).join(',')
     const { data: rows, error: fbErr } = await supabase
       .from('order_feedback')
-      .select('id,orderId,rating,collectedBy,collectedAt,followUpRequired')
+      .select(`id,orderId,rating,collectedBy,collectedAt,followUpRequired,${dimCols}`)
       .gte('collectedAt', fromIso)
       .lte('collectedAt', toIso)
     if (fbErr) {
@@ -40,6 +44,7 @@ export async function GET(req: NextRequest) {
       collectedBy: string
       collectedAt: string
       followUpRequired: boolean
+      [key: string]: unknown
     }>
 
     // 2) Count delivered orders in the same range — head-only, no payload.
@@ -76,6 +81,28 @@ export async function GET(req: NextRequest) {
       .map((a) => ({ agent: a.agent, count: a.count, avgRating: a.count > 0 ? a.total / a.count : 0 }))
       .sort((a, b) => b.count - a.count)
 
+    // 3) Per-dimension distributions. For each of the 7 dimensions we
+    //    return { [optionValue]: count, _answered: <how many rows answered> }.
+    //    Front-end uses _answered to compute % share within respondents,
+    //    not over the full feedback count (so unanswered rows don't dilute).
+    const byDimension: Record<
+      string,
+      { answered: number; counts: Record<string, number> }
+    > = {}
+    for (const dim of FEEDBACK_DIMENSIONS) {
+      const counts: Record<string, number> = {}
+      for (const opt of dim.options) counts[opt.value] = 0
+      let answered = 0
+      for (const r of feedback) {
+        const v = r[dim.key]
+        if (typeof v === 'string' && v.length > 0 && counts[v] !== undefined) {
+          counts[v] += 1
+          answered += 1
+        }
+      }
+      byDimension[dim.key] = { answered, counts }
+    }
+
     let recentLowRatings: Array<{
       id: string
       orderId: string
@@ -106,6 +133,7 @@ export async function GET(req: NextRequest) {
         collectionRatePct: Number(collectionRatePct.toFixed(1)),
         satisfactionPct: Number(satisfactionPct.toFixed(1)),
         byRating,
+        byDimension,
         perAgent,
         recentLowRatings,
       },

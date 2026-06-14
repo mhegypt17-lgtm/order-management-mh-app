@@ -14,6 +14,13 @@ import toast from 'react-hot-toast'
 import Link from 'next/link'
 import { useAuthStore } from '@/lib/auth'
 import { formatCairoDateTime } from '@/lib/cairoTime'
+import {
+  FEEDBACK_DIMENSIONS,
+  TONE_CLASSES,
+  TONE_BADGE,
+  findOption,
+  type FeedbackDimensionKey,
+} from '@/lib/feedbackDimensions'
 
 type Feedback = {
   id: string
@@ -25,6 +32,32 @@ type Feedback = {
   contactChannel: 'phone' | 'whatsapp' | 'in-person' | 'other' | null
   followUpRequired: boolean
   escalatedComplaintId: string | null
+  productQuality: string | null
+  packaging: string | null
+  packagingOther: string | null
+  deliveryTimeliness: string | null
+  customerService: string | null
+  customerServiceOther: string | null
+  pricingValue: string | null
+  appUsability: string | null
+  recommendToFriends: string | null
+}
+
+type DimensionState = Record<FeedbackDimensionKey, string | null> & {
+  packagingOther: string
+  customerServiceOther: string
+}
+
+const EMPTY_DIMENSIONS: DimensionState = {
+  productQuality: null,
+  packaging: null,
+  deliveryTimeliness: null,
+  customerService: null,
+  pricingValue: null,
+  appUsability: null,
+  recommendToFriends: null,
+  packagingOther: '',
+  customerServiceOther: '',
 }
 
 const EDIT_WINDOW_DAYS = 30
@@ -79,6 +112,7 @@ export default function OrderFeedbackCard({ orderId }: { orderId: string }) {
   const [rating, setRating] = useState(0)
   const [comment, setComment] = useState('')
   const [channel, setChannel] = useState<Feedback['contactChannel']>('phone')
+  const [dims, setDims] = useState<DimensionState>(EMPTY_DIMENSIONS)
   const [saving, setSaving] = useState(false)
 
   const load = async () => {
@@ -98,6 +132,17 @@ export default function OrderFeedbackCard({ orderId }: { orderId: string }) {
         setRating(existing.rating)
         setComment(existing.comment || '')
         setChannel(existing.contactChannel || 'phone')
+        setDims({
+          productQuality: existing.productQuality || null,
+          packaging: existing.packaging || null,
+          deliveryTimeliness: existing.deliveryTimeliness || null,
+          customerService: existing.customerService || null,
+          pricingValue: existing.pricingValue || null,
+          appUsability: existing.appUsability || null,
+          recommendToFriends: existing.recommendToFriends || null,
+          packagingOther: existing.packagingOther || '',
+          customerServiceOther: existing.customerServiceOther || '',
+        })
       }
     } catch {
       /* network errors silenced — card just hides */
@@ -123,6 +168,21 @@ export default function OrderFeedbackCard({ orderId }: { orderId: string }) {
       toast.error('اختر تقييم من 1 إلى 5 نجوم')
       return
     }
+    // Build the dimension payload — only send keys for fields we know about,
+    // null when unanswered, free-text "other" only when relevant option is picked.
+    const dimPayload: Record<string, string | null> = {
+      productQuality: dims.productQuality,
+      packaging: dims.packaging,
+      packagingOther: dims.packaging === 'أخرى' ? dims.packagingOther.trim() || null : null,
+      deliveryTimeliness: dims.deliveryTimeliness,
+      customerService: dims.customerService,
+      customerServiceOther:
+        dims.customerService === 'أخرى' ? dims.customerServiceOther.trim() || null : null,
+      pricingValue: dims.pricingValue,
+      appUsability: dims.appUsability,
+      recommendToFriends: dims.recommendToFriends,
+    }
+
     setSaving(true)
     try {
       const isEdit = !!feedback
@@ -131,8 +191,8 @@ export default function OrderFeedbackCard({ orderId }: { orderId: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
           isEdit
-            ? { id: feedback.id, rating, comment, contactChannel: channel }
-            : { orderId, rating, comment, contactChannel: channel, collectedBy: user.name },
+            ? { id: feedback.id, rating, comment, contactChannel: channel, ...dimPayload }
+            : { orderId, rating, comment, contactChannel: channel, collectedBy: user.name, ...dimPayload },
         ),
       })
       const json = await res.json()
@@ -210,6 +270,35 @@ export default function OrderFeedbackCard({ orderId }: { orderId: string }) {
           {feedback.comment && (
             <p className="text-sm whitespace-pre-wrap leading-relaxed">{feedback.comment}</p>
           )}
+
+          {/* Detailed dimensions — only render the ones that were answered */}
+          {FEEDBACK_DIMENSIONS.some((d) => (feedback as any)[d.key]) && (
+            <div className="mt-3 pt-3 border-t border-current border-opacity-20">
+              <div className="flex flex-wrap gap-1.5">
+                {FEEDBACK_DIMENSIONS.map((dim) => {
+                  const v = (feedback as any)[dim.key] as string | null
+                  if (!v) return null
+                  const opt = findOption(dim, v)
+                  const tone = opt ? TONE_BADGE[opt.tone] : 'bg-gray-100 text-gray-800 border-gray-300'
+                  const other =
+                    v === 'أخرى' && dim.otherField
+                      ? (feedback as any)[dim.otherField]
+                      : null
+                  return (
+                    <span
+                      key={dim.key}
+                      className={`text-[11px] border rounded-full px-2.5 py-1 font-medium ${tone}`}
+                      title={`${dim.label}: ${v}${other ? ` — ${other}` : ''}`}
+                    >
+                      {dim.icon} {dim.label}: <strong>{v}</strong>
+                      {other ? <span className="opacity-70"> — {other}</span> : null}
+                    </span>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="text-[11px] mt-2 opacity-80">
             بواسطة <strong>{feedback.collectedBy}</strong> ·{' '}
             <span dir="ltr">{formatCairoDateTime(feedback.collectedAt, 'en-GB')}</span>
@@ -239,7 +328,7 @@ export default function OrderFeedbackCard({ orderId }: { orderId: string }) {
       {open && (
         <div className="fixed inset-0 z-[9000] bg-black/50 flex items-center justify-center p-4" onClick={() => !saving && setOpen(false)}>
           <div
-            className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6"
+            className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto"
             dir="rtl"
             onClick={(e) => e.stopPropagation()}
           >
@@ -248,6 +337,7 @@ export default function OrderFeedbackCard({ orderId }: { orderId: string }) {
             </h3>
             <p className="text-xs text-gray-500 text-center mb-4">سجّل ما قاله العميل عن الطلب بعد التوصيل</p>
 
+            <div className="text-center text-xs text-gray-500 mb-1">التقييم العام <span className="text-red-600">*</span></div>
             <StarPicker value={rating} onChange={setRating} disabled={saving} />
             {rating > 0 && (
               <div className="mt-2 text-center text-sm text-gray-700">
@@ -279,13 +369,75 @@ export default function OrderFeedbackCard({ orderId }: { orderId: string }) {
               ))}
             </div>
 
-            <label className="block mt-4 text-sm text-gray-700 font-medium">
+            {/* Detailed dimensions section */}
+            <div className="mt-5 pt-5 border-t border-gray-200">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-sm font-bold text-gray-900">📊 تقييم مفصل للخدمة</h4>
+                <span className="text-[10px] text-gray-500">اختياري — إذا أجاب العميل</span>
+              </div>
+
+              <div className="space-y-3">
+                {FEEDBACK_DIMENSIONS.map((dim) => {
+                  const selected = dims[dim.key]
+                  return (
+                    <div key={dim.key} className="bg-gray-50 rounded-lg p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-gray-800">
+                          {dim.icon} {dim.label}
+                        </span>
+                        {selected && (
+                          <button
+                            type="button"
+                            onClick={() => setDims((d) => ({ ...d, [dim.key]: null }))}
+                            className="text-[10px] text-gray-400 hover:text-red-600"
+                          >
+                            ✕ مسح
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {dim.options.map((opt) => {
+                          const isSel = selected === opt.value
+                          const cls = isSel ? TONE_CLASSES[opt.tone].selected : TONE_CLASSES[opt.tone].chip
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              onClick={() => setDims((d) => ({ ...d, [dim.key]: opt.value }))}
+                              className={`text-[11px] px-2.5 py-1.5 rounded-lg border font-medium transition ${cls}`}
+                            >
+                              {opt.value}
+                            </button>
+                          )
+                        })}
+                      </div>
+                      {/* Free-text "other" field for packaging + customer service */}
+                      {dim.hasOther && dim.otherField && selected === 'أخرى' && (
+                        <input
+                          type="text"
+                          value={dims[dim.otherField] as string}
+                          onChange={(e) =>
+                            setDims((d) => ({ ...d, [dim.otherField!]: e.target.value }))
+                          }
+                          placeholder="اكتب التفاصيل..."
+                          maxLength={500}
+                          className="w-full mt-2 px-3 py-1.5 text-xs border border-blue-300 rounded-lg text-right focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
+                          disabled={saving}
+                        />
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            <label className="block mt-5 text-sm text-gray-700 font-medium">
               تعليق العميل <span className="text-gray-400">(اختياري)</span>
             </label>
             <textarea
               value={comment}
               onChange={(e) => setComment(e.target.value)}
-              rows={4}
+              rows={3}
               maxLength={1000}
               placeholder="اكتب ما قاله العميل بالضبط..."
               className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-right focus:outline-none focus:ring-2 focus:ring-red-500"
