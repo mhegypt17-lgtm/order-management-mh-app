@@ -101,7 +101,31 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    return NextResponse.json({ feedback: data || [] }, { status: 200 })
+    // Enrich with customer name + phone in a single batched lookup so the
+    // list page can render contact info without N+1 fetches.
+    const rows = (data || []) as Array<Record<string, any>>
+    if (!summary && rows.length > 0) {
+      const customerIds = Array.from(
+        new Set(rows.map((r) => r.customerId).filter(Boolean) as string[]),
+      )
+      if (customerIds.length > 0) {
+        const { data: custs } = await supabase
+          .from('customers')
+          .select('id, customerName, phone')
+          .in('id', customerIds)
+        const map = new Map<string, { customerName: string; phone: string }>()
+        for (const c of (custs || []) as Array<{ id: string; customerName: string; phone: string }>) {
+          map.set(c.id, { customerName: c.customerName, phone: c.phone })
+        }
+        for (const r of rows) {
+          const c = r.customerId ? map.get(r.customerId) : null
+          r.customerName = c?.customerName || null
+          r.customerPhone = c?.phone || null
+        }
+      }
+    }
+
+    return NextResponse.json({ feedback: rows }, { status: 200 })
   } catch (e: any) {
     return NextResponse.json({ error: 'Failed to fetch feedback', details: e?.message }, { status: 500 })
   }

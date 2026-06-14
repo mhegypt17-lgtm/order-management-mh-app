@@ -209,6 +209,20 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       favoriteProduct,
     }
 
+    // Enriched orders with items + their feedback (if any)
+    // Pull all feedback for this customer in one query — narrow projection
+    // (no internal createdAt/updatedAt) to keep the response small.
+    const { data: fbRows } = await supabase
+      .from('order_feedback')
+      .select(
+        'id,orderId,rating,comment,collectedBy,collectedAt,contactChannel,escalatedComplaintId,productQuality,packaging,packagingOther,deliveryTimeliness,customerService,customerServiceOther,pricingValue,appUsability,recommendToFriends',
+      )
+      .eq('customerId', customerId)
+    const feedbackByOrder = new Map<string, any>()
+    for (const fb of (fbRows || []) as Array<{ orderId: string }>) {
+      feedbackByOrder.set(fb.orderId, fb)
+    }
+
     // Enriched orders with items
     const enrichedOrders = customerOrders.map((o) => {
       const items = allOrderItems
@@ -217,8 +231,38 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
           const prod = products.find((p) => p.id === i.productId)
           return { ...i, productName: prod?.productName || i.productId }
         })
-      return { ...o, items }
+      return { ...o, items, feedback: feedbackByOrder.get(o.id) || null }
     })
+
+    // Overall feedback stats for the customer (across ALL orders, not just
+    // the role-filtered window) so the overview tab tells a consistent story.
+    const allFeedback = (fbRows || []) as Array<{
+      rating: number
+      escalatedComplaintId: string | null
+      collectedAt: string
+      recommendToFriends: string | null
+    }>
+    const fbCount = allFeedback.length
+    const fbAvg = fbCount > 0 ? allFeedback.reduce((s, r) => s + (r.rating || 0), 0) / fbCount : 0
+    const fbSatisfied = allFeedback.filter((r) => r.rating >= 4).length
+    const fbLow = allFeedback.filter((r) => r.rating <= 2).length
+    const fbEscalated = allFeedback.filter((r) => !!r.escalatedComplaintId).length
+    const fbRecommendYes = allFeedback.filter((r) => r.recommendToFriends === 'نعم').length
+    const fbRecommendNo = allFeedback.filter((r) => r.recommendToFriends === 'لا').length
+    const lastFeedback = [...allFeedback].sort(
+      (a, b) => new Date(b.collectedAt).getTime() - new Date(a.collectedAt).getTime(),
+    )[0] || null
+    const feedbackStats = {
+      count: fbCount,
+      avgRating: parseFloat(fbAvg.toFixed(2)),
+      satisfactionPct: fbCount > 0 ? parseFloat(((fbSatisfied / fbCount) * 100).toFixed(1)) : 0,
+      lowRatingCount: fbLow,
+      escalatedCount: fbEscalated,
+      recommendYes: fbRecommendYes,
+      recommendNo: fbRecommendNo,
+      lastRating: lastFeedback?.rating ?? null,
+      lastCollectedAt: lastFeedback?.collectedAt ?? null,
+    }
 
     // Customer Lifetime Value
     // Historical: total spend so far (delivered orders only)
@@ -247,6 +291,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       },
       top5Products,
       insights,
+      feedbackStats,
     })
   } catch (err) {
     console.error('CRM customer detail error:', err)

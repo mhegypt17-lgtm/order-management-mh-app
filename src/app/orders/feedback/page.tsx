@@ -18,6 +18,8 @@ type Feedback = {
   id: string
   orderId: string
   customerId: string | null
+  customerName: string | null
+  customerPhone: string | null
   rating: number
   comment: string
   collectedBy: string
@@ -105,7 +107,9 @@ export default function FeedbackListPage() {
       (r) =>
         r.comment.toLowerCase().includes(term) ||
         r.collectedBy.toLowerCase().includes(term) ||
-        r.orderId.toLowerCase().includes(term),
+        r.orderId.toLowerCase().includes(term) ||
+        (r.customerName || '').toLowerCase().includes(term) ||
+        (r.customerPhone || '').toLowerCase().includes(term),
     )
   }, [rows, search, dimFilters])
 
@@ -200,7 +204,7 @@ export default function FeedbackListPage() {
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="🔍 بحث في التعليقات أو رقم الطلب..."
+          placeholder="🔍 بحث بالاسم أو التليفون أو التعليقات أو رقم الطلب..."
           className="w-full px-3 py-2 border border-gray-300 rounded-lg"
         />
 
@@ -255,11 +259,25 @@ export default function FeedbackListPage() {
               className={`rounded-xl border p-4 ${ratingTone(row.rating)}`}
             >
               <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
                   <span className="text-xl">
                     <Stars rating={row.rating} />
                   </span>
                   <span className="text-sm font-bold">{row.rating}/5</span>
+                  {(row.customerName || row.customerPhone) && (
+                    <span className="text-sm font-bold bg-white/70 rounded-lg px-2 py-0.5">
+                      👤 {row.customerName || '—'}
+                      {row.customerPhone && (
+                        <a
+                          href={`tel:${row.customerPhone}`}
+                          className="ms-2 text-xs underline opacity-80 hover:opacity-100"
+                          dir="ltr"
+                        >
+                          📞 {row.customerPhone}
+                        </a>
+                      )}
+                    </span>
+                  )}
                   {row.escalatedComplaintId && (
                     <span className="text-[10px] bg-white/70 px-2 py-0.5 rounded-full font-bold">
                       🎫 شكوى مفتوحة

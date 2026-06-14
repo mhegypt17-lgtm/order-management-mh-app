@@ -41,6 +41,26 @@ interface OrderItem {
   specialInstructions: string
 }
 
+interface OrderFeedback {
+  id: string
+  orderId: string
+  rating: number
+  comment: string
+  collectedBy: string
+  collectedAt: string
+  contactChannel: string | null
+  escalatedComplaintId: string | null
+  productQuality: string | null
+  packaging: string | null
+  packagingOther: string | null
+  deliveryTimeliness: string | null
+  customerService: string | null
+  customerServiceOther: string | null
+  pricingValue: string | null
+  appUsability: string | null
+  recommendToFriends: string | null
+}
+
 interface Order {
   id: string
   appOrderNo: string
@@ -54,6 +74,7 @@ interface Order {
   orderTotal: number
   notes: string
   items: OrderItem[]
+  feedback?: OrderFeedback | null
 }
 
 interface TopProduct {
@@ -90,6 +111,18 @@ interface Insights {
   avgOrderValue: number
 }
 
+interface FeedbackStats {
+  count: number
+  avgRating: number
+  satisfactionPct: number
+  lowRatingCount: number
+  escalatedCount: number
+  recommendYes: number
+  recommendNo: number
+  lastRating: number | null
+  lastCollectedAt: string | null
+}
+
 interface CustomerProfile {
   customer: {
     id: string
@@ -105,6 +138,7 @@ interface CustomerProfile {
   stats: Stats
   top5Products: TopProduct[]
   insights: Insights
+  feedbackStats?: FeedbackStats
 }
 
 interface DeliveryZoneOpt {
@@ -847,6 +881,75 @@ export default function CRMView({ role }: CRMViewProps) {
                   )}
                 </div>
 
+                {/* Customer feedback summary — only renders when at least
+                    one feedback row exists for this customer. */}
+                {profile.feedbackStats && profile.feedbackStats.count > 0 && (
+                  <div className="bg-white rounded-xl shadow-sm border border-amber-200 p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-sm font-bold text-gray-700">⭐ تقييمات العميل</h3>
+                      <span className="text-[10px] text-gray-500">عبر {profile.feedbackStats.count} طلب</span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div className="bg-amber-50 rounded-lg p-3 text-center border border-amber-200">
+                        <div className="text-xl font-bold text-yellow-600">
+                          {profile.feedbackStats.avgRating.toFixed(2)}
+                          <span className="text-xs text-gray-500"> / 5</span>
+                        </div>
+                        <div className="text-[11px] text-amber-700 mt-0.5">متوسط التقييم</div>
+                        <div dir="ltr" className="mt-1 text-yellow-400 text-sm">
+                          {'★'.repeat(Math.round(profile.feedbackStats.avgRating))}
+                          <span className="text-gray-300">
+                            {'★'.repeat(Math.max(0, 5 - Math.round(profile.feedbackStats.avgRating)))}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="bg-emerald-50 rounded-lg p-3 text-center border border-emerald-200">
+                        <div className="text-xl font-bold text-emerald-700">
+                          {profile.feedbackStats.satisfactionPct.toFixed(0)}%
+                        </div>
+                        <div className="text-[11px] text-emerald-700 mt-0.5">نسبة الرضا</div>
+                      </div>
+                      <div className="bg-red-50 rounded-lg p-3 text-center border border-red-200">
+                        <div className="text-xl font-bold text-red-700">
+                          {profile.feedbackStats.lowRatingCount}
+                        </div>
+                        <div className="text-[11px] text-red-700 mt-0.5">تقييمات سلبية</div>
+                        {profile.feedbackStats.escalatedCount > 0 && (
+                          <div className="text-[10px] text-red-600 mt-0.5">
+                            🎫 {profile.feedbackStats.escalatedCount} شكوى
+                          </div>
+                        )}
+                      </div>
+                      <div className="bg-blue-50 rounded-lg p-3 text-center border border-blue-200">
+                        <div className="text-base font-bold text-blue-700 leading-tight">
+                          {profile.feedbackStats.recommendYes > 0 || profile.feedbackStats.recommendNo > 0 ? (
+                            <>
+                              <span className="text-emerald-700">{profile.feedbackStats.recommendYes} نعم</span>
+                              <span className="text-gray-400"> / </span>
+                              <span className="text-red-700">{profile.feedbackStats.recommendNo} لا</span>
+                            </>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-blue-700 mt-0.5">ترشيح للأصدقاء</div>
+                      </div>
+                    </div>
+                    {profile.feedbackStats.lastCollectedAt && (
+                      <div className="mt-2 text-[10px] text-gray-500 text-left" dir="ltr">
+                        last: {profile.feedbackStats.lastCollectedAt.split('T')[0]} · {profile.feedbackStats.lastRating}★
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('orders')}
+                      className="mt-2 text-xs text-blue-600 hover:text-blue-800 underline"
+                    >
+                      عرض التقييمات على كل طلب في تبويب الطلبات ←
+                    </button>
+                  </div>
+                )}
+
                 {/* Order history summary */}
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
                   <h3 className="text-sm font-bold text-gray-700 mb-3">📊 ملخص التاريخ</h3>
@@ -926,6 +1029,41 @@ export default function CRMView({ role }: CRMViewProps) {
                             <span className="text-sm font-bold text-gray-800">{formatCurrency(order.orderTotal)}</span>
                             <span className="text-xs text-gray-500">{order.paymentMethod}</span>
                           </div>
+                          {order.feedback && (
+                            <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                              <span
+                                className={`text-xs font-bold px-2 py-0.5 rounded-full border ${
+                                  order.feedback.rating >= 4
+                                    ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                                    : order.feedback.rating === 3
+                                      ? 'bg-yellow-50 border-yellow-300 text-yellow-800'
+                                      : 'bg-red-50 border-red-300 text-red-800'
+                                }`}
+                                title={order.feedback.comment || ''}
+                              >
+                                <span dir="ltr" className="text-yellow-500">
+                                  {'★'.repeat(order.feedback.rating)}
+                                  <span className="text-gray-300">{'★'.repeat(5 - order.feedback.rating)}</span>
+                                </span>{' '}
+                                {order.feedback.rating}/5
+                              </span>
+                              {order.feedback.escalatedComplaintId && (
+                                <span className="text-[10px] bg-red-100 text-red-700 border border-red-300 rounded-full px-2 py-0.5 font-bold">
+                                  🎫 شكوى
+                                </span>
+                              )}
+                              {order.feedback.recommendToFriends === 'لا' && (
+                                <span className="text-[10px] bg-red-100 text-red-700 border border-red-300 rounded-full px-2 py-0.5">
+                                  👎 لن يرشح
+                                </span>
+                              )}
+                              {order.feedback.recommendToFriends === 'نعم' && (
+                                <span className="text-[10px] bg-emerald-100 text-emerald-700 border border-emerald-300 rounded-full px-2 py-0.5">
+                                  👍 سيرشح
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </button>
 
                         {expandedOrder === order.id && (
@@ -944,6 +1082,27 @@ export default function CRMView({ role }: CRMViewProps) {
                               </div>
                               {order.notes && (
                                 <p className="text-xs text-gray-500 mt-1 bg-yellow-50 rounded px-2 py-1">📝 {order.notes}</p>
+                              )}
+                              {/* Customer feedback comment + collected-by stamp */}
+                              {order.feedback && (order.feedback.comment || order.feedback.collectedBy) && (
+                                <div className="mt-2 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 text-xs">
+                                  {order.feedback.comment && (
+                                    <p className="text-gray-800 whitespace-pre-wrap">
+                                      💬 {order.feedback.comment}
+                                    </p>
+                                  )}
+                                  <div className="text-[10px] text-gray-500 mt-0.5">
+                                    بواسطة <strong>{order.feedback.collectedBy}</strong>
+                                    {order.feedback.collectedAt && (
+                                      <>
+                                        {' · '}
+                                        <span dir="ltr">
+                                          {order.feedback.collectedAt.split('T')[0]}
+                                        </span>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
                               )}
                             </div>
                           </div>
