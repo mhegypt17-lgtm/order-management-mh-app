@@ -414,8 +414,21 @@ export async function POST(request: NextRequest) {
       finalError = retry.error
     }
 
+    // ─── Migration-fallback chain ──────────────────────────────────────
+    // Each fallback is keyed off the actual column name in the Postgres
+    // error message (code 42703 = undefined_column) so we never strip an
+    // unrelated field. Track `csAttachmentsStripped` so the response can
+    // tell the client "your photos were lost — run the migration".
+    let csAttachmentsStripped = false
+    const errorMentions = (err: any, ...names: string[]) => {
+      if (!err) return false
+      if (err.code === '42703') return true
+      const msg = (err.message || '').toLowerCase()
+      return names.some((n) => msg.includes(n.toLowerCase()))
+    }
+
     // Fallback: DB may not yet have the scheduled columns from the new migration.
-    if (finalError && /scheduled|column .* does not exist/i.test(finalError.message || '')) {
+    if (finalError && errorMentions(finalError, 'isScheduled', 'scheduledDate', 'scheduledTimeSlot', 'scheduledSpecificTime')) {
       console.warn('[orders POST] scheduled columns missing in DB, retrying without them')
       const {
         isScheduled: _i,
@@ -430,7 +443,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Fallback: DB may not yet have the discount columns from the new migration.
-    if (finalError && /discountCode|discountAmount|netTotal|column .* does not exist/i.test(finalError.message || '')) {
+    if (finalError && errorMentions(finalError, 'discountCode', 'discountAmount', 'netTotal')) {
       console.warn('[orders POST] discount columns missing in DB, retrying without them')
       const {
         discountCode: _dc,
@@ -444,12 +457,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Fallback: DB may not yet have the csAttachments column.
-    if (finalError && /csAttachments|column .* does not exist/i.test(finalError.message || '')) {
+    if (finalError && errorMentions(finalError, 'csAttachments')) {
       console.warn('[orders POST] csAttachments column missing in DB, retrying without it')
       const { csAttachments: _ca, ...orderSafe } = order as any
       const retry = await supabase.from('orders').insert([orderSafe]).select().single()
       finalOrder = retry.data
       finalError = retry.error
+      csAttachmentsStripped = Array.isArray((order as any).csAttachments) && (order as any).csAttachments.length > 0
     }
 
     if (finalError || !finalOrder) {
@@ -542,7 +556,15 @@ export async function POST(request: NextRequest) {
       deliveryByOrderId,
       productsById,
     })
-    return NextResponse.json({ order: enrichedOrder }, { status: 201 })
+    return NextResponse.json(
+      {
+        order: enrichedOrder,
+        warning: csAttachmentsStripped
+          ? 'تم حفظ الطلب بدون مرفقات خدمة العملاء — العمود csAttachments غير موجود في قاعدة البيانات. شغّل data/cs-attachments-migration.sql'
+          : null,
+      },
+      { status: 201 },
+    )
   } catch (error) {
     console.error('Error creating order:', error)
     return NextResponse.json({ error: 'Failed to create order' }, { status: 500 })

@@ -372,7 +372,7 @@ export default function OrderForm({ mode, orderId }: Props) {
         }
 
         if (mode === 'edit' && orderId) {
-          const orderRes = await fetch(`/api/orders/${orderId}`)
+          const orderRes = await fetch(`/api/orders/${orderId}`, { cache: 'no-store' })
           if (!orderRes.ok) {
             console.error('[OrderForm] order fetch failed', orderRes.status, await orderRes.text().catch(() => ''))
             throw new Error('Failed to load order')
@@ -911,7 +911,14 @@ export default function OrderForm({ mode, orderId }: Props) {
 
       const data = await response.json()
       setDirtyFlag(false)
-      toast.success(mode === 'create' ? '✅ تم إنشاء الطلب بنجاح' : '✅ تم تحديث الطلب بنجاح')
+      // The API may have silently dropped csAttachments if the DB column is
+      // missing — surface that loudly so the operator knows to run the
+      // migration instead of thinking the photos persisted.
+      if (data?.warning) {
+        toast.error(data.warning, { duration: 8000 })
+      } else {
+        toast.success(mode === 'create' ? '✅ تم إنشاء الطلب بنجاح' : '✅ تم تحديث الطلب بنجاح')
+      }
       router.push(`/orders/${data.order.id}`)
     } catch {
       toast.error('حدث خطأ أثناء الحفظ')

@@ -364,35 +364,58 @@ export async function PUT(
       updatedAt: now,
     }
     const updRes = await supabase.from('orders').update(updatedOrder).eq('id', params.id)
-    if (updRes.error && /scheduled|column .* does not exist/i.test(updRes.error.message || '')) {
-      console.warn('[orders PUT] scheduled columns missing in DB, retrying without them')
-      const {
-        isScheduled: _i,
-        scheduledDate: _d,
-        scheduledTimeSlot: _s,
-        scheduledSpecificTime: _t,
-        ...updateSafe
-      } = updatedOrder
-      await supabase.from('orders').update(updateSafe).eq('id', params.id)
+
+    // ─── Migration-fallback chain ──────────────────────────────────────
+    // If a column referenced in `updatedOrder` doesn't exist yet on this
+    // Supabase instance, Postgres returns error code 42703 with a message
+    // that names the missing column. We isolate each fallback to its own
+    // column set (looking at the actual column name in the message rather
+    // than the loose "column does not exist" string) so we don't ever
+    // strip an unrelated field. After every retry we capture the NEW
+    // error — not the original — so the next fallback only fires when
+    // there really is more work to do.
+    let lastError = updRes.error
+    const stripped = { scheduled: false, discount: false, csAttachments: false }
+
+    const errorMentions = (err: any, ...names: string[]) => {
+      if (!err) return false
+      if (err.code === '42703') return true // undefined_column — always retry
+      const msg = (err.message || '').toLowerCase()
+      return names.some((n) => msg.includes(n.toLowerCase()))
     }
-    if (updRes.error && /discountCode|discountAmount|netTotal|column .* does not exist/i.test(updRes.error.message || '')) {
-      console.warn('[orders PUT] discount columns missing in DB, retrying without them')
-      const {
-        discountCode: _dc,
-        discountAmount: _da,
-        netTotal: _nt,
-        ...updateSafe
-      } = updatedOrder
-      await supabase.from('orders').update(updateSafe).eq('id', params.id)
+
+    if (lastError && errorMentions(lastError, 'isScheduled', 'scheduledDate', 'scheduledTimeSlot', 'scheduledSpecificTime')) {
+      console.warn('[orders PUT] scheduled columns missing, retrying without them')
+      const { isScheduled: _i, scheduledDate: _d, scheduledTimeSlot: _s, scheduledSpecificTime: _t, ...safe } = updatedOrder as any
+      const retry = await supabase.from('orders').update(safe).eq('id', params.id)
+      lastError = retry.error
+      stripped.scheduled = true
     }
-    if (updRes.error && /csAttachments|column .* does not exist/i.test(updRes.error.message || '')) {
+    if (lastError && errorMentions(lastError, 'discountCode', 'discountAmount', 'netTotal')) {
+      console.warn('[orders PUT] discount columns missing, retrying without them')
+      const { discountCode: _dc, discountAmount: _da, netTotal: _nt, ...safe } = updatedOrder as any
+      const retry = await supabase.from('orders').update(safe).eq('id', params.id)
+      lastError = retry.error
+      stripped.discount = true
+    }
+    if (lastError && errorMentions(lastError, 'csAttachments')) {
       // csAttachments column hasn't been added yet — retry without it.
-      // The migration to add it ships in this commit; deployments that
-      // haven't run it will lose the upload until they do, but the rest
-      // of the order will still save.
+      // The order will save but the uploaded photos are LOST. We capture
+      // a warning so the response can tell the client to run
+      // data/cs-attachments-migration.sql; the client surfaces a toast
+      // so the operator never thinks the photos were persisted.
       console.warn('[orders PUT] csAttachments column missing in DB, retrying without it')
-      const { csAttachments: _ca, ...updateSafe } = updatedOrder as any
-      await supabase.from('orders').update(updateSafe).eq('id', params.id)
+      const { csAttachments: _ca, ...safe } = updatedOrder as any
+      const retry = await supabase.from('orders').update(safe).eq('id', params.id)
+      lastError = retry.error
+      stripped.csAttachments = (updatedOrder as any).csAttachments && (updatedOrder as any).csAttachments.length > 0
+    }
+    if (lastError) {
+      console.error('[orders PUT] update failed after fallbacks:', lastError)
+      return NextResponse.json(
+        { error: 'Failed to update order', details: lastError.message || null },
+        { status: 500 },
+      )
     }
 
     // Replace order items: delete old, insert new
@@ -415,7 +438,15 @@ export async function PUT(
       },
     })
 
-    return NextResponse.json({ order: await enrichOrder(updatedOrder as OrderRecord) }, { status: 200 })
+    return NextResponse.json(
+      {
+        order: await enrichOrder(updatedOrder as OrderRecord),
+        warning: stripped.csAttachments
+          ? 'تم حفظ الطلب بدون مرفقات خدمة العملاء — العمود csAttachments غير موجود في قاعدة البيانات. شغّل data/cs-attachments-migration.sql'
+          : null,
+      },
+      { status: 200 },
+    )
   } catch {
     return NextResponse.json({ error: 'Failed to update order' }, { status: 500 })
   }
