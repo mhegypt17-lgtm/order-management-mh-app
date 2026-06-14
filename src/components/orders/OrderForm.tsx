@@ -1413,7 +1413,7 @@ export default function OrderForm({ mode, orderId }: Props) {
         className="bg-white rounded-lg border border-emerald-200 p-4"
       >
         <summary className="font-bold text-emerald-900 cursor-pointer">
-          💳 مرفقات خدمة العملاء {form.csAttachments?.length ? `(${form.csAttachments.length})` : ''}
+          � مرفقات خدمة العملاء {form.csAttachments?.length ? `(${form.csAttachments.length})` : ''}
         </summary>
         <div className="mt-3 space-y-3">
           <div>
