@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import toast from 'react-hot-toast'
 import { useProductCategories } from '@/lib/useProductCategories'
 
@@ -545,7 +546,20 @@ export default function ProductCatalogPage() {
                     {product.productName}
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-700 font-medium">
-                    {product.productCategory || '-'}
+                    {product.productCategory ? (
+                      activeCategories.some((c) => c.name === product.productCategory) ? (
+                        product.productCategory
+                      ) : (
+                        <span
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-300 text-xs"
+                          title="تصنيف غير معروف — غير موجود في إعدادات التصنيفات"
+                        >
+                          ⚠️ {product.productCategory}
+                        </span>
+                      )
+                    ) : (
+                      '-'
+                    )}
                   </td>
                   <td
                     className="px-6 py-4 text-sm text-gray-900 font-semibold"
@@ -703,10 +717,28 @@ export default function ProductCatalogPage() {
                   required
                 >
                   <option value="" disabled>-- اختر التصنيف --</option>
+                  {/* If the saved category is no longer in the active list,
+                      surface it as an explicit option so the user sees the
+                      real stored value instead of the browser silently
+                      displaying the first option. */}
+                  {formData.productCategory &&
+                    !activeCategories.some((c) => c.name === formData.productCategory) && (
+                      <option value={formData.productCategory}>
+                        ⚠️ {formData.productCategory} — (تصنيف غير معروف في الإعدادات)
+                      </option>
+                    )}
                   {activeCategories.map((cat) => (
                     <option key={cat.id} value={cat.name}>{cat.name}</option>
                   ))}
                 </select>
+                {formData.productCategory &&
+                  !activeCategories.some((c) => c.name === formData.productCategory) && (
+                    <p className="mt-1 text-xs text-amber-700 bg-amber-50 border border-amber-300 rounded px-2 py-1">
+                      ⚠️ التصنيف الحالي «{formData.productCategory}» غير موجود في قائمة التصنيفات الفعّالة. اختر تصنيفاً صحيحاً
+                      أو أضفه من{' '}
+                      <Link href="/admin/settings/categories" className="underline font-medium">إعدادات → التصنيفات</Link>.
+                    </p>
+                  )}
               </div>
 
               {/* Pricing Mode */}
