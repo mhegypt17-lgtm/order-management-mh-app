@@ -68,7 +68,13 @@ export default async function RetentionDashboardPage() {
   ])
 
   let customers: CustomerRow[] = (customersRes.data as CustomerRow[]) || []
-  if (customersRes.error && /doNotFollowUp|followUpSnoozeUntil/i.test(customersRes.error.message || '')) {
+  // Schema diagnostic — when the migration hasn't been applied,
+  // Supabase rejects the whole select; surface it in the dashboard header.
+  const customersErrorMsg = customersRes.error?.message || ''
+  const missingFollowUpColumns =
+    /doNotFollowUp|followUpSnoozeUntil|column .* does not exist/i.test(customersErrorMsg)
+  if (customersRes.error) {
+    // Fallback to the legacy projection so the rest of the page still works.
     const fallback = await supabase.from('customers').select('id,customerName,phone')
     customers = (fallback.data as CustomerRow[]) || []
   }
@@ -136,9 +142,9 @@ export default async function RetentionDashboardPage() {
     <div dir="rtl" className="min-h-screen bg-gray-50 p-4 md:p-6 space-y-6">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">🔁 لوحة متابعة العملاء الخاملين</h1>
+          <h1 className="text-2xl font-bold text-gray-900">🔁 Retention</h1>
           <p className="text-sm text-gray-600 mt-1">
-            نظرة عامة على مراحل عدم النشاط ({retention.stage1.days}/{retention.stage2.days}/{retention.stage3.days} يوم) وأداء فريق المتابعة
+            مراحل عدم النشاط ({retention.stage1.days}/{retention.stage2.days}/{retention.stage3.days} يوم) وأداء فريق المتابعة
             {retention.enabled === false && (
               <span className="ms-2 inline-block px-2 py-0.5 rounded bg-red-100 text-red-700 text-xs font-medium">
                 المحرك متوقّف حالياً
@@ -153,6 +159,63 @@ export default async function RetentionDashboardPage() {
           ⚙️ ضبط المراحل
         </Link>
       </div>
+
+      {/* Diagnostics: explain what's loaded so the user understands an empty dashboard. */}
+      {(() => {
+        const totalCustomers = customers.length
+        const customersWithOrders = lastOrderMs.size
+        const inAnyStage = buckets[1].length + buckets[2].length + buckets[3].length
+        const ordersInWindow = orders.length
+        const issues: Array<{ tone: 'red' | 'amber' | 'blue'; text: string }> = []
+        if (missingFollowUpColumns) {
+          issues.push({
+            tone: 'red',
+            text: 'الأعمدة doNotFollowUp / followUpSnoozeUntil غير موجودة في قاعدة البيانات — قم بتشغيل data/customer-followup-controls.sql في Supabase لتفعيل خيارات الاستبعاد والتأجيل.',
+          })
+        } else if (customersRes.error) {
+          issues.push({ tone: 'red', text: `خطأ في تحميل العملاء: ${customersErrorMsg}` })
+        }
+        if (totalCustomers === 0) {
+          issues.push({ tone: 'amber', text: 'لا يوجد عملاء مسجّلون في قاعدة البيانات.' })
+        } else if (ordersInWindow === 0) {
+          issues.push({ tone: 'amber', text: 'لا توجد طلبات خلال آخر 400 يوم.' })
+        } else if (customersWithOrders === 0) {
+          issues.push({ tone: 'amber', text: 'لا يوجد عملاء مربوطون بأي طلب فعّال خلال آخر 400 يوم.' })
+        } else if (inAnyStage === 0) {
+          issues.push({
+            tone: 'blue',
+            text: `كل العملاء النشطين طلبوا خلال آخر ${retention.stage1.days} يوم — لا أحد في أي مرحلة متابعة حالياً. يمكنك خفض حد المرحلة الأولى من الإعدادات لاختبار النظام.`,
+          })
+        }
+        return (
+          <div className="bg-white border-2 border-gray-200 rounded-xl p-3">
+            <div className="text-xs font-bold text-gray-700 mb-2">تشخيص البيانات</div>
+            <div className="flex flex-wrap gap-3 text-xs text-gray-700">
+              <span>👥 إجمالي العملاء: <b>{totalCustomers}</b></span>
+              <span>📦 طلبات خلال 400 يوم: <b>{ordersInWindow}</b></span>
+              <span>🔗 عملاء لديهم طلب فعّال: <b>{customersWithOrders}</b></span>
+              <span>📊 في إحدى المراحل: <b>{inAnyStage}</b></span>
+            </div>
+            {issues.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {issues.map((iss, i) => {
+                  const cls =
+                    iss.tone === 'red'
+                      ? 'bg-red-50 border-red-300 text-red-800'
+                      : iss.tone === 'amber'
+                      ? 'bg-amber-50 border-amber-300 text-amber-800'
+                      : 'bg-blue-50 border-blue-300 text-blue-800'
+                  return (
+                    <div key={i} className={`text-xs px-2 py-1.5 rounded border ${cls}`}>
+                      {iss.text}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* KPI grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">

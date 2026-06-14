@@ -64,7 +64,7 @@ export default function Navbar({ user }: NavbarProps) {
       { label: '🐑 اضاحي', href: '/admin/adahi' },
       { label: '🚚 التوصيل', href: '/admin/delivery' },
       { label: '⚙️ الإعدادات', href: '/admin/settings' },
-      { label: '� متابعة العملاء', href: '/admin/retention' },
+      { label: '🔁 Retention', href: '/admin/retention' },
       { label: '�🕐 الورديات', href: '/admin/shifts' },
       { label: '📦 المنتجات', href: '/admin/products' },
       { label: '👥 Customers', href: '/admin/crm' },
