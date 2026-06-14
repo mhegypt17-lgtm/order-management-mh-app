@@ -10,11 +10,38 @@ type BranchReportOrder = {
   orderStatus: 'تم' | 'مؤجل' | 'لاغي' | 'حجز'
   delivery: {
     deliveryStatus: 'لم يخرج بعد' | 'جاهز' | 'في الطريق' | 'تم التوصيل'
+    acceptedAt?: string | null
+    readyAt?: string | null
+    outForDeliveryAt?: string | null
+    deliveredAt?: string | null
   }
 }
 
 function getCurrentMonth() {
   return cairoMonthString()
+}
+
+// Average time-to-deliver helpers — kept module-scope so they're reusable
+// from admin reports too. We measure from acceptedAt (first branch touch)
+// to deliveredAt (final state) because that is the window the branch
+// actually controls; the time a CS user spends preparing the order before
+// dispatching to the branch is intentionally excluded.
+function durationMinutes(from?: string | null, to?: string | null): number | null {
+  if (!from || !to) return null
+  const a = new Date(from).getTime()
+  const b = new Date(to).getTime()
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return null
+  return (b - a) / 60000
+}
+
+function formatDurationMinutes(mins: number | null): string {
+  if (mins === null || !Number.isFinite(mins)) return '—'
+  const total = Math.max(0, Math.round(mins))
+  const h = Math.floor(total / 60)
+  const m = total % 60
+  if (h === 0) return `${m} دقيقة`
+  if (m === 0) return `${h} ساعة`
+  return `${h} ساعة ${m} دقيقة`
 }
 
 export default function BranchReportsPage() {
@@ -47,6 +74,21 @@ export default function BranchReportsPage() {
     const deliveryRate = totalOrders > 0 ? (deliveredOrders / totalOrders) * 100 : 0
     const cancelRate = totalOrders > 0 ? (cancelledOrders / totalOrders) * 100 : 0
 
+    // Average delivery duration: only orders that have BOTH timestamps
+    // contribute. Orders accepted before the timing-columns migration ran
+    // will be missing acceptedAt and are silently skipped — that's better
+    // than polluting the average with a falsy "0 minute" entry.
+    const durations: number[] = []
+    for (const o of orders) {
+      if (o.delivery?.deliveryStatus !== 'تم التوصيل') continue
+      const d = durationMinutes(o.delivery?.acceptedAt, o.delivery?.deliveredAt)
+      if (d !== null) durations.push(d)
+    }
+    const avgDeliveryMinutes =
+      durations.length > 0
+        ? durations.reduce((a, b) => a + b, 0) / durations.length
+        : null
+
     return {
       totalOrders,
       deliveredOrders,
@@ -54,6 +96,8 @@ export default function BranchReportsPage() {
       totalRevenue,
       deliveryRate,
       cancelRate,
+      avgDeliveryMinutes,
+      avgDeliveryCount: durations.length,
     }
   }, [orders])
 
@@ -124,6 +168,20 @@ export default function BranchReportsPage() {
             <div className="bg-white rounded-lg border border-gray-200 p-4">
               <p className="text-sm text-gray-500">إجمالي قيمة الشهر</p>
               <p className="text-2xl font-bold text-gray-900 mt-1">{stats.totalRevenue.toLocaleString()} ج.م</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="bg-blue-50 rounded-lg border border-blue-200 p-4">
+              <p className="text-sm text-gray-600">⏱️ متوسط مدة التوصيل</p>
+              <p className="text-2xl font-bold text-blue-700 mt-1">
+                {formatDurationMinutes(stats.avgDeliveryMinutes)}
+              </p>
+              <p className="text-xs text-blue-700 mt-1">
+                {stats.avgDeliveryCount > 0
+                  ? `محسوبة من ${stats.avgDeliveryCount} طلب — من وقت قبول الفرع حتى التسليم`
+                  : 'لا توجد بيانات كافية لحساب متوسط مدة التوصيل لهذا الشهر'}
+              </p>
             </div>
           </div>
 

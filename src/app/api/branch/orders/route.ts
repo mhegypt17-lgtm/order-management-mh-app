@@ -95,32 +95,117 @@ export async function GET(request: NextRequest) {
     const to = searchParams.get('to') || ''
     const deliveryStatus = searchParams.get('deliveryStatus') || 'all'
 
-    let orders = await readOrders()
-    const enriched = await Promise.all(orders.map(enrichOrderForBranch))
-    let filtered = enriched
+    // ─── Hoist every read up-front (1 round-trip per table) ───────────────
+    // Previously enrichOrderForBranch re-fetched all customers, addresses,
+    // items, products, AND order_delivery for EACH order — turning the
+    // monthly branch report into hundreds of Supabase round-trips and
+    // making the page take 10-30 s to load. We now read each table once
+    // and build Map<id, row> lookups so enrichment is O(1) per order.
+    const [allOrders, customers, addresses, items, products, deliveryRows] =
+      await Promise.all([
+        readOrders(),
+        readCustomers(),
+        readAddresses(),
+        readOrderItems(),
+        readProducts(),
+        readOrderDelivery(),
+      ])
 
+    // ─── Filter orders BEFORE enrichment ───────────────────────────────
+    // Enriching every order in the DB just to throw most away wastes
+    // CPU & memory on hot endpoints. Apply date filters first; status
+    // filter is applied after enrichment because it lives on the
+    // delivery row, not the order row.
+    let filteredOrders = allOrders
     if (date) {
-      filtered = filtered.filter((o) => o.orderDate === date)
+      filteredOrders = filteredOrders.filter((o) => o.orderDate === date)
     }
-
     if (month) {
-      filtered = filtered.filter((o) => String(o.orderDate || '').startsWith(`${month}-`))
+      filteredOrders = filteredOrders.filter((o) =>
+        String(o.orderDate || '').startsWith(`${month}-`),
+      )
     }
-
     if (from) {
-      filtered = filtered.filter((o) => String(o.orderDate || '') >= from)
+      filteredOrders = filteredOrders.filter((o) => String(o.orderDate || '') >= from)
     }
     if (to) {
-      filtered = filtered.filter((o) => String(o.orderDate || '') <= to)
+      filteredOrders = filteredOrders.filter((o) => String(o.orderDate || '') <= to)
     }
+
+    // ─── Build Map lookups so enrichment is O(1) ──────────────────────
+    const customerById = new Map<string, any>()
+    for (const c of customers) customerById.set(c.id, c)
+    const addressById = new Map<string, any>()
+    for (const a of addresses) addressById.set(a.id, a)
+    const productById = new Map<string, any>()
+    for (const p of products) productById.set(p.id, p)
+    const deliveryByOrderId = new Map<string, OrderDeliveryRecord>()
+    for (const d of deliveryRows) deliveryByOrderId.set(d.orderId, d)
+    const itemsByOrderId = new Map<string, any[]>()
+    for (const it of items) {
+      const list = itemsByOrderId.get(it.orderId) || []
+      list.push(it)
+      itemsByOrderId.set(it.orderId, list)
+    }
+
+    // ─── Lazy-insert missing delivery rows (only for what survived) ───
+    // Most orders will already have a delivery row; only newly-created
+    // orders ever need this fallback insert. Doing it in batch keeps
+    // the hot path fast even when 100 orders all lack a delivery row.
+    const missingDeliveryFallbacks: OrderDeliveryRecord[] = []
+    for (const o of filteredOrders) {
+      if (deliveryByOrderId.has(o.id)) continue
+      const fb: OrderDeliveryRecord = {
+        id: generateId('del'),
+        orderId: o.id,
+        deliveryStatus: 'لم يخرج بعد',
+        branchComments: '',
+        productPhotos: [],
+        invoicePhoto: '',
+        deliveredAt: null,
+        updatedBy: '',
+        updatedAt: o.updatedAt,
+      }
+      deliveryByOrderId.set(o.id, fb)
+      missingDeliveryFallbacks.push(fb)
+    }
+    if (missingDeliveryFallbacks.length > 0) {
+      // Fire-and-forget so a slow insert doesn't block the response;
+      // the in-memory fallback above is what we return to the client.
+      supabase
+        .from('order_delivery')
+        .insert(missingDeliveryFallbacks)
+        .then((res) => {
+          if (res.error) console.warn('lazy-insert delivery fallbacks failed:', res.error.message)
+        })
+    }
+
+    let enriched = filteredOrders.map((order) => {
+      const customer = customerById.get(order.customerId) || null
+      const address = addressById.get(order.deliveryAddressId) || null
+      const orderItems = (itemsByOrderId.get(order.id) || []).map((item) => {
+        const product = productById.get(item.productId)
+        return {
+          ...item,
+          productName: product?.productName || 'منتج محذوف',
+        }
+      })
+      return {
+        ...order,
+        customer,
+        address,
+        items: orderItems,
+        delivery: deliveryByOrderId.get(order.id)!,
+      }
+    })
 
     if (deliveryStatus !== 'all') {
-      filtered = filtered.filter((o) => o.delivery.deliveryStatus === deliveryStatus)
+      enriched = enriched.filter((o) => o.delivery.deliveryStatus === deliveryStatus)
     }
 
-    filtered = filtered.sort((a, b) => (a.orderTime < b.orderTime ? 1 : -1))
+    enriched = enriched.sort((a, b) => (a.orderTime < b.orderTime ? 1 : -1))
 
-    return NextResponse.json({ orders: filtered }, { status: 200 })
+    return NextResponse.json({ orders: enriched }, { status: 200 })
   } catch {
     return NextResponse.json({ error: 'Failed to fetch branch orders' }, { status: 500 })
   }

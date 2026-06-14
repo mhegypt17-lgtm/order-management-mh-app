@@ -331,18 +331,62 @@ export async function PUT(
       branchComments: body.branchComments ?? existing.branchComments,
       productPhotos: Array.isArray(body.productPhotos) ? body.productPhotos : existing.productPhotos,
       invoicePhoto: body.invoicePhoto ?? existing.invoicePhoto,
+      // Stage-transition timestamps — set the FIRST time the order reaches
+      // each stage and never overwritten thereafter, so durations stay
+      // truthful even if the branch toggles statuses while correcting a
+      // mistake. `acceptedAt` covers any move off "لم يخرج بعد" since the
+      // branch effectively acknowledged the order at that point.
+      acceptedAt:
+        existing.acceptedAt ||
+        (nextStatus !== 'لم يخرج بعد' && existing.deliveryStatus === 'لم يخرج بعد'
+          ? now
+          : null),
+      readyAt:
+        existing.readyAt ||
+        (nextStatus === 'جاهز' && existing.deliveryStatus !== 'جاهز' ? now : null),
+      outForDeliveryAt:
+        existing.outForDeliveryAt ||
+        (nextStatus === 'في الطريق' && existing.deliveryStatus !== 'في الطريق'
+          ? now
+          : null),
       deliveredAt: nextStatus === 'تم التوصيل' ? existing.deliveredAt || now : null,
       updatedBy: body.updatedBy || existing.updatedBy || 'branch',
       updatedAt: now,
     }
 
     if (index >= 0) {
-      await supabase
+      const updRes = await supabase
         .from('order_delivery')
         .update(updated)
         .eq('id', updated.id)
+      if (
+        updRes.error &&
+        /acceptedAt|readyAt|outForDeliveryAt|column .* does not exist/i.test(
+          updRes.error.message || '',
+        )
+      ) {
+        console.warn(
+          '[branch PUT] timing columns missing in DB, retrying without them',
+        )
+        const { acceptedAt: _a, readyAt: _r, outForDeliveryAt: _o, ...safe } =
+          updated
+        await supabase.from('order_delivery').update(safe).eq('id', updated.id)
+      }
     } else {
-      await supabase.from('order_delivery').insert([updated])
+      const insRes = await supabase.from('order_delivery').insert([updated])
+      if (
+        insRes.error &&
+        /acceptedAt|readyAt|outForDeliveryAt|column .* does not exist/i.test(
+          insRes.error.message || '',
+        )
+      ) {
+        console.warn(
+          '[branch PUT] timing columns missing in DB, retrying without them',
+        )
+        const { acceptedAt: _a, readyAt: _r, outForDeliveryAt: _o, ...safe } =
+          updated
+        await supabase.from('order_delivery').insert([safe])
+      }
     }
 
     await appendEditHistory({

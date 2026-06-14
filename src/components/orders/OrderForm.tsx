@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
-import { cairoDateString, cairoTimeString } from '@/lib/cairoTime'
+import { cairoDateString, cairoTimeString, formatCairoDateTime } from '@/lib/cairoTime'
 import WhatsAppShare from './WhatsAppShare'
 
 type Product = {
@@ -1554,7 +1554,7 @@ export default function OrderForm({ mode, orderId }: Props) {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1 text-right">وقت التسليم</label>
                 <div className="px-3 py-2 bg-gray-100 rounded-lg text-gray-700 text-right" dir="ltr">
-                  {deliveryData.deliveredAt}
+                  {formatCairoDateTime(deliveryData.deliveredAt)}
                 </div>
               </div>
             )}

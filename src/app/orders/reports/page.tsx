@@ -20,10 +20,37 @@ type OrderRecord = {
   items: OrderItem[]
   delivery?: {
     deliveryStatus: 'لم يخرج بعد' | 'جاهز' | 'في الطريق' | 'تم التوصيل'
+    acceptedAt?: string | null
+    readyAt?: string | null
+    outForDeliveryAt?: string | null
+    deliveredAt?: string | null
   }
 }
 
 type ReportComplaint = ComplaintAnalyticsRecord
+
+// Average time-to-deliver: measured from the moment the branch first
+// acknowledges the order (acceptedAt) to the moment it is marked
+// delivered. We deliberately exclude orders missing either timestamp
+// (e.g. older orders predating the timing-columns migration) instead
+// of treating them as zero — that would skew the average downward.
+function durationMinutes(from?: string | null, to?: string | null): number | null {
+  if (!from || !to) return null
+  const a = new Date(from).getTime()
+  const b = new Date(to).getTime()
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return null
+  return (b - a) / 60000
+}
+
+function formatDurationMinutes(mins: number | null): string {
+  if (mins === null || !Number.isFinite(mins)) return '—'
+  const total = Math.max(0, Math.round(mins))
+  const h = Math.floor(total / 60)
+  const m = total % 60
+  if (h === 0) return `${m} دقيقة`
+  if (m === 0) return `${h} ساعة`
+  return `${h} ساعة ${m} دقيقة`
+}
 
 function countBy<T extends string>(list: T[]) {
   const map = new Map<T, number>()
@@ -143,6 +170,25 @@ export default function ReportsPage() {
   const sourceStats = useMemo(() => countBy(rangeOrders.map((o) => o.orderMethod)), [rangeOrders])
   const customerTypeStats = useMemo(() => countBy(rangeOrders.map((o) => o.customerType)), [rangeOrders])
   const deliveryStats = useMemo(() => countBy(rangeOrders.map((o) => o.delivery?.deliveryStatus || 'لم يخرج بعد')), [rangeOrders])
+
+  const deliveryDurationStats = useMemo(() => {
+    const durations: number[] = []
+    for (const o of rangeOrders) {
+      if (o.delivery?.deliveryStatus !== 'تم التوصيل') continue
+      const d = durationMinutes(o.delivery?.acceptedAt, o.delivery?.deliveredAt)
+      if (d !== null) durations.push(d)
+    }
+    if (durations.length === 0) {
+      return { avgMinutes: null as number | null, count: 0, fastest: null as number | null, slowest: null as number | null }
+    }
+    const sorted = [...durations].sort((a, b) => a - b)
+    return {
+      avgMinutes: durations.reduce((a, b) => a + b, 0) / durations.length,
+      count: durations.length,
+      fastest: sorted[0],
+      slowest: sorted[sorted.length - 1],
+    }
+  }, [rangeOrders])
 
   const topProducts = useMemo(() => {
     const map = new Map<string, number>()
@@ -456,6 +502,32 @@ export default function ReportsPage() {
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <ReportTable title="حالة التوصيل" rows={deliveryStats.map((s) => ({ name: s.name, value: s.count }))} emptyLabel="لا توجد بيانات" />
 
+            <section className="bg-white rounded-lg border border-gray-200 p-4">
+              <h2 className="font-bold text-gray-900 mb-3">⏱️ متوسط مدة التوصيل</h2>
+              <p className="text-3xl font-bold text-blue-700">
+                {formatDurationMinutes(deliveryDurationStats.avgMinutes)}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                {deliveryDurationStats.count > 0
+                  ? `محسوبة من ${deliveryDurationStats.count} طلب موصل — من وقت قبول الفرع حتى التسليم`
+                  : 'لا توجد بيانات كافية في هذا النطاق لحساب متوسط مدة التوصيل'}
+              </p>
+              {deliveryDurationStats.count > 0 && (
+                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                  <div className="bg-green-50 rounded p-2 border border-green-100">
+                    <p className="text-xs text-gray-600">أسرع توصيل</p>
+                    <p className="font-bold text-green-700">{formatDurationMinutes(deliveryDurationStats.fastest)}</p>
+                  </div>
+                  <div className="bg-red-50 rounded p-2 border border-red-100">
+                    <p className="text-xs text-gray-600">أبطأ توصيل</p>
+                    <p className="font-bold text-red-700">{formatDurationMinutes(deliveryDurationStats.slowest)}</p>
+                  </div>
+                </div>
+              )}
+            </section>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <section className="bg-white rounded-lg border border-gray-200 p-4 overflow-x-auto">
               <h2 className="font-bold text-gray-900 mb-3">المنتجات المباعة بالكمية (حسب النطاق)</h2>
               {topProducts.length === 0 ? (

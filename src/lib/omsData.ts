@@ -114,6 +114,15 @@ export interface OrderDeliveryRecord {
   productPhotos: string[]
   invoicePhoto: string
   deliveredAt: string | null
+  /**
+   * Stage-transition timestamps (UTC ISO). All optional so deployments
+   * that haven't run `data/delivery-timing-migration.sql` still work.
+   * Each is set the FIRST time the order reaches that stage and is never
+   * overwritten, so we can compute average time-in-stage cleanly.
+   */
+  acceptedAt?: string | null      // first move off "لم يخرج بعد"
+  readyAt?: string | null         // first time at "جاهز"
+  outForDeliveryAt?: string | null // first time at "في الطريق"
   updatedBy: string
   updatedAt: string
 }
