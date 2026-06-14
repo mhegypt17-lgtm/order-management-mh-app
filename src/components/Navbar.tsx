@@ -58,6 +58,7 @@ export default function Navbar({ user }: NavbarProps) {
       { label: '📋 الطلبات', href: '/orders' },
       { label: '➕ طلب جديد', href: '/orders/new' },
       { label: '📈 التقارير', href: '/orders/reports' },
+      { label: '📊 مبيعات المنتجات', href: '/admin/products-sales' },
       { label: '⭐ تقييمات العملاء', href: '/orders/feedback' },
       { label: '🐑 اضاحي', href: '/admin/adahi' },
       { label: '🚚 التوصيل', href: '/admin/delivery' },
