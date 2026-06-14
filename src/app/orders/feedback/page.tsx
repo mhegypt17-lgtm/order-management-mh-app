@@ -1,0 +1,239 @@
+'use client'
+
+// /orders/feedback
+// Filterable, searchable list of every customer feedback. Used by CS leads
+// and admins for monthly review and trend spotting.
+
+import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
+import { formatCairoDateTime, cairoFirstDayOfMonth, cairoDateString } from '@/lib/cairoTime'
+
+type Feedback = {
+  id: string
+  orderId: string
+  customerId: string | null
+  rating: number
+  comment: string
+  collectedBy: string
+  collectedAt: string
+  contactChannel: string | null
+  followUpRequired: boolean
+  escalatedComplaintId: string | null
+}
+
+const RATING_BUCKETS = [
+  { value: 'all', label: 'كل التقييمات', ratingMin: undefined, ratingMax: undefined },
+  { value: 'positive', label: '😍 إيجابية (4-5)', ratingMin: 4, ratingMax: undefined },
+  { value: 'neutral', label: '😐 محايدة (3)', ratingMin: 3, ratingMax: 3 },
+  { value: 'negative', label: '😡 سلبية (1-2)', ratingMin: undefined, ratingMax: 2 },
+] as const
+
+function ratingTone(rating: number): string {
+  if (rating >= 4) return 'bg-emerald-50 border-emerald-300 text-emerald-900'
+  if (rating === 3) return 'bg-yellow-50 border-yellow-300 text-yellow-900'
+  return 'bg-red-50 border-red-300 text-red-900'
+}
+
+function Stars({ rating }: { rating: number }) {
+  return (
+    <span dir="ltr" className="font-bold tracking-tight">
+      <span className="text-yellow-400">{'★'.repeat(rating)}</span>
+      <span className="text-gray-300">{'★'.repeat(5 - rating)}</span>
+    </span>
+  )
+}
+
+export default function FeedbackListPage() {
+  const [rows, setRows] = useState<Feedback[]>([])
+  const [loading, setLoading] = useState(true)
+  const [from, setFrom] = useState(cairoFirstDayOfMonth())
+  const [to, setTo] = useState(cairoDateString())
+  const [bucket, setBucket] = useState<(typeof RATING_BUCKETS)[number]['value']>('all')
+  const [agentFilter, setAgentFilter] = useState('')
+  const [search, setSearch] = useState('')
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const params = new URLSearchParams({ from, to })
+      const b = RATING_BUCKETS.find((b) => b.value === bucket)!
+      if (b.ratingMin) params.set('ratingMin', String(b.ratingMin))
+      if (b.ratingMax) params.set('ratingMax', String(b.ratingMax))
+      if (agentFilter) params.set('collectedBy', agentFilter)
+      const res = await fetch(`/api/feedback?${params.toString()}`, { cache: 'no-store' })
+      const json = await res.json()
+      setRows(Array.isArray(json?.feedback) ? json.feedback : [])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to, bucket, agentFilter])
+
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase()
+    if (!term) return rows
+    return rows.filter(
+      (r) =>
+        r.comment.toLowerCase().includes(term) ||
+        r.collectedBy.toLowerCase().includes(term) ||
+        r.orderId.toLowerCase().includes(term),
+    )
+  }, [rows, search])
+
+  const stats = useMemo(() => {
+    if (rows.length === 0) return { count: 0, avg: 0, positivePct: 0 }
+    const total = rows.reduce((s, r) => s + (r.rating || 0), 0)
+    const positive = rows.filter((r) => r.rating >= 4).length
+    return {
+      count: rows.length,
+      avg: total / rows.length,
+      positivePct: (positive / rows.length) * 100,
+    }
+  }, [rows])
+
+  const agents = useMemo(() => {
+    const s = new Set<string>()
+    rows.forEach((r) => r.collectedBy && s.add(r.collectedBy))
+    return Array.from(s).sort()
+  }, [rows])
+
+  return (
+    <div className="space-y-4" dir="rtl">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">⭐ تقييمات العملاء</h1>
+        <p className="text-sm text-gray-600 mt-1">عرض وتصفية جميع التقييمات المسجلة بعد التوصيل.</p>
+      </div>
+
+      {/* Summary */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="text-xs text-gray-500">عدد التقييمات في الفترة</div>
+          <div className="text-2xl font-bold text-gray-900 mt-1">{stats.count.toLocaleString()}</div>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="text-xs text-gray-500">متوسط التقييم</div>
+          <div className="text-2xl font-bold text-yellow-600 mt-1">{stats.avg.toFixed(2)} / 5</div>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="text-xs text-gray-500">نسبة الرضا (4-5)</div>
+          <div className="text-2xl font-bold text-emerald-600 mt-1">{stats.positivePct.toFixed(1)}%</div>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">من تاريخ</label>
+            <input
+              type="date"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">إلى تاريخ</label>
+            <input
+              type="date"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">نطاق التقييم</label>
+            <select
+              value={bucket}
+              onChange={(e) => setBucket(e.target.value as typeof bucket)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+            >
+              {RATING_BUCKETS.map((b) => (
+                <option key={b.value} value={b.value}>{b.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">جامع التقييم</label>
+            <select
+              value={agentFilter}
+              onChange={(e) => setAgentFilter(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+            >
+              <option value="">الكل</option>
+              {agents.map((a) => (
+                <option key={a} value={a}>{a}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="🔍 بحث في التعليقات أو رقم الطلب..."
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+        />
+      </div>
+
+      {/* List */}
+      <div className="space-y-2">
+        {loading ? (
+          <div className="text-center py-12 text-gray-500">⏳ جاري التحميل...</div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-12 text-gray-500 bg-white rounded-xl border border-gray-200">
+            لا توجد تقييمات مطابقة للفلاتر.
+          </div>
+        ) : (
+          filtered.map((row) => (
+            <div
+              key={row.id}
+              className={`rounded-xl border p-4 ${ratingTone(row.rating)}`}
+            >
+              <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">
+                    <Stars rating={row.rating} />
+                  </span>
+                  <span className="text-sm font-bold">{row.rating}/5</span>
+                  {row.escalatedComplaintId && (
+                    <span className="text-[10px] bg-white/70 px-2 py-0.5 rounded-full font-bold">
+                      🎫 شكوى مفتوحة
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] opacity-80">
+                  بواسطة <strong>{row.collectedBy}</strong> ·{' '}
+                  <span dir="ltr">{formatCairoDateTime(row.collectedAt, 'en-GB')}</span>
+                </div>
+              </div>
+              {row.comment && (
+                <p className="text-sm whitespace-pre-wrap leading-relaxed">{row.comment}</p>
+              )}
+              <div className="mt-2 flex items-center justify-between text-xs">
+                <Link
+                  href={`/orders/${row.orderId}`}
+                  className="font-bold underline"
+                >
+                  📋 الطلب
+                </Link>
+                {row.escalatedComplaintId && (
+                  <Link
+                    href={`/orders/complaints?complaintId=${row.escalatedComplaintId}`}
+                    className="font-bold underline"
+                  >
+                    عرض الشكوى ←
+                  </Link>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}

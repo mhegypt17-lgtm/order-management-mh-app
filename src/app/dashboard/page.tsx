@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { calculateComplaintAnalytics, type ComplaintAnalyticsRecord } from '@/lib/complaintAnalytics'
 import { cairoDateString, cairoFirstDayOfMonth, addDays, formatCairoDateTime } from '@/lib/cairoTime'
+import FeedbackSummaryWidget from '@/components/FeedbackSummaryWidget'
 
 type DashboardOrder = {
   id: string
@@ -396,6 +397,8 @@ export default function DashboardPage() {
           }
         />
       </div>
+
+      <FeedbackSummaryWidget from={dateFrom} to={dateTo} showRecent showPerAgent />
 
       <section className="bg-white rounded-lg border border-amber-200 p-4 space-y-3">
         <div className="flex items-center justify-between gap-2 flex-wrap">

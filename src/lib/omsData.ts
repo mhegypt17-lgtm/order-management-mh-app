@@ -549,6 +549,33 @@ export async function writeOrderDelivery(_data: OrderDeliveryRecord[]): Promise<
   // No-op: writes handled directly in API routes
 }
 
+// ─── Order Feedback ──────────────────────────────────────────────────────────
+// One row per order (enforced by unique constraint on orderId). Captures
+// the customer's post-delivery satisfaction rating + free-text comment as
+// collected by a CS agent. Editable for 30 days; auto-creates a complaint
+// when rating <= 2.
+export interface OrderFeedbackRecord {
+  id: string
+  orderId: string
+  customerId: string | null
+  rating: number // 1..5
+  comment: string
+  collectedBy: string
+  collectedAt: string
+  contactChannel: 'phone' | 'whatsapp' | 'in-person' | 'other' | null
+  followUpRequired: boolean
+  escalatedComplaintId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export async function readOrderFeedback(): Promise<OrderFeedbackRecord[]> {
+  return fetchAllRows<OrderFeedbackRecord>('order_feedback', {
+    column: 'collectedAt',
+    ascending: false,
+  })
+}
+
 // ─── Edit History ─────────────────────────────────────────────────────────────
 
 export async function readEditHistory(): Promise<EditHistoryRecord[]> {

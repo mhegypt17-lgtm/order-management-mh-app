@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import OrderForm from '@/components/orders/OrderForm'
+import OrderFeedbackCard from '@/components/orders/OrderFeedbackCard'
 import { formatCairoDateTime } from '@/lib/cairoTime'
 
 type HistoryItem = {
@@ -43,6 +44,8 @@ export default function EditOrderPage() {
         <p className="text-gray-600 mt-1">تحديث بيانات الطلب وتعديل العناصر</p>
       </div>
       <OrderForm mode="edit" orderId={params.id} />
+
+      <OrderFeedbackCard orderId={params.id} />
 
       <section className="bg-white rounded-lg border border-gray-200 p-4">
         <h2 className="text-lg font-bold text-gray-900 mb-3">سجل التعديلات</h2>
