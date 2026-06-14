@@ -6,11 +6,14 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import toast from 'react-hot-toast'
+import { useAuthStore } from '@/lib/auth'
 import { formatCairoDateTime, cairoFirstDayOfMonth, cairoDateString } from '@/lib/cairoTime'
 import {
   FEEDBACK_DIMENSIONS,
   TONE_BADGE,
   findOption,
+  getEscalationReasons,
   type FeedbackDimensionKey,
 } from '@/lib/feedbackDimensions'
 
@@ -61,6 +64,7 @@ function Stars({ rating }: { rating: number }) {
 }
 
 export default function FeedbackListPage() {
+  const { user } = useAuthStore()
   const [rows, setRows] = useState<Feedback[]>([])
   const [loading, setLoading] = useState(true)
   const [from, setFrom] = useState(cairoFirstDayOfMonth())
@@ -70,6 +74,32 @@ export default function FeedbackListPage() {
   const [search, setSearch] = useState('')
   // Dimension drill-down: { 'productQuality': 'جودة منخفضة', ... }
   const [dimFilters, setDimFilters] = useState<Partial<Record<FeedbackDimensionKey, string>>>({})
+  const [escalatingId, setEscalatingId] = useState<string | null>(null)
+
+  const escalateRow = async (row: Feedback) => {
+    if (!confirm('سيتم فتح تذكرة شكوى مرتبطة بهذا التقييم. المتابعة؟')) return
+    setEscalatingId(row.id)
+    try {
+      const res = await fetch('/api/feedback/escalate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feedbackId: row.id, by: user.name }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        toast.error(json?.error || 'فشل فتح الشكوى')
+        return
+      }
+      toast.success(json.alreadyExists ? 'الشكوى مفتوحة بالفعل' : 'تم فتح تذكرة الشكوى')
+      setRows((prev) =>
+        prev.map((r) => (r.id === row.id ? { ...r, escalatedComplaintId: json.complaintId } : r)),
+      )
+    } catch (e: any) {
+      toast.error(e?.message || 'فشل فتح الشكوى')
+    } finally {
+      setEscalatingId(null)
+    }
+  }
 
   const load = async () => {
     setLoading(true)
@@ -318,21 +348,35 @@ export default function FeedbackListPage() {
                 </div>
               )}
 
-              <div className="mt-2 flex items-center justify-between text-xs">
+              <div className="mt-2 flex items-center justify-between text-xs gap-2 flex-wrap">
                 <Link
                   href={`/orders/${row.orderId}`}
                   className="font-bold underline"
                 >
                   📋 الطلب
                 </Link>
-                {row.escalatedComplaintId && (
-                  <Link
-                    href={`/orders/complaints?complaintId=${row.escalatedComplaintId}`}
-                    className="font-bold underline"
-                  >
-                    عرض الشكوى ←
-                  </Link>
-                )}
+                <div className="flex items-center gap-2">
+                  {row.escalatedComplaintId ? (
+                    <Link
+                      href={`/orders/complaints?complaintId=${row.escalatedComplaintId}`}
+                      className="font-bold underline"
+                    >
+                      عرض الشكوى ←
+                    </Link>
+                  ) : (
+                    (row.rating <= 2 || getEscalationReasons(row).length > 0) && (
+                      <button
+                        type="button"
+                        onClick={() => escalateRow(row)}
+                        disabled={escalatingId === row.id}
+                        className="text-[11px] px-2.5 py-1 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold shadow disabled:opacity-50"
+                        title="فتح تذكرة شكوى مرتبطة بهذا التقييم"
+                      >
+                        {escalatingId === row.id ? '...جاري' : '🎫 فتح شكوى'}
+                      </button>
+                    )
+                  )}
+                </div>
               </div>
             </div>
           ))

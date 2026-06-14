@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import {
   OrderFeedbackRecord,
-  createComplaint,
   generateId,
 } from '@/lib/omsData'
 import {
@@ -10,6 +9,7 @@ import {
   getEscalationReasons,
   type FeedbackDimensionKey,
 } from '@/lib/feedbackDimensions'
+import { buildAndCreateComplaint } from '@/lib/feedbackEscalation'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -208,6 +208,7 @@ export async function POST(req: NextRequest) {
     const customerId = (order as any).customerId || null
 
     let escalatedComplaintId: string | null = null
+    let escalationError: string | null = null
 
     // 3) Decide if we need to auto-escalate. Triggers:
     //    a) Overall rating <= LOW_RATING_THRESHOLD
@@ -218,63 +219,42 @@ export async function POST(req: NextRequest) {
     const shouldEscalate = lowRating || subReasons.length > 0
 
     if (shouldEscalate) {
-      try {
-        // Fetch customer phone/name for the complaint card
-        let customerName: string | null = null
-        let customerPhone: string | null = null
-        if (customerId) {
-          const { data: cust } = await supabase
-            .from('customers')
-            .select('customerName, phone')
-            .eq('id', customerId)
-            .maybeSingle()
-          customerName = (cust as any)?.customerName || null
-          customerPhone = (cust as any)?.phone || null
-        }
+      // Fetch customer phone/name for the complaint card
+      let customerName: string | null = null
+      let customerPhone: string | null = null
+      if (customerId) {
+        const { data: cust } = await supabase
+          .from('customers')
+          .select('customerName, phone')
+          .eq('id', customerId)
+          .maybeSingle()
+        customerName = (cust as any)?.customerName || null
+        customerPhone = (cust as any)?.phone || null
+      }
 
-        // Build a human-readable subject + reason listing every trigger
-        const triggers: string[] = []
-        if (lowRating) triggers.push(`تقييم عام منخفض (${rating}/5)`)
-        for (const r of subReasons) triggers.push(`${r.dim.label}: ${r.value}`)
-        const subject = `تقييم سلبي من العميل — ${triggers[0]}${triggers.length > 1 ? ` (+${triggers.length - 1})` : ''}`
-        const reason = triggers.join(' • ')
+      const triggers: string[] = []
+      if (lowRating) triggers.push(`تقييم عام منخفض (${rating}/5)`)
+      for (const r of subReasons) triggers.push(`${r.dim.label}: ${r.value}`)
 
-        // Priority: high if overall rating is 1 OR multiple sub-dim triggers, else medium
-        const priority: 'high' | 'medium' =
-          rating === 1 || subReasons.length >= 2 ? 'high' : 'medium'
+      const priority: 'high' | 'medium' =
+        rating === 1 || subReasons.length >= 2 ? 'high' : 'medium'
 
-        // Description = customer comment + structured trigger summary
-        const descriptionLines: string[] = []
-        if (comment) descriptionLines.push(comment)
-        if (triggers.length) {
-          descriptionLines.push('')
-          descriptionLines.push('— أسباب التصعيد الآلي —')
-          for (const t of triggers) descriptionLines.push(`• ${t}`)
-        }
-
-        const complaint = await createComplaint({
-          channel: 'App',
-          subject,
-          description: descriptionLines.join('\n') || '(لم يُسجل تعليق نصي)',
-          reason,
-          status: 'open',
-          priority,
+      const result = await buildAndCreateComplaint(
+        {
+          orderId,
           customerId,
           customerName,
           customerPhone,
-          linkedOrderId: orderId,
-          assignedTo: collectedBy,
-          createdBy: `النظام (تقييم آلي بواسطة ${collectedBy})`,
-          compensationAmount: 0,
-          productIds: [],
-          openedAt: now,
-          closedAt: null,
-        })
-        escalatedComplaintId = complaint.id
-      } catch (e) {
-        console.error('auto-complaint creation from feedback failed:', e)
-        // Don't fail the whole request — feedback still saves.
-      }
+          rating,
+          comment,
+          collectedBy,
+          triggers,
+          priority,
+        },
+        now,
+      )
+      escalatedComplaintId = result.id
+      escalationError = result.error || null
     }
 
     const feedback: OrderFeedbackRecord = {
@@ -310,7 +290,10 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    return NextResponse.json({ feedback }, { status: 201 })
+    return NextResponse.json(
+      { feedback, escalationError, shouldEscalate },
+      { status: 201 },
+    )
   } catch (e: any) {
     return NextResponse.json({ error: 'failed', details: e?.message }, { status: 500 })
   }

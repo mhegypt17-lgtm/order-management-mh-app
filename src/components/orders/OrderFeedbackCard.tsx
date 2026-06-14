@@ -19,6 +19,7 @@ import {
   TONE_CLASSES,
   TONE_BADGE,
   findOption,
+  getEscalationReasons,
   type FeedbackDimensionKey,
 } from '@/lib/feedbackDimensions'
 
@@ -114,6 +115,7 @@ export default function OrderFeedbackCard({ orderId }: { orderId: string }) {
   const [channel, setChannel] = useState<Feedback['contactChannel']>('phone')
   const [dims, setDims] = useState<DimensionState>(EMPTY_DIMENSIONS)
   const [saving, setSaving] = useState(false)
+  const [escalating, setEscalating] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -205,6 +207,14 @@ export default function OrderFeedbackCard({ orderId }: { orderId: string }) {
       setOpen(false)
       if (saved.escalatedComplaintId) {
         toast.success('تم حفظ التقييم وتم فتح تذكرة شكوى للمتابعة', { duration: 5000 })
+      } else if (json.shouldEscalate) {
+        // We tried to auto-create but it failed. Tell CS to use the manual button.
+        toast.error(
+          json.escalationError
+            ? `تم حفظ التقييم ولكن تعذر فتح الشكوى تلقائياً: ${json.escalationError}`
+            : 'تم حفظ التقييم — اضغط فتح شكوى يدوياً',
+          { duration: 7000 },
+        )
       } else {
         toast.success('تم حفظ التقييم')
       }
@@ -212,6 +222,37 @@ export default function OrderFeedbackCard({ orderId }: { orderId: string }) {
       toast.error(e?.message || 'فشل الحفظ')
     } finally {
       setSaving(false)
+    }
+  }
+
+  // Manually open a complaint linked to this feedback. Used when the
+  // automatic create failed at submit time, OR when CS decides to escalate
+  // a borderline rating after the fact.
+  const escalateNow = async () => {
+    if (!feedback) return
+    if (!confirm('سيتم فتح تذكرة شكوى مرتبطة بهذا التقييم. هل تريد المتابعة؟')) return
+    setEscalating(true)
+    try {
+      const res = await fetch('/api/feedback/escalate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feedbackId: feedback.id, by: user.name }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        toast.error(json?.error || 'فشل فتح الشكوى')
+        return
+      }
+      if (json.alreadyExists) {
+        toast('الشكوى مفتوحة بالفعل', { icon: 'ℹ️' })
+      } else {
+        toast.success('تم فتح تذكرة الشكوى')
+      }
+      setFeedback(json.feedback)
+    } catch (e: any) {
+      toast.error(e?.message || 'فشل فتح الشكوى')
+    } finally {
+      setEscalating(false)
     }
   }
 
@@ -304,7 +345,7 @@ export default function OrderFeedbackCard({ orderId }: { orderId: string }) {
             <span dir="ltr">{formatCairoDateTime(feedback.collectedAt, 'en-GB')}</span>
             {feedback.contactChannel && ` · ${CHANNEL_OPTIONS.find((c) => c.value === feedback.contactChannel)?.label || feedback.contactChannel}`}
           </div>
-          {feedback.escalatedComplaintId && (
+          {feedback.escalatedComplaintId ? (
             <div className="mt-3 pt-3 border-t border-current border-opacity-20">
               <Link
                 href={`/orders/complaints?complaintId=${feedback.escalatedComplaintId}`}
@@ -313,6 +354,22 @@ export default function OrderFeedbackCard({ orderId }: { orderId: string }) {
                 🎫 شكوى متابعة تم فتحها — اضغط للعرض
               </Link>
             </div>
+          ) : (
+            // No linked complaint: offer a manual escalate button when
+            // either the rating is low OR a sub-dimension would trigger.
+            (feedback.rating <= 2 || getEscalationReasons(feedback).length > 0) && (
+              <div className="mt-3 pt-3 border-t border-current border-opacity-20 flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-[11px] font-medium">⚠️ تقييم يستدعي المتابعة — لم تفتح شكوى بعد.</span>
+                <button
+                  type="button"
+                  onClick={escalateNow}
+                  disabled={escalating}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold shadow disabled:opacity-50"
+                >
+                  {escalating ? '...جاري' : '🎫 فتح تذكرة شكوى'}
+                </button>
+              </div>
+            )
           )}
           {!isEditable && (
             <p className="text-[10px] mt-2 opacity-60">
