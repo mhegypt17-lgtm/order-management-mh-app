@@ -938,14 +938,19 @@ export default function OrderForm({ mode, orderId }: Props) {
 
           <FieldInput label="اسم العميل" value={form.customerName} onChange={(v) => updateForm('customerName', v)} />
           <FieldSelect label="نوع العميل" value={form.customerType} onChange={(v) => updateForm('customerType', v as OrderFormModel['customerType'])} options={CUSTOMER_TYPES} />
-          <FieldSelect
-            label="مصدر العميل"
-            value={form.customerSource}
-            onChange={(v) => updateForm('customerSource', v)}
-            options={
-              customerSources.includes(form.customerSource) ? customerSources : [form.customerSource, ...customerSources]
-            }
-          />
+          {/* مصدر العميل only matters when acquiring a new customer; for an
+              existing (looked-up) customer the original acquisition source is
+              already stored on their profile and shouldn't be overwritten. */}
+          {form.customerType !== 'قديم' && (
+            <FieldSelect
+              label="مصدر العميل"
+              value={form.customerSource}
+              onChange={(v) => updateForm('customerSource', v)}
+              options={
+                customerSources.includes(form.customerSource) ? customerSources : [form.customerSource, ...customerSources]
+              }
+            />
+          )}
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1 text-right">عنوان التوصيل</label>
