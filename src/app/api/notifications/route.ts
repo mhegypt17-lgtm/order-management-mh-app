@@ -23,7 +23,7 @@ const BRIEFING_COLS = 'id,authorName,message,type,priority,createdAt'
 const COMPLAINT_COLS = 'id,ticketNumber,channel,status,assignedTo,createdBy,openedAt,closedAt,createdAt,comments'
 const ORDER_COLS = 'id,appOrderNo,orderStatus,customerId,createdBy,createdAt,updatedAt,isScheduled,scheduledDate,scheduledTimeSlot,scheduledSpecificTime,isPriority,priorityReason'
 const ORDER_INACTIVITY_COLS = 'id,customerId,orderStatus,createdAt'
-const CUSTOMER_COLS = 'id,customerName,phone'
+const CUSTOMER_COLS = 'id,customerName,phone,doNotFollowUp,followUpSnoozeUntil'
 const HISTORY_COLS = 'id,entityType,entityId,orderId,action,changedBy,changedAt,details'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -116,6 +116,8 @@ interface CustomerRec {
   id: string
   customerName?: string
   phone?: string
+  doNotFollowUp?: boolean
+  followUpSnoozeUntil?: string | null
 }
 
 interface HistoryRec {
@@ -196,7 +198,14 @@ export async function GET(req: NextRequest) {
     for (const o of scheduledOrders) if (!orderById.has(o.id)) orderById.set(o.id, o)
     const orders: OrderRec[] = Array.from(orderById.values())
     const inactivityOrders = (inactivityOrdersRes.data as Array<{ id: string; customerId: string | null; orderStatus: string; createdAt: string }>) || []
-    const customers: CustomerRec[] = (customersRes.data as CustomerRec[]) || []
+    let customers: CustomerRec[] = (customersRes.data as CustomerRec[]) || []
+    // If the new follow-up control columns don't exist yet (migration not
+    // applied), Supabase rejects the whole select. Detect that and retry
+    // with the legacy projection so the rest of the endpoint keeps working.
+    if (customersRes.error && /doNotFollowUp|followUpSnoozeUntil/i.test(customersRes.error.message || '')) {
+      const fallback = await supabase.from('customers').select('id,customerName,phone')
+      customers = (fallback.data as CustomerRec[]) || []
+    }
     const history: HistoryRec[] = (historyRes.data as HistoryRec[]) || []
 
     // ── Tasks ─────────────────────────────────────────────────────────────
@@ -418,6 +427,9 @@ export async function GET(req: NextRequest) {
     // Stages and per-stage action/agent are configured in admin settings (retention).
     if (role === 'cs' || role === 'admin') {
       const retention: RetentionConfig = settings.retention || DEFAULT_RETENTION_CONFIG
+      if (retention.enabled === false) {
+        // Master switch off — skip the whole retention engine.
+      } else {
       const nowMs = Date.now()
       // Build last-order map per customer (any non-cancelled order) using
       // the narrow inactivityOrders projection — covers up to 400 days back.
@@ -431,18 +443,27 @@ export async function GET(req: NextRequest) {
         if (ts > prev) lastOrderMs.set(o.customerId, ts)
       }
 
-      // Existing open auto-followup tasks per customer (idempotency guard).
-      // Narrow projection — only the fields used for the dedupe check.
+      // Existing open auto-followup tasks per customer (idempotency guard)
+      // PLUS last-completed auto-followup timestamp per customer for the
+      // cooldown gate (no re-trigger within stage.cooldownDays of completion).
       const existingAutoTasks = new Map<string, { id: string; linkedCustomerId: string | null; status?: string }>()
+      const lastCompletedMs = new Map<string, number>()
       try {
         const { data: autoTasks } = await supabase
           .from('tasks')
-          .select('id,linkedCustomerId,status,source')
+          .select('id,linkedCustomerId,status,source,updatedAt,completedAt')
           .eq('source', 'auto-followup')
-          .neq('status', 'مكتملة')
-        for (const t of (autoTasks || []) as Array<{ id: string; linkedCustomerId: string | null; status?: string; source?: string }>) {
+        for (const t of (autoTasks || []) as Array<{ id: string; linkedCustomerId: string | null; status?: string; source?: string; updatedAt?: string; completedAt?: string }>) {
           if (!t.linkedCustomerId) continue
-          existingAutoTasks.set(t.linkedCustomerId, t)
+          if (t.status !== 'مكتملة') {
+            existingAutoTasks.set(t.linkedCustomerId, t)
+          } else {
+            const ts = new Date(t.completedAt || t.updatedAt || 0).getTime()
+            if (isFinite(ts)) {
+              const prev = lastCompletedMs.get(t.linkedCustomerId) || 0
+              if (ts > prev) lastCompletedMs.set(t.linkedCustomerId, ts)
+            }
+          }
         }
       } catch {}
 
@@ -457,12 +478,28 @@ export async function GET(req: NextRequest) {
       ]
 
       for (const c of customers) {
+        // Per-customer opt-out — admin or CS flagged this customer as
+        // "do not follow up", or set a snooze date that hasn't passed yet.
+        if (c.doNotFollowUp) continue
+        if (c.followUpSnoozeUntil) {
+          const snoozeMs = new Date(c.followUpSnoozeUntil).getTime()
+          if (isFinite(snoozeMs) && snoozeMs > nowMs) continue
+        }
+
         const lastMs = lastOrderMs.get(c.id)
         if (!lastMs) continue
         const days = Math.floor((nowMs - lastMs) / (1000 * 60 * 60 * 24))
         if (days < retention.stage1.days) continue
         const matched = stages.find((s) => days >= s.cfg.days && s.cfg.action !== 'off')
         if (!matched) continue
+
+        // Cooldown: skip if a previous auto-followup task for this customer
+        // was completed within the matched stage's cooldown window.
+        const cooldownDays = Math.max(0, Number(matched.cfg.cooldownDays) || 0)
+        if (cooldownDays > 0) {
+          const lastDoneMs = lastCompletedMs.get(c.id)
+          if (lastDoneMs && (nowMs - lastDoneMs) / (1000 * 60 * 60 * 24) < cooldownDays) continue
+        }
 
         const stageKey = matched.key
         const stageCfg = matched.cfg
@@ -514,6 +551,7 @@ export async function GET(req: NextRequest) {
           priority: stageCfg.action === 'task' ? 'high' : 'normal',
         })
       }
+      } // end of retention.enabled gate
     }
 
     // Sort newest first, cap at 50

@@ -13,6 +13,9 @@ export interface CustomerRecord {
   statusReason?: string | null
   statusUpdatedAt?: string | null
   statusUpdatedBy?: string | null
+  // Retention controls (per-customer opt-out / snooze for auto follow-ups)
+  doNotFollowUp?: boolean
+  followUpSnoozeUntil?: string | null
 }
 
 export interface CustomerAddressRecord {
@@ -336,18 +339,25 @@ export interface RetentionStageConfig {
   days: number
   action: 'off' | 'notify' | 'task'
   assignedTo: 'auto' | 'رنا' | 'مى' | 'ميرنا' | 'أمل'
+  /** Days to wait after a previous auto-followup task is completed before
+   *  re-triggering this stage for the same customer. Prevents spam loops
+   *  when a customer is talked to but still hasn't ordered. */
+  cooldownDays?: number
 }
 
 export interface RetentionConfig {
+  /** Master switch — when false the whole retention engine stays silent. */
+  enabled?: boolean
   stage1: RetentionStageConfig
   stage2: RetentionStageConfig
   stage3: RetentionStageConfig
 }
 
 export const DEFAULT_RETENTION_CONFIG: RetentionConfig = {
-  stage1: { days: 30, action: 'notify', assignedTo: 'auto' },
-  stage2: { days: 60, action: 'task', assignedTo: 'auto' },
-  stage3: { days: 90, action: 'task', assignedTo: 'auto' },
+  enabled: true,
+  stage1: { days: 30, action: 'notify', assignedTo: 'auto', cooldownDays: 14 },
+  stage2: { days: 60, action: 'task',   assignedTo: 'auto', cooldownDays: 21 },
+  stage3: { days: 90, action: 'task',   assignedTo: 'auto', cooldownDays: 30 },
 }
 
 export interface LoyaltyTierConfig {

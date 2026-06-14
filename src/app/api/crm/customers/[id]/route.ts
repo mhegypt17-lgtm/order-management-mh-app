@@ -345,6 +345,25 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       next.wallet = w
       updates.wallet = w
     }
+    // Retention controls
+    if (body.doNotFollowUp !== undefined) {
+      next.doNotFollowUp = Boolean(body.doNotFollowUp)
+      updates.doNotFollowUp = next.doNotFollowUp
+    }
+    if (body.followUpSnoozeUntil !== undefined) {
+      // null / '' clears the snooze; otherwise must be an ISO date
+      if (body.followUpSnoozeUntil === null || body.followUpSnoozeUntil === '') {
+        next.followUpSnoozeUntil = null
+        updates.followUpSnoozeUntil = null
+      } else {
+        const d = new Date(body.followUpSnoozeUntil)
+        if (!isFinite(d.getTime())) {
+          return NextResponse.json({ error: 'تاريخ التأجيل غير صحيح' }, { status: 400 })
+        }
+        next.followUpSnoozeUntil = d.toISOString()
+        updates.followUpSnoozeUntil = next.followUpSnoozeUntil
+      }
+    }
     next.updatedAt = new Date().toISOString()
     updates.updatedAt = next.updatedAt
 

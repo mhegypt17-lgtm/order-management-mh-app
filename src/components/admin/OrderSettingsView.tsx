@@ -1,7 +1,13 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
+import {
+  DEFAULT_RETENTION_CONFIG,
+  type RetentionConfig,
+  type RetentionStageConfig,
+} from '@/lib/omsData'
 
 type SectionKey =
   | 'orderReceivers'
@@ -81,6 +87,8 @@ export default function OrderSettingsView() {
   const [autoActivateEnabled, setAutoActivateEnabled] = useState(true)
   const [autoActivateThreshold, setAutoActivateThreshold] = useState(3)
   const [savingAutoActivate, setSavingAutoActivate] = useState(false)
+  const [retention, setRetention] = useState<RetentionConfig>(DEFAULT_RETENTION_CONFIG)
+  const [savingRetention, setSavingRetention] = useState(false)
   const [agentNotice, setAgentNotice] = useState<AgentNotice>({
     message: '',
     type: 'info',
@@ -143,6 +151,15 @@ export default function OrderSettingsView() {
         }
         if (data.settings?.autoActivateEnabled !== undefined) {
           setAutoActivateEnabled(data.settings.autoActivateEnabled !== false)
+        }
+        if (data.settings?.retention) {
+          const merged: RetentionConfig = {
+            enabled: data.settings.retention.enabled !== false,
+            stage1: { ...DEFAULT_RETENTION_CONFIG.stage1, ...(data.settings.retention.stage1 || {}) },
+            stage2: { ...DEFAULT_RETENTION_CONFIG.stage2, ...(data.settings.retention.stage2 || {}) },
+            stage3: { ...DEFAULT_RETENTION_CONFIG.stage3, ...(data.settings.retention.stage3 || {}) },
+          }
+          setRetention(merged)
         }
       } catch {
         toast.error('تعذر تحميل إعدادات النظام')
@@ -687,6 +704,144 @@ export default function OrderSettingsView() {
             className="px-5 py-2 rounded-lg bg-yellow-500 text-white hover:bg-yellow-600 disabled:opacity-50 font-medium"
           >
             {savingNotice ? 'جاري الحفظ...' : '💾 حفظ الرسالة'}
+          </button>
+        </div>
+      </section>
+
+      {/* ── Retention (inactive customer follow-up) ─────────────────────── */}
+      <section className="bg-white border-2 border-emerald-300 rounded-xl p-4 space-y-4" dir="rtl">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-bold text-emerald-900 flex items-center gap-2">
+              🔁 متابعة العملاء الخاملين (Retention)
+            </h3>
+            <p className="text-sm text-emerald-700 mt-1">
+              تحكّم في عدد الأيام لكل مرحلة (30/60/90 افتراضي)، الإجراء المطلوب، ومن المُكلّف. تظهر التنبيهات والمهام لـ CS والإدارة فقط.
+            </p>
+          </div>
+          <Link
+            href="/admin/retention"
+            className="shrink-0 px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 text-sm font-medium"
+          >
+            📊 لوحة المتابعة
+          </Link>
+        </div>
+
+        {/* Master switch */}
+        <label className="flex items-center gap-3 p-3 rounded-lg bg-emerald-50 border border-emerald-200 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={retention.enabled !== false}
+            onChange={(e) => setRetention({ ...retention, enabled: e.target.checked })}
+            className="w-5 h-5 accent-emerald-600"
+          />
+          <span className="font-medium text-emerald-900">
+            تفعيل محرك متابعة العملاء الخاملين
+          </span>
+        </label>
+
+        {/* Stage cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {([1, 2, 3] as const).map((n) => {
+            const stageKey = (`stage${n}` as 'stage1' | 'stage2' | 'stage3')
+            const stage: RetentionStageConfig = retention[stageKey]
+            const accent =
+              n === 1 ? 'border-yellow-300 bg-yellow-50' :
+              n === 2 ? 'border-orange-300 bg-orange-50' :
+                        'border-red-300 bg-red-50'
+            const update = (patch: Partial<RetentionStageConfig>) =>
+              setRetention({ ...retention, [stageKey]: { ...stage, ...patch } })
+            return (
+              <div key={n} className={`rounded-xl border-2 ${accent} p-3 space-y-3`}>
+                <div className="font-bold text-gray-900">
+                  {n === 1 ? '🟡 المرحلة 1' : n === 2 ? '🟠 المرحلة 2' : '🔴 المرحلة 3'}
+                </div>
+
+                <label className="block text-sm">
+                  <span className="text-gray-700 font-medium">عدد الأيام بدون طلب</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={stage.days}
+                    onChange={(e) => update({ days: Math.max(1, Number(e.target.value) || 1) })}
+                    className="mt-1 w-full px-2 py-1.5 border-2 border-gray-300 rounded-lg text-center font-bold"
+                  />
+                </label>
+
+                <label className="block text-sm">
+                  <span className="text-gray-700 font-medium">الإجراء</span>
+                  <select
+                    value={stage.action}
+                    onChange={(e) => update({ action: e.target.value as RetentionStageConfig['action'] })}
+                    className="mt-1 w-full px-2 py-1.5 border-2 border-gray-300 rounded-lg"
+                  >
+                    <option value="off">إيقاف</option>
+                    <option value="notify">إشعار فقط</option>
+                    <option value="task">إنشاء مهمة + إشعار</option>
+                  </select>
+                </label>
+
+                <label className="block text-sm">
+                  <span className="text-gray-700 font-medium">المُكلّف</span>
+                  <select
+                    value={stage.assignedTo}
+                    onChange={(e) => update({ assignedTo: e.target.value as RetentionStageConfig['assignedTo'] })}
+                    className="mt-1 w-full px-2 py-1.5 border-2 border-gray-300 rounded-lg"
+                  >
+                    <option value="auto">توزيع تلقائي</option>
+                    <option value="رنا">رنا</option>
+                    <option value="مى">مى</option>
+                    <option value="ميرنا">ميرنا</option>
+                    <option value="أمل">أمل</option>
+                  </select>
+                </label>
+
+                <label className="block text-sm">
+                  <span className="text-gray-700 font-medium">فترة الانتظار بعد الإغلاق (يوم)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={stage.cooldownDays ?? 0}
+                    onChange={(e) => update({ cooldownDays: Math.max(0, Number(e.target.value) || 0) })}
+                    className="mt-1 w-full px-2 py-1.5 border-2 border-gray-300 rounded-lg text-center"
+                  />
+                  <span className="block text-xs text-gray-500 mt-1">
+                    لا تُنشئ مهمة جديدة قبل مرور هذه المدة على إغلاق آخر مهمة لنفس العميل.
+                  </span>
+                </label>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="text-xs text-gray-600 bg-gray-50 rounded-lg p-2 border border-gray-200">
+          ⓘ لإيقاف المتابعة لعميل معيّن أو تأجيلها، استخدم لوحة المتابعة أعلاه (زر «لوحة المتابعة») أو حقول
+          <code className="mx-1 bg-white px-1 rounded">doNotFollowUp</code> /
+          <code className="mx-1 bg-white px-1 rounded">followUpSnoozeUntil</code> على بيانات العميل.
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            disabled={savingRetention}
+            onClick={async () => {
+              setSavingRetention(true)
+              try {
+                const res = await fetch('/api/order-settings', {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ retention }),
+                })
+                if (!res.ok) throw new Error('failed')
+                toast.success('تم حفظ إعدادات المتابعة')
+              } catch {
+                toast.error('تعذر حفظ إعدادات المتابعة')
+              } finally {
+                setSavingRetention(false)
+              }
+            }}
+            className="px-5 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 font-medium"
+          >
+            {savingRetention ? 'جاري الحفظ...' : '💾 حفظ إعدادات المتابعة'}
           </button>
         </div>
       </section>

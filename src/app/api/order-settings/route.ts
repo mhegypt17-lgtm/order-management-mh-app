@@ -4,6 +4,7 @@ import {
   AgentNoticeRecord,
   LookupValueRecord,
   readOrderSettings,
+  RetentionConfig,
 } from '@/lib/omsData'
 
 // Patch: Add missing OrderSettingsRecord type with slaHours
@@ -22,6 +23,7 @@ type OrderSettingsRecord = {
   agentNotice: AgentNoticeRecord
   autoActivateThreshold?: number
   autoActivateEnabled?: boolean
+  retention?: RetentionConfig
 }
 
 type SectionKey = keyof OrderSettingsRecord
@@ -171,6 +173,25 @@ export async function PATCH(request: NextRequest) {
       nextSettings.autoActivateEnabled = Boolean(body.autoActivateEnabled)
     }
 
+    // Handle retention (inactive customer follow-up) configuration.
+    // Persisted as JSON in the `retention` column of `order_settings`.
+    if (body.retention && typeof body.retention === 'object') {
+      const ASSIGNEES = new Set(['auto', 'رنا', 'مى', 'ميرنا', 'أمل'])
+      const ACTIONS   = new Set(['off', 'notify', 'task'])
+      const sanitizeStage = (s: any, fallbackDays: number, fallbackCooldown: number) => ({
+        days: Math.max(1, Math.floor(Number(s?.days) || fallbackDays)),
+        action: ACTIONS.has(s?.action) ? s.action : 'notify',
+        assignedTo: ASSIGNEES.has(s?.assignedTo) ? s.assignedTo : 'auto',
+        cooldownDays: Math.max(0, Math.floor(Number(s?.cooldownDays) || fallbackCooldown)),
+      })
+      ;(nextSettings as any).retention = {
+        enabled: body.retention.enabled !== false,
+        stage1: sanitizeStage(body.retention.stage1, 30, 14),
+        stage2: sanitizeStage(body.retention.stage2, 60, 21),
+        stage3: sanitizeStage(body.retention.stage3, 90, 30),
+      } as RetentionConfig
+    }
+
     // Handle agent notice update
     if (body.message !== undefined || body.type !== undefined || body.isActive !== undefined) {
       const notice: AgentNoticeRecord = {
@@ -205,6 +226,7 @@ export async function PATCH(request: NextRequest) {
         monthlyTargetedUnitsGoal: nextSettings.monthlyTargetedUnitsGoal,
         autoActivateThreshold: nextSettings.autoActivateThreshold,
         autoActivateEnabled: nextSettings.autoActivateEnabled,
+        retention: nextSettings.retention,
       },
       { status: 200 }
     )
