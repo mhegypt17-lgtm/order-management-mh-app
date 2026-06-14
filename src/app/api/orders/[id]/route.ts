@@ -358,6 +358,9 @@ export async function PUT(
       discountCode: nextDiscountCode,
       discountAmount: nextDiscountAmount,
       netTotal: nextNetTotal,
+      csAttachments: Array.isArray(body.csAttachments)
+        ? body.csAttachments
+        : (existing as any).csAttachments || [],
       updatedAt: now,
     }
     const updRes = await supabase.from('orders').update(updatedOrder).eq('id', params.id)
@@ -380,6 +383,15 @@ export async function PUT(
         netTotal: _nt,
         ...updateSafe
       } = updatedOrder
+      await supabase.from('orders').update(updateSafe).eq('id', params.id)
+    }
+    if (updRes.error && /csAttachments|column .* does not exist/i.test(updRes.error.message || '')) {
+      // csAttachments column hasn't been added yet — retry without it.
+      // The migration to add it ships in this commit; deployments that
+      // haven't run it will lose the upload until they do, but the rest
+      // of the order will still save.
+      console.warn('[orders PUT] csAttachments column missing in DB, retrying without it')
+      const { csAttachments: _ca, ...updateSafe } = updatedOrder as any
       await supabase.from('orders').update(updateSafe).eq('id', params.id)
     }
 

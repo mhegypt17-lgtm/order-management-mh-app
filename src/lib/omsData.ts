@@ -65,6 +65,22 @@ export interface OrderRecord {
   discountCode?: string | null
   discountAmount?: number | null
   netTotal?: number | null
+  /**
+   * Optional CS-side attachments (proof of payment screenshots, ID copies,
+   * bank-transfer receipts, etc.). Each entry is a base64 data URL with a
+   * short caption, captured by the CS agent on the order form.
+   * Persisted as a JSONB column on `orders` — falls back gracefully when
+   * the column is absent so deployments without the migration still work.
+   */
+  csAttachments?: CSAttachment[] | null
+}
+
+export interface CSAttachment {
+  id: string
+  url: string          // data URL (base64) or hosted URL
+  caption: string      // freeform short label, e.g. "إيصال تحويل بنكي"
+  uploadedBy: string   // user.name at upload time
+  uploadedAt: string   // ISO timestamp
 }
 
 export interface OrderItemRecord {

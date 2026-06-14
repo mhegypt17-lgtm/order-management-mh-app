@@ -95,6 +95,18 @@ type OrderFormModel = {
   scheduledDate: string
   scheduledTimeSlot: '' | 'صباحي' | 'مسائي' | 'ساعة محددة'
   scheduledSpecificTime: string
+  csAttachments: CSAttachmentForm[]
+}
+
+// CS-side attachment captured on the order form. We use a separate form
+// type (vs. lib/omsData's CSAttachment) so the form state stays a pure
+// React-friendly value and the persistence shape can evolve independently.
+type CSAttachmentForm = {
+  id: string
+  url: string        // data URL (base64)
+  caption: string
+  uploadedBy: string
+  uploadedAt: string
 }
 
 type DeliveryData = {
@@ -145,6 +157,7 @@ function getDefaultOrderModel(): OrderFormModel {
     scheduledDate: '',
     scheduledTimeSlot: '',
     scheduledSpecificTime: '',
+    csAttachments: [],
   }
 }
 
@@ -392,6 +405,7 @@ export default function OrderForm({ mode, orderId }: Props) {
             scheduledDate: order.scheduledDate || '',
             scheduledTimeSlot: (order.scheduledTimeSlot as OrderFormModel['scheduledTimeSlot']) || '',
             scheduledSpecificTime: order.scheduledSpecificTime || '',
+            csAttachments: Array.isArray(order.csAttachments) ? order.csAttachments : [],
           })
 
           // Best-effort: load other addresses for this customer (non-fatal).
@@ -595,6 +609,62 @@ export default function OrderForm({ mode, orderId }: Props) {
   const handleClearDiscount = () => {
     setAppliedDiscount(null)
     setDiscountCodeInput('')
+  }
+
+  // CS-side attachments (proof of payment, ID copy, financial transaction
+  // receipts, etc.). We store images as base64 data URLs — same approach
+  // used for branch productPhotos / invoicePhoto — and persist them as a
+  // JSONB column on the order row. Each file is converted client-side
+  // before save so the PUT/POST payload is the only network round-trip.
+  const MAX_CS_ATTACHMENT_BYTES = 5 * 1024 * 1024 // 5 MB per file
+  const handleAddCsAttachments = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    const newOnes: CSAttachmentForm[] = []
+    for (const file of Array.from(files)) {
+      if (file.size > MAX_CS_ATTACHMENT_BYTES) {
+        toast.error(`الملف "${file.name}" أكبر من 5MB — اختر صورة أصغر`)
+        continue
+      }
+      try {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(String(reader.result || ''))
+          reader.onerror = () => reject(reader.error)
+          reader.readAsDataURL(file)
+        })
+        newOnes.push({
+          id: `cs-att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          url: dataUrl,
+          caption: '',
+          uploadedBy: user?.name || user?.id || 'unknown',
+          uploadedAt: new Date().toISOString(),
+        })
+      } catch (err) {
+        console.warn('[OrderForm] failed to read CS attachment', err)
+        toast.error(`تعذر قراءة الملف "${file.name}"`)
+      }
+    }
+    if (newOnes.length === 0) return
+    setDirtyFlag(true)
+    setForm((prev) => ({ ...prev, csAttachments: [...(prev.csAttachments || []), ...newOnes] }))
+  }
+
+  const handleUpdateCsAttachmentCaption = (id: string, caption: string) => {
+    setDirtyFlag(true)
+    setForm((prev) => ({
+      ...prev,
+      csAttachments: (prev.csAttachments || []).map((a) =>
+        a.id === id ? { ...a, caption } : a,
+      ),
+    }))
+  }
+
+  const handleRemoveCsAttachment = (id: string) => {
+    setDirtyFlag(true)
+    setForm((prev) => ({
+      ...prev,
+      csAttachments: (prev.csAttachments || []).filter((a) => a.id !== id),
+    }))
   }
 
   const handleLookupCustomer = async () => {
@@ -1329,6 +1399,90 @@ export default function OrderForm({ mode, orderId }: Props) {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 text-right"
                 dir="rtl"
               />
+            </div>
+          )}
+        </div>
+      </details>
+
+      {/* CS-side attachments — proof of payment screenshots, ID copies,
+          bank-transfer receipts, etc. Mirrors the branch's productPhotos
+          pattern (data URLs) but exposes a caption per attachment so the
+          admin/branch can tell at a glance what each image represents. */}
+      <details
+        open={(form.csAttachments && form.csAttachments.length > 0) || false}
+        className="bg-white rounded-lg border border-emerald-200 p-4"
+      >
+        <summary className="font-bold text-emerald-900 cursor-pointer">
+          💳 مرفقات خدمة العملاء {form.csAttachments?.length ? `(${form.csAttachments.length})` : ''}
+        </summary>
+        <div className="mt-3 space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1 text-right">
+              إضافة مرفقات (إيصال تحويل، صورة بطاقة، أي مستند ذي صلة)
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              disabled={isLocked}
+              onChange={(e) => {
+                handleAddCsAttachments(e.target.files)
+                e.target.value = ''
+              }}
+              className="w-full text-sm"
+            />
+            <p className="text-xs text-gray-500 mt-1 text-right">
+              حد أقصى 5MB لكل ملف — يمكن رفع أكثر من صورة في المرة الواحدة
+            </p>
+          </div>
+
+          {form.csAttachments && form.csAttachments.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+              {form.csAttachments.map((att) => (
+                <div
+                  key={att.id}
+                  className="relative border border-gray-200 rounded-lg p-2 bg-gray-50 space-y-2"
+                >
+                  <a href={att.url} target="_blank" rel="noreferrer" className="block">
+                    <img
+                      src={att.url}
+                      alt={att.caption || 'مرفق'}
+                      className="w-full h-28 object-cover rounded border border-gray-300"
+                    />
+                  </a>
+                  <input
+                    type="text"
+                    value={att.caption}
+                    onChange={(e) => handleUpdateCsAttachmentCaption(att.id, e.target.value)}
+                    placeholder="وصف قصير (مثال: إيصال تحويل)"
+                    disabled={isLocked}
+                    className="w-full px-2 py-1 text-xs border border-gray-300 rounded text-right"
+                    dir="rtl"
+                  />
+                  <div className="flex items-center justify-between text-[10px] text-gray-500">
+                    <span>👤 {att.uploadedBy || '—'}</span>
+                    <a
+                      href={att.url}
+                      download={att.caption ? `${att.caption}.png` : `attachment-${att.id}.png`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-700 underline"
+                    >
+                      📥 تحميل
+                    </a>
+                  </div>
+                  {!isLocked && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveCsAttachment(att.id)}
+                      className="absolute top-1 left-1 bg-red-600 hover:bg-red-700 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shadow"
+                      title="حذف"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </div>

@@ -383,6 +383,7 @@ export async function POST(request: NextRequest) {
       discountCode,
       discountAmount,
       netTotal,
+      csAttachments: Array.isArray(body.csAttachments) ? body.csAttachments : [],
       createdBy: body.createdBy || 'unknown',
       createdAt: now,
       updatedAt: now,
@@ -437,6 +438,15 @@ export async function POST(request: NextRequest) {
         netTotal: _nt,
         ...orderSafe
       } = order
+      const retry = await supabase.from('orders').insert([orderSafe]).select().single()
+      finalOrder = retry.data
+      finalError = retry.error
+    }
+
+    // Fallback: DB may not yet have the csAttachments column.
+    if (finalError && /csAttachments|column .* does not exist/i.test(finalError.message || '')) {
+      console.warn('[orders POST] csAttachments column missing in DB, retrying without it')
+      const { csAttachments: _ca, ...orderSafe } = order as any
       const retry = await supabase.from('orders').insert([orderSafe]).select().single()
       finalOrder = retry.data
       finalError = retry.error
