@@ -11,6 +11,19 @@ import {
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+// Detect when the Supabase customers table has not yet been migrated to
+// include the `wallet` column. PostgREST returns PGRST204 when its cached
+// schema lacks the column; Postgres returns 42703 (undefined_column) when the
+// table is queried directly. Either way, retry without wallet so the request
+// doesn't fail outright.
+function isWalletColumnMissing(err: any): boolean {
+  if (!err) return false
+  const code = String(err.code || '')
+  const msg = String(err.message || '').toLowerCase()
+  if (code === 'PGRST204' || code === '42703') return true
+  return msg.includes('wallet') && (msg.includes('column') || msg.includes('schema cache'))
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
@@ -113,11 +126,26 @@ export async function POST(request: NextRequest) {
       updatedAt: now,
     }
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('customers')
       .insert([newCustomer])
       .select()
       .single()
+
+    // Fallback: if the wallet column hasn't been migrated yet, retry without it
+    // so customer creation still succeeds. The wallet field is best-effort here.
+    let walletWarning: string | null = null
+    if (error && isWalletColumnMissing(error)) {
+      const { wallet: _ignored, ...rest } = newCustomer as any
+      const retry = await supabase
+        .from('customers')
+        .insert([rest])
+        .select()
+        .single()
+      data = retry.data as any
+      error = retry.error as any
+      walletWarning = 'تم إنشاء العميل بدون رصيد المحفظة — يلزم تشغيل ملف الترحيل data/customer-wallet-migration.sql'
+    }
 
     if (error) {
       console.error('Error creating customer:', error)
@@ -154,7 +182,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ customer: data || newCustomer }, { status: 201 })
+    return NextResponse.json(
+      { customer: data || newCustomer, warning: walletWarning || undefined },
+      { status: 201 }
+    )
   } catch (err) {
     console.error('POST /api/customers error:', err)
     return NextResponse.json({ error: 'تعذر إنشاء العميل' }, { status: 500 })

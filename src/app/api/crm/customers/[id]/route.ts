@@ -15,6 +15,17 @@ import { supabase } from '@/lib/supabase'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+// Detect when the Supabase customers table has not yet been migrated to
+// include the `wallet` column so wallet edits can be skipped gracefully
+// instead of failing the entire customer update.
+function isWalletColumnMissing(err: any): boolean {
+  if (!err) return false
+  const code = String(err.code || '')
+  const msg = String(err.message || '').toLowerCase()
+  if (code === 'PGRST204' || code === '42703') return true
+  return msg.includes('wallet') && (msg.includes('column') || msg.includes('schema cache'))
+}
+
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const { searchParams } = new URL(req.url)
@@ -367,10 +378,23 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     next.updatedAt = new Date().toISOString()
     updates.updatedAt = next.updatedAt
 
-    const { error } = await supabase
+    let walletWarning: string | null = null
+    let { error } = await supabase
       .from('customers')
       .update(updates)
       .eq('id', params.id)
+
+    // Fallback: if the wallet column is not yet migrated in Supabase, retry
+    // without it so the rest of the edits still go through.
+    if (error && 'wallet' in updates && isWalletColumnMissing(error)) {
+      const { wallet: _ignored, ...rest } = updates
+      const retry = await supabase
+        .from('customers')
+        .update(rest)
+        .eq('id', params.id)
+      error = retry.error
+      walletWarning = 'تعذر حفظ رصيد المحفظة — يلزم تشغيل ملف الترحيل data/customer-wallet-migration.sql'
+    }
 
     if (error) {
       console.error('Supabase update error:', error)
@@ -437,7 +461,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       }
     }
 
-    return NextResponse.json({ customer: next })
+    return NextResponse.json({ customer: next, warning: walletWarning || undefined })
   } catch (err) {
     console.error('CRM customer update error:', err)
     return NextResponse.json({ error: 'تعذر تحديث بيانات العميل' }, { status: 500 })

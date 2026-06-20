@@ -11,6 +11,7 @@ interface CustomerSummary {
   id: string
   customerName: string
   phone: string
+  wallet?: number
   createdAt: string
   addressCount: number
   totalOrders: number
@@ -18,7 +19,8 @@ interface CustomerSummary {
   totalRevenue: number
   lastOrderDate: string | null
   daysSinceLastOrder: number | null
-  tier: 'برونزي' | 'فضي' | 'ذهبي' | 'بلاتيني'
+  // Tier may be returned as Arabic legacy values or English loyalty-config names.
+  tier: string
 }
 
 interface Address {
@@ -653,6 +655,11 @@ export default function CRMView({ role }: CRMViewProps) {
                   </span>
                   <span className="text-xs text-gray-600">{c.totalOrders} طلب</span>
                 </div>
+                {typeof c.wallet === 'number' && c.wallet > 0 && (
+                  <div className="text-xs text-emerald-700 font-semibold mt-1 text-right">
+                    💳 {formatCurrency(c.wallet)}
+                  </div>
+                )}
               </button>
             ))
           )}
@@ -779,6 +786,14 @@ export default function CRMView({ role }: CRMViewProps) {
                   <div className="text-2xl font-bold text-green-700">{profile.stats.completedOrders}</div>
                   <div className="text-xs text-gray-500 mt-0.5">طلبات مكتملة</div>
                 </div>
+                {/* Wallet balance is shown to both admin and CS so they can apply
+                    store credit on the next order without opening the edit modal. */}
+                <div className="bg-emerald-50 rounded-lg p-3 text-center">
+                  <div className="text-xl font-bold text-emerald-700">
+                    💳 {formatCurrency(profile.customer.wallet ?? 0)}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-0.5">رصيد المحفظة</div>
+                </div>
                 {role === 'admin' && (
                   <>
                     <div className="bg-blue-50 rounded-lg p-3 text-center">
@@ -796,10 +811,6 @@ export default function CRMView({ role }: CRMViewProps) {
                     <div className="bg-orange-50 rounded-lg p-3 text-center">
                       <div className="text-2xl font-bold text-orange-700">{profile.stats.cancelledOrders}</div>
                       <div className="text-xs text-gray-500 mt-0.5">طلبات ملغية</div>
-                    </div>
-                    <div className="bg-blue-50 rounded-lg p-3 text-center">
-                      <div className="text-xl font-bold text-blue-700">{profile.insights.ordersPerMonth}</div>
-                      <div className="text-xs text-gray-500 mt-0.5">طلب/شهر</div>
                     </div>
                   </>
                 )}

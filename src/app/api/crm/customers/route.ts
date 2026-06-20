@@ -4,6 +4,9 @@ import {
   readAddresses,
   readOrders,
   readOrderItems,
+  readOrderSettings,
+  resolveCustomerTier,
+  DEFAULT_LOYALTY_CONFIG,
 } from '@/lib/omsData'
 
 export async function GET(req: NextRequest) {
@@ -14,6 +17,11 @@ export async function GET(req: NextRequest) {
     const customers = await readCustomers()
     const addresses = await readAddresses()
     const orders = await readOrders()
+    // Tier formula must match the customer-profile endpoint so the sidebar
+    // chip never disagrees with the profile header. Both use the loyalty
+    // config and count any non-cancelled order toward the tier.
+    const settings = await readOrderSettings()
+    const loyalty = settings.loyalty || DEFAULT_LOYALTY_CONFIG
 
     const result = customers
       .filter((c) => {
@@ -29,7 +37,9 @@ export async function GET(req: NextRequest) {
         const custAddresses = addresses.filter((a) => a.customerId === c.id)
 
         const completedOrders = custOrders.filter((o) => o.orderStatus === 'تم')
+        const loyaltyOrders = custOrders.filter((o) => o.orderStatus !== 'لاغي')
         const totalRevenue = completedOrders.reduce((sum, o) => sum + (o.orderTotal || 0), 0)
+        const loyaltyRevenue = loyaltyOrders.reduce((sum, o) => sum + (o.orderTotal || 0), 0)
         const lastOrder = custOrders
           .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]
 
@@ -37,16 +47,18 @@ export async function GET(req: NextRequest) {
           ? Math.floor((Date.now() - new Date(lastOrder.createdAt).getTime()) / (1000 * 60 * 60 * 24))
           : null
 
-        // Customer tier based on completed orders count
-        let tier: 'برونزي' | 'فضي' | 'ذهبي' | 'بلاتيني' = 'برونزي'
-        if (completedOrders.length >= 20) tier = 'بلاتيني'
-        else if (completedOrders.length >= 10) tier = 'ذهبي'
-        else if (completedOrders.length >= 5) tier = 'فضي'
+        // Tier resolved via shared loyalty config (matches profile endpoint).
+        const tierConfig = resolveCustomerTier(loyalty, {
+          completedOrderCount: loyaltyOrders.length,
+          totalRevenue: loyaltyRevenue,
+        })
+        const tier = tierConfig.name
 
         return {
           id: c.id,
           customerName: c.customerName,
           phone: c.phone,
+          wallet: typeof c.wallet === 'number' ? c.wallet : 0,
           createdAt: c.createdAt,
           addressCount: custAddresses.length,
           totalOrders: custOrders.length,

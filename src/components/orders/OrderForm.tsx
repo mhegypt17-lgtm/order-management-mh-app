@@ -535,6 +535,10 @@ export default function OrderForm({ mode, orderId }: Props) {
         const firstAddress = data.addresses?.[0]
         const lookedUpStatus = (data.customer?.status as 'active' | 'warning' | 'suspended') || 'active'
         setCustomerStatus({ status: lookedUpStatus, reason: data.customer?.statusReason || null })
+        // Capture identity + wallet so the status banner and wallet badge both
+        // render — same behaviour as the manual lookup path.
+        setLoadedCustomerId(String(data.customer.id))
+        setCustomerWalletBalance(Number(data.customer.wallet) || 0)
 
         setForm((prev) => ({
           ...prev,
@@ -1091,22 +1095,42 @@ export default function OrderForm({ mode, orderId }: Props) {
             </div>
           </div>
 
-          {customerStatus && customerStatus.status !== 'active' && (
+          {/* Customer status banner — always shown after a successful lookup so
+              the agent never has to wonder whether the lookup ran. Active
+              customers get a green confirmation; warning/suspended get the
+              louder coloured warning. */}
+          {customerStatus && loadedCustomerId !== null && (
             <div
               className={
                 customerStatus.status === 'suspended'
                   ? 'md:col-span-2 border-2 border-red-400 bg-red-50 rounded-lg p-3'
-                  : 'md:col-span-2 border-2 border-amber-400 bg-amber-50 rounded-lg p-3'
+                  : customerStatus.status === 'warning'
+                  ? 'md:col-span-2 border-2 border-amber-400 bg-amber-50 rounded-lg p-3'
+                  : 'md:col-span-2 border border-green-300 bg-green-50 rounded-lg p-3'
               }
               dir="rtl"
             >
-              <div className={`font-bold ${customerStatus.status === 'suspended' ? 'text-red-800' : 'text-amber-800'}`}>
+              <div
+                className={`font-bold ${
+                  customerStatus.status === 'suspended'
+                    ? 'text-red-800'
+                    : customerStatus.status === 'warning'
+                    ? 'text-amber-800'
+                    : 'text-green-800'
+                }`}
+              >
                 {customerStatus.status === 'suspended'
                   ? '🛑 عميل موقوف — انتبه قبل إنشاء الطلب'
-                  : '⚠️ عميل مُحذَّر — انتبه قبل إنشاء الطلب'}
+                  : customerStatus.status === 'warning'
+                  ? '⚠️ عميل مُحذَّر — انتبه قبل إنشاء الطلب'
+                  : '✅ عميل نشط'}
               </div>
-              {customerStatus.reason && (
-                <div className={`text-sm mt-1 ${customerStatus.status === 'suspended' ? 'text-red-700' : 'text-amber-700'}`}>
+              {customerStatus.reason && customerStatus.status !== 'active' && (
+                <div
+                  className={`text-sm mt-1 ${
+                    customerStatus.status === 'suspended' ? 'text-red-700' : 'text-amber-700'
+                  }`}
+                >
                   السبب: {customerStatus.reason}
                 </div>
               )}
