@@ -103,15 +103,33 @@ async function upsertShift(req: NextRequest) {
 
     // Try writing with `assignments`. If the column doesn't exist yet (migration
     // not applied), fall back to writing without it so the rest of the data is
-    // persisted.
+    // persisted. Supabase/Postgres surfaces two distinct error shapes:
+    //   • PostgREST schema-cache miss (no live column in cache):
+    //       code 'PGRST204', "Could not find the 'assignments' column of 'shifts' in the schema cache"
+    //   • Direct Postgres undefined_column when the column truly doesn't exist:
+    //       code '42703', `column "assignments" of relation "shifts" does not exist`
+    // We match both so the fallback works in either branch.
+    const isAssignmentsMissing = (err: any) => {
+      if (!err) return false
+      if (err.code === 'PGRST204' || err.code === '42703') return true
+      const msg = String(err.message || '').toLowerCase()
+      return (
+        msg.includes("'assignments'") ||
+        msg.includes('"assignments"') ||
+        /\bassignments\b.*\b(column|does not exist|schema cache|not found)\b/.test(msg) ||
+        /\b(column|schema cache).*\bassignments\b/.test(msg)
+      )
+    }
+
     let { error } = await supabase.from('shifts').upsert([shift], { onConflict: 'id' })
-    if (error && /column .* "?assignments"? .* does not exist/i.test(error.message)) {
+    if (error && isAssignmentsMissing(error)) {
+      console.warn('[shifts upsert] assignments column missing in DB, retrying without it:', error.message)
       const { assignments: _drop, ...legacy } = shift as any
       ;({ error } = await supabase.from('shifts').upsert([legacy], { onConflict: 'id' }))
       if (!error) {
         return NextResponse.json({
           shift,
-          warning: 'تم الحفظ بدون التوزيعات لكل وكيل — يرجى تشغيل data/shift-assignments-migration.sql على قاعدة البيانات.',
+          warning: 'تم حفظ الوردية لكن لم تُحفظ التوزيعات لكل وكيل — يرجى تشغيل data/shift-assignments-migration.sql على قاعدة البيانات.',
         })
       }
     }
