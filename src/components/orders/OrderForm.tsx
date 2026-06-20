@@ -836,7 +836,10 @@ export default function OrderForm({ mode, orderId }: Props) {
     const validItems = normalizedItems
     if (validItems.length === 0) return toast.error('أضف منتجاً واحداً على الأقل')
 
-    // Block out-of-stock items (lookup latest stock from products list).
+    // Stock checks: surface as non-blocking warnings so CS can still place the
+    // order (e.g. customer wants to wait for restock, or branch has stock not
+    // yet reflected in the system). Admin/branch can review via the order
+    // notes which products were out / over-quantity at the time of creation.
     const outOfStockNames = validItems
       .map((i) => {
         const p = products.find((pp) => pp.id === i.productId)
@@ -848,10 +851,14 @@ export default function OrderForm({ mode, orderId }: Props) {
       })
       .filter(Boolean) as string[]
     if (outOfStockNames.length > 0) {
-      return toast.error(`⛔ منتج غير متاح: ${outOfStockNames.join('، ')}`)
+      toast(`⚠️ تم إنشاء الطلب رغم أن المنتج غير متاح: ${outOfStockNames.join('، ')}`, {
+        icon: '⛔',
+        duration: 6000,
+        style: { background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' },
+      })
     }
 
-    // Warn (but allow) low-stock items where quantity would exceed remaining stock.
+    // Same treatment for low-stock breaches — warn, don't block.
     const lowStockBreaches = validItems
       .map((i) => {
         const p = products.find((pp) => pp.id === i.productId)
@@ -867,7 +874,11 @@ export default function OrderForm({ mode, orderId }: Props) {
       })
       .filter(Boolean) as string[]
     if (lowStockBreaches.length > 0) {
-      return toast.error(`⚠️ الكمية تتجاوز المتاح: ${lowStockBreaches.join('، ')}`)
+      toast(`⚠️ الكمية تتجاوز المتاح في المخزون: ${lowStockBreaches.join('، ')}`, {
+        icon: '📉',
+        duration: 6000,
+        style: { background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a' },
+      })
     }
 
     if (form.orderStatus === 'لاغي' && !form.cancellationReason) {
