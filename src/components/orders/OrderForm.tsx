@@ -806,11 +806,52 @@ export default function OrderForm({ mode, orderId }: Props) {
     }))
   }
 
+  // Narrow save path used when the order is locked (post-delivery): only
+  // the csAttachments array is sent. All other order fields stay frozen on
+  // the server. CS uses this to upload proof-of-payment / receipt photos
+  // that arrive after the branch has marked the order as delivered.
+  const saveAttachmentsOnly = async () => {
+    if (!orderId) return
+    setIsSaving(true)
+    try {
+      const response = await fetch(`/api/orders/${orderId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          attachmentsOnly: true,
+          csAttachments: form.csAttachments || [],
+          createdBy: user?.name || user?.id || 'unknown',
+          role: user?.role || '',
+        }),
+      })
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}))
+        toast.error(err?.error || 'حدث خطأ أثناء حفظ المرفقات')
+        return
+      }
+      const data = await response.json()
+      setDirtyFlag(false)
+      if (data?.warning) {
+        toast.error(data.warning, { duration: 8000 })
+      } else {
+        toast.success('✅ تم حفظ المرفقات')
+      }
+      router.refresh()
+    } catch {
+      toast.error('حدث خطأ أثناء الحفظ')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
     if (isLocked) {
-      return toast.error('🔒 الطلب مقفل — الفرع بدأ التوصيل ولا يمكن التعديل')
+      // Locked orders allow ONLY csAttachments updates — route to the
+      // narrow attachments-only save path so CS can still upload receipts
+      // / proof-of-payment after the branch has marked the order delivered.
+      return saveAttachmentsOnly()
     }
 
     const resolvedDeliveryArea = form.deliveryArea.trim() || String(deliveryZones[0]?.area || '').trim()
@@ -954,7 +995,8 @@ export default function OrderForm({ mode, orderId }: Props) {
       {isLocked && (
         <div className="bg-amber-50 border border-amber-300 rounded-lg p-4 text-amber-900">
           <p className="font-bold">🔒 هذا الطلب مقفل للتعديل</p>
-          <p className="text-sm mt-1">لأن الفرع بدأ التوصيل (الحالة: <span className="font-semibold">{deliveryData?.deliveryStatus}</span>). يمكن للأدمن فقط إجراء تعديلات.</p>
+          <p className="text-sm mt-1">لأن الفرع بدأ التوصيل (الحالة: <span className="font-semibold">{deliveryData?.deliveryStatus}</span>). يمكن للأدمن فقط إجراء تعديلات على بقية الحقول.</p>
+          <p className="text-sm mt-1">📎 <span className="font-semibold">يمكنك إضافة أو تعديل المرفقات (الصور والإيصالات) فقط</span> — ثم اضغط "حفظ المرفقات".</p>
         </div>
       )}
       <details open className="bg-white rounded-lg border border-gray-200 p-4">
@@ -1442,7 +1484,6 @@ export default function OrderForm({ mode, orderId }: Props) {
               type="file"
               accept="image/*"
               multiple
-              disabled={isLocked}
               onChange={(e) => {
                 handleAddCsAttachments(e.target.files)
                 e.target.value = ''
@@ -1473,7 +1514,6 @@ export default function OrderForm({ mode, orderId }: Props) {
                     value={att.caption}
                     onChange={(e) => handleUpdateCsAttachmentCaption(att.id, e.target.value)}
                     placeholder="وصف قصير (مثال: إيصال تحويل)"
-                    disabled={isLocked}
                     className="w-full px-2 py-1 text-xs border border-gray-300 rounded text-right"
                     dir="rtl"
                   />
@@ -1489,16 +1529,14 @@ export default function OrderForm({ mode, orderId }: Props) {
                       📥 تحميل
                     </a>
                   </div>
-                  {!isLocked && (
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveCsAttachment(att.id)}
-                      className="absolute top-1 left-1 bg-red-600 hover:bg-red-700 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shadow"
-                      title="حذف"
-                    >
-                      ✕
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveCsAttachment(att.id)}
+                    className="absolute top-1 left-1 bg-red-600 hover:bg-red-700 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shadow"
+                    title="حذف"
+                  >
+                    ✕
+                  </button>
                 </div>
               ))}
             </div>
@@ -1583,11 +1621,21 @@ export default function OrderForm({ mode, orderId }: Props) {
       <div className="flex gap-3">
         <button
           type="submit"
-          disabled={isSaving || isLocked}
-          title={isLocked ? 'الطلب مقفل بسبب حالة التوصيل' : undefined}
-          className="px-5 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:bg-red-300 disabled:cursor-not-allowed text-white font-semibold"
+          disabled={isSaving}
+          title={isLocked ? 'الطلب مقفل — سيتم حفظ المرفقات فقط' : undefined}
+          className={`px-5 py-2 rounded-lg disabled:cursor-not-allowed text-white font-semibold ${
+            isLocked
+              ? 'bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300'
+              : 'bg-red-600 hover:bg-red-700 disabled:bg-red-300'
+          }`}
         >
-          {isSaving ? '... جاري الحفظ' : isLocked ? '🔒 مقفل' : mode === 'create' ? 'حفظ الطلب' : 'تحديث الطلب'}
+          {isSaving
+            ? '... جاري الحفظ'
+            : isLocked
+              ? '📎 حفظ المرفقات'
+              : mode === 'create'
+                ? 'حفظ الطلب'
+                : 'تحديث الطلب'}
         </button>
         <button type="button" onClick={() => router.push('/orders')} className="px-5 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold">
           رجوع

@@ -155,6 +155,48 @@ export async function PUT(
       const currentDelivery = deliveryRows.find((d) => d.orderId === params.id)
       const lockingStatuses = ['في الطريق', 'تم التوصيل']
       if (currentDelivery && lockingStatuses.includes(currentDelivery.deliveryStatus)) {
+        // Exception: CS may still add/edit attachments (proof of payment,
+        // post-delivery receipts, etc.) on a locked order. The client sends
+        // `attachmentsOnly: true` to opt into this narrow patch; nothing
+        // else on the order is touched.
+        if (body.attachmentsOnly === true) {
+          const incomingAttachments = Array.isArray(body.csAttachments) ? body.csAttachments : []
+          const attUpd = await supabase
+            .from('orders')
+            .update({ csAttachments: incomingAttachments, updatedAt: now })
+            .eq('id', params.id)
+          if (attUpd.error) {
+            const msg = (attUpd.error.message || '').toLowerCase()
+            if (attUpd.error.code === '42703' || msg.includes('csattachments')) {
+              return NextResponse.json(
+                {
+                  error:
+                    'تعذّر حفظ المرفقات — العمود csAttachments غير موجود في قاعدة البيانات. شغّل data/cs-attachments-migration.sql',
+                },
+                { status: 500 },
+              )
+            }
+            console.error('[orders PUT attachmentsOnly] update failed:', attUpd.error)
+            return NextResponse.json(
+              { error: 'فشل حفظ المرفقات', details: attUpd.error.message || null },
+              { status: 500 },
+            )
+          }
+          await appendEditHistory({
+            entityType: 'order',
+            entityId: params.id,
+            orderId: params.id,
+            action: 'updated',
+            changedBy: body.createdBy || 'unknown',
+            summary: 'تم تحديث مرفقات خدمة العملاء (الطلب مقفل بعد التوصيل)',
+            details: { attachmentCount: incomingAttachments.length, lockedStatus: currentDelivery.deliveryStatus },
+          })
+          const refreshed = { ...orders[orderIndex], csAttachments: incomingAttachments, updatedAt: now } as OrderRecord
+          return NextResponse.json(
+            { order: await enrichOrder(refreshed), warning: null },
+            { status: 200 },
+          )
+        }
         return NextResponse.json(
           {
             error: 'الطلب مقفل — الفرع بدأ التوصيل ولا يمكن التعديل',
