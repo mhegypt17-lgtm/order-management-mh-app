@@ -339,7 +339,33 @@ export async function PUT(
         nextDiscountAmount = Math.min(nextDiscountAmount, orderTotal)
       }
     }
-    const nextNetTotal = Math.max(0, orderTotal - nextDiscountAmount)
+    const afterVoucher = Math.max(0, orderTotal - nextDiscountAmount)
+
+    // Wallet-credit handling on edit. We treat the incoming walletUsed as
+    // a *target* and reconcile against (a) what was previously debited on
+    // this same order and (b) the customer's current balance. The customer's
+    // wallet is then credited/debited by the delta (new - previous) below.
+    const previousWalletUsed = Math.max(0, Number((existing as any).walletUsed) || 0)
+    let nextWalletUsed = previousWalletUsed
+    if (Object.prototype.hasOwnProperty.call(body, 'walletUsed')) {
+      const requested = Math.max(0, Number(body.walletUsed) || 0)
+      const { data: walletRow } = await supabase
+        .from('customers')
+        .select('wallet')
+        .eq('id', existing.customerId)
+        .maybeSingle()
+      const currentBalance = Math.max(0, Number(walletRow?.wallet) || 0)
+      // Customer can spend at most (currentBalance + previousWalletUsed),
+      // because the previousWalletUsed amount has already been debited.
+      const cap = Math.min(currentBalance + previousWalletUsed, afterVoucher)
+      nextWalletUsed = Math.max(0, Math.min(requested, cap))
+    } else {
+      // Client didn't send walletUsed at all (partial PUT). Keep whatever
+      // was saved, but clamp it to the new owed amount so we never debit
+      // more than the customer actually has to pay.
+      nextWalletUsed = Math.min(previousWalletUsed, afterVoucher)
+    }
+    const nextNetTotal = Math.max(0, afterVoucher - nextWalletUsed)
 
     const changedFields: string[] = []
     if (existing.orderStatus !== body.orderStatus) changedFields.push('orderStatus')
@@ -400,6 +426,7 @@ export async function PUT(
       discountCode: nextDiscountCode,
       discountAmount: nextDiscountAmount,
       netTotal: nextNetTotal,
+      walletUsed: nextWalletUsed,
       csAttachments: Array.isArray(body.csAttachments)
         ? body.csAttachments
         : (existing as any).csAttachments || [],
@@ -417,7 +444,7 @@ export async function PUT(
     // error — not the original — so the next fallback only fires when
     // there really is more work to do.
     let lastError = updRes.error
-    const stripped = { scheduled: false, discount: false, csAttachments: false }
+    const stripped = { scheduled: false, discount: false, csAttachments: false, walletUsed: false }
 
     const errorMentions = (err: any, ...names: string[]) => {
       if (!err) return false
@@ -452,6 +479,16 @@ export async function PUT(
       lastError = retry.error
       stripped.csAttachments = (updatedOrder as any).csAttachments && (updatedOrder as any).csAttachments.length > 0
     }
+    if (lastError && errorMentions(lastError, 'walletUsed')) {
+      // walletUsed column hasn't been added yet — retry without it. Wallet
+      // won't be debited/refunded in this branch; the client warning tells
+      // the operator to run data/wallet-used-migration.sql.
+      console.warn('[orders PUT] walletUsed column missing in DB, retrying without it')
+      const { walletUsed: _wu, ...safe } = updatedOrder as any
+      const retry = await supabase.from('orders').update(safe).eq('id', params.id)
+      lastError = retry.error
+      stripped.walletUsed = nextWalletUsed > 0 || previousWalletUsed > 0
+    }
     if (lastError) {
       console.error('[orders PUT] update failed after fallbacks:', lastError)
       return NextResponse.json(
@@ -464,6 +501,29 @@ export async function PUT(
     await supabase.from('order_items').delete().eq('orderId', params.id)
     if (rewrittenItems.length > 0) {
       await supabase.from('order_items').insert(rewrittenItems)
+    }
+
+    // Reconcile the customer's wallet by the delta (new - previous). If
+    // CS bumped walletUsed from 50 to 80 we debit 30 more; if they dropped
+    // it from 80 to 50 we refund 30. We skip this entirely when the column
+    // was stripped (migration not run) so we don't refund money the order
+    // never actually claimed.
+    if (!stripped.walletUsed && nextWalletUsed !== previousWalletUsed) {
+      const delta = nextWalletUsed - previousWalletUsed
+      const { data: walletRow } = await supabase
+        .from('customers')
+        .select('wallet')
+        .eq('id', existing.customerId)
+        .maybeSingle()
+      const current = Math.max(0, Number(walletRow?.wallet) || 0)
+      const next = Math.max(0, current - delta)
+      const { error: walletErr } = await supabase
+        .from('customers')
+        .update({ wallet: next, updatedAt: now })
+        .eq('id', existing.customerId)
+      if (walletErr) {
+        console.error('[orders PUT] failed to reconcile customer wallet:', walletErr)
+      }
     }
 
     await appendEditHistory({
@@ -483,9 +543,11 @@ export async function PUT(
     return NextResponse.json(
       {
         order: await enrichOrder(updatedOrder as OrderRecord),
-        warning: stripped.csAttachments
-          ? 'تم حفظ الطلب بدون مرفقات خدمة العملاء — العمود csAttachments غير موجود في قاعدة البيانات. شغّل data/cs-attachments-migration.sql'
-          : null,
+        warning: stripped.walletUsed
+          ? 'تم حفظ الطلب لكن لم يُخصم الرصيد — العمود walletUsed غير موجود في قاعدة البيانات. شغّل data/wallet-used-migration.sql'
+          : stripped.csAttachments
+            ? 'تم حفظ الطلب بدون مرفقات خدمة العملاء — العمود csAttachments غير موجود في قاعدة البيانات. شغّل data/cs-attachments-migration.sql'
+            : null,
       },
       { status: 200 },
     )

@@ -69,6 +69,14 @@ export interface OrderRecord {
   discountAmount?: number | null
   netTotal?: number | null
   /**
+   * Amount of the customer's wallet credit consumed by this order. Applied
+   * as an extra discount on top of any voucher code: `netTotal =
+   * max(0, orderTotal - discountAmount - walletUsed)`. The API mirrors
+   * this delta back onto the customer's running wallet balance on every
+   * create/edit so the two sides stay in sync.
+   */
+  walletUsed?: number | null
+  /**
    * Optional CS-side attachments (proof of payment screenshots, ID copies,
    * bank-transfer receipts, etc.). Each entry is a base64 data URL with a
    * short caption, captured by the CS agent on the order form.

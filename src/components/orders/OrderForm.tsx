@@ -274,6 +274,19 @@ export default function OrderForm({ mode, orderId }: Props) {
   const [isSaving, setIsSaving] = useState(false)
   const [isLookupLoading, setIsLookupLoading] = useState(false)
   const [customerStatus, setCustomerStatus] = useState<{ status: 'active' | 'warning' | 'suspended'; reason: string | null } | null>(null)
+  // Wallet credit captured at customer-lookup time. `customerWalletBalance`
+  // is the latest balance pulled from the CRM (null before lookup, 0 if the
+  // customer has none, > 0 if they have credit to spend). `walletUsedInput`
+  // is the raw string the agent typed so we don't fight with controlled
+  // input formatting. `loadedCustomerId` is the customer FK we matched on
+  // — used by the API to credit/debit the right wallet on save.
+  const [loadedCustomerId, setLoadedCustomerId] = useState<string | null>(null)
+  const [customerWalletBalance, setCustomerWalletBalance] = useState<number | null>(null)
+  // For an edit, this is the walletUsed amount that was already deducted
+  // from the customer's balance on the previous save — we surface it as
+  // "available again" inside the cap so editing doesn't double-count.
+  const [previousWalletUsed, setPreviousWalletUsed] = useState<number>(0)
+  const [walletUsedInput, setWalletUsedInput] = useState<string>('')
   const [discountCodeInput, setDiscountCodeInput] = useState('')
   const [appliedDiscount, setAppliedDiscount] = useState<{ code: string; amount: number; type: 'percent' | 'value'; value: number } | null>(null)
   const [isCheckingDiscount, setIsCheckingDiscount] = useState(false)
@@ -415,6 +428,12 @@ export default function OrderForm({ mode, orderId }: Props) {
               if (lookupRes.ok) {
                 const lookupData = await lookupRes.json()
                 setAddresses(Array.isArray(lookupData.addresses) ? lookupData.addresses : [])
+                // Capture wallet balance + customer id so the wallet UI is
+                // populated when the agent reopens an existing order.
+                if (lookupData?.customer) {
+                  setLoadedCustomerId(String(lookupData.customer.id))
+                  setCustomerWalletBalance(Number(lookupData.customer.wallet) || 0)
+                }
               } else {
                 setAddresses([])
               }
@@ -458,6 +477,12 @@ export default function OrderForm({ mode, orderId }: Props) {
             setAppliedDiscount(null)
             setDiscountCodeInput('')
           }
+
+          // Restore previously-applied wallet usage (if any) so editing
+          // the order shows the same amount in the wallet input.
+          const savedWalletUsed = Number((order as any).walletUsed) || 0
+          setPreviousWalletUsed(savedWalletUsed)
+          setWalletUsedInput(savedWalletUsed > 0 ? String(savedWalletUsed) : '')
 
           // Load delivery data if available
           if (order.delivery) {
@@ -580,7 +605,17 @@ export default function OrderForm({ mode, orderId }: Props) {
 
   // Voucher / discount-code applied to the gross total
   const discountAmount = appliedDiscount ? Math.min(appliedDiscount.amount, orderTotal) : 0
-  const netTotal = Math.max(0, orderTotal - discountAmount)
+  // Wallet credit applied on top of the voucher. We cap the wallet
+  // application to (a) what the customer actually has + whatever was
+  // already debited on this order in edit mode — so editing a saved order
+  // doesn't artificially shrink the cap — and (b) what's still owed after
+  // the voucher is taken off, so the customer is never charged below 0.
+  const afterVoucher = Math.max(0, orderTotal - discountAmount)
+  const walletAvailable = Math.max(0, (customerWalletBalance ?? 0) + previousWalletUsed)
+  const walletUsedRaw = Number(walletUsedInput) || 0
+  const walletUsed = Math.max(0, Math.min(walletUsedRaw, walletAvailable, afterVoucher))
+  const netTotal = Math.max(0, afterVoucher - walletUsed)
+  const walletBalanceAfter = Math.max(0, walletAvailable - walletUsed)
 
   const handleApplyDiscount = async () => {
     const code = discountCodeInput.trim().toUpperCase()
@@ -687,6 +722,9 @@ export default function OrderForm({ mode, orderId }: Props) {
       if (!data.customer) {
         setAddresses([])
         setCustomerStatus(null)
+        setLoadedCustomerId(null)
+        setCustomerWalletBalance(null)
+        setWalletUsedInput('')
         setForm((prev) => ({
           ...prev,
           customerName: '',
@@ -709,6 +747,14 @@ export default function OrderForm({ mode, orderId }: Props) {
         status: lookedUpStatus,
         reason: data.customer?.statusReason || null,
       })
+
+      // Capture wallet credit so the form can offer it as a discount.
+      setLoadedCustomerId(String(data.customer.id))
+      setCustomerWalletBalance(Number(data.customer.wallet) || 0)
+      // New lookup — reset any wallet-usage carried over from a previous
+      // search on the same form session.
+      setPreviousWalletUsed(0)
+      setWalletUsedInput('')
 
       setForm((prev) => ({
         ...prev,
@@ -940,6 +986,7 @@ export default function OrderForm({ mode, orderId }: Props) {
         deliverySubArea: form.deliverySubArea || '',
         items: validItems,
         discountCode: appliedDiscount?.code || null,
+        walletUsed,
         createdBy: user?.name || user?.id || 'unknown',
         role: user?.role || '',
       }
@@ -1062,6 +1109,43 @@ export default function OrderForm({ mode, orderId }: Props) {
                 <div className={`text-sm mt-1 ${customerStatus.status === 'suspended' ? 'text-red-700' : 'text-amber-700'}`}>
                   السبب: {customerStatus.reason}
                 </div>
+              )}
+            </div>
+          )}
+
+          {/* Wallet credit badge — surfaced after a successful customer lookup
+              so the agent immediately sees how much credit is available and
+              can offer to apply it as a discount on the current order. */}
+          {loadedCustomerId !== null && customerWalletBalance !== null && (
+            <div
+              className={
+                walletAvailable > 0
+                  ? 'md:col-span-2 border-2 border-emerald-300 bg-emerald-50 rounded-lg p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2'
+                  : 'md:col-span-2 border border-gray-200 bg-gray-50 rounded-lg p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2'
+              }
+              dir="rtl"
+            >
+              <div className={walletAvailable > 0 ? 'text-emerald-900' : 'text-gray-700'}>
+                <span className="font-bold">💳 رصيد المحفظة:</span>{' '}
+                <span className="font-semibold">{walletAvailable.toLocaleString()} ج.م</span>
+                {previousWalletUsed > 0 && (
+                  <span className="text-xs text-gray-600 mr-2">
+                    (يشمل {previousWalletUsed.toLocaleString()} ج.م مستخدم في هذا الطلب)
+                  </span>
+                )}
+              </div>
+              {walletAvailable > 0 && walletUsed === 0 && afterVoucher > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const apply = Math.min(walletAvailable, afterVoucher)
+                    setDirtyFlag(true)
+                    setWalletUsedInput(String(apply))
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold"
+                >
+                  تطبيق على الطلب
+                </button>
               )}
             </div>
           )}
@@ -1330,7 +1414,13 @@ export default function OrderForm({ mode, orderId }: Props) {
           <SummaryCard label="الإجمالي الفرعي" value={`${subtotal.toLocaleString()} ج.م`} />
           <SummaryCard label="رسوم التوصيل" value={`${deliveryFee.toLocaleString()} ج.م`} />
           <SummaryCard
-            label={discountAmount > 0 ? 'الإجمالي بعد الخصم' : 'الإجمالي الكلي'}
+            label={
+              walletUsed > 0
+                ? 'الإجمالي بعد الخصم والرصيد'
+                : discountAmount > 0
+                  ? 'الإجمالي بعد الخصم'
+                  : 'الإجمالي الكلي'
+            }
             value={`${netTotal.toLocaleString()} ج.م`}
             highlight
           />
@@ -1382,6 +1472,73 @@ export default function OrderForm({ mode, orderId }: Props) {
               ? '✅ تم تطبيق التوصيل المجاني لأن الطلب وصل الحد الأدنى.'
               : `التوصيل مجاني عند ${freeDeliveryValue.toLocaleString()} ج.م`}
           </p>
+        )}
+
+        {/* Wallet credit applier — only shown if the looked-up customer has
+            a wallet balance to spend. Wallet is applied on top of any
+            voucher and capped to the remaining-owed amount. */}
+        {loadedCustomerId !== null && customerWalletBalance !== null && walletAvailable > 0 && (
+          <div className="mt-3 rounded-lg border-2 border-emerald-200 bg-emerald-50 p-3">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
+              <div className="text-sm font-semibold text-emerald-900">
+                💳 خصم من رصيد المحفظة
+              </div>
+              <div className="text-xs text-emerald-800">
+                المتاح: <span className="font-bold">{walletAvailable.toLocaleString()} ج.م</span>
+              </div>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="number"
+                min={0}
+                max={Math.min(walletAvailable, afterVoucher)}
+                step="1"
+                value={walletUsedInput}
+                onChange={(e) => {
+                  setDirtyFlag(true)
+                  setWalletUsedInput(e.target.value)
+                }}
+                placeholder="المبلغ المستخدم من الرصيد"
+                className="flex-1 px-3 py-2 border border-emerald-300 rounded-lg text-left bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                dir="ltr"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const apply = Math.min(walletAvailable, afterVoucher)
+                  setDirtyFlag(true)
+                  setWalletUsedInput(String(apply))
+                }}
+                className="w-full sm:w-auto px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold min-h-[40px]"
+              >
+                تطبيق الحد الأقصى
+              </button>
+              {walletUsedInput && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDirtyFlag(true)
+                    setWalletUsedInput('')
+                  }}
+                  className="w-full sm:w-auto px-3 py-2 rounded-lg bg-red-100 text-red-700 hover:bg-red-200 text-sm font-semibold min-h-[40px]"
+                >
+                  ✖ إزالة
+                </button>
+              )}
+            </div>
+            {walletUsed > 0 && (
+              <div className="mt-2 text-xs text-emerald-800">
+                ✅ سيتم خصم <span className="font-bold">{walletUsed.toLocaleString()} ج.م</span> من رصيد العميل،
+                الرصيد بعد الحفظ: <span className="font-bold">{walletBalanceAfter.toLocaleString()} ج.م</span>
+              </div>
+            )}
+            {walletUsedRaw > walletUsed && (
+              <div className="mt-2 text-xs text-red-700">
+                ⚠️ تم تقليص المبلغ إلى {walletUsed.toLocaleString()} ج.م
+                ({walletUsedRaw > walletAvailable ? 'تجاوز الرصيد المتاح' : 'تجاوز المبلغ المطلوب'})
+              </div>
+            )}
+          </div>
         )}
       </details>
 

@@ -328,7 +328,24 @@ export async function POST(request: NextRequest) {
         discountAmount = Math.min(Number(evald.discount) || 0, orderTotal)
       }
     }
-    const netTotal = Math.max(0, orderTotal - discountAmount)
+    const afterVoucher = Math.max(0, orderTotal - discountAmount)
+
+    // Wallet-credit re-validation: cap to (a) the customer's available
+    // wallet and (b) the amount still owed after the voucher, so we never
+    // produce a negative net total or debit more than the customer has.
+    // The customer's wallet is debited below, only after the order row is
+    // successfully inserted.
+    let walletUsed = 0
+    if (Number(body.walletUsed) > 0) {
+      const { data: walletRow } = await supabase
+        .from('customers')
+        .select('id, wallet')
+        .eq('id', customerId)
+        .maybeSingle()
+      const available = Math.max(0, Number(walletRow?.wallet) || 0)
+      walletUsed = Math.max(0, Math.min(Number(body.walletUsed), available, afterVoucher))
+    }
+    const netTotal = Math.max(0, afterVoucher - walletUsed)
 
     // Get existing orders for that same date+type only (cheap & accurate)
     const dateKey = (() => {
@@ -383,6 +400,7 @@ export async function POST(request: NextRequest) {
       discountCode,
       discountAmount,
       netTotal,
+      walletUsed,
       csAttachments: Array.isArray(body.csAttachments) ? body.csAttachments : [],
       createdBy: body.createdBy || 'unknown',
       createdAt: now,
@@ -466,6 +484,19 @@ export async function POST(request: NextRequest) {
       csAttachmentsStripped = Array.isArray((order as any).csAttachments) && (order as any).csAttachments.length > 0
     }
 
+    // Fallback: DB may not yet have the walletUsed column. We can still
+    // persist the order — wallet just won't be debited (and the operator
+    // gets a warning so they know to run the migration).
+    let walletUsedStripped = false
+    if (finalError && errorMentions(finalError, 'walletUsed')) {
+      console.warn('[orders POST] walletUsed column missing in DB, retrying without it')
+      const { walletUsed: _wu, ...orderSafe } = order as any
+      const retry = await supabase.from('orders').insert([orderSafe]).select().single()
+      finalOrder = retry.data
+      finalError = retry.error
+      walletUsedStripped = walletUsed > 0
+    }
+
     if (finalError || !finalOrder) {
       console.error('Error inserting order:', finalError)
       return NextResponse.json(
@@ -516,6 +547,27 @@ export async function POST(request: NextRequest) {
       console.error('Error inserting delivery:', deliveryError)
     }
 
+    // Debit the customer's wallet by the amount actually applied. Only
+    // touch the column when (a) we actually used some credit and (b) the
+    // walletUsed column made it onto the row — otherwise we'd hand the
+    // customer credit for an order that was never debited.
+    if (walletUsed > 0 && !walletUsedStripped) {
+      const { data: walletRow } = await supabase
+        .from('customers')
+        .select('wallet')
+        .eq('id', customerId)
+        .maybeSingle()
+      const current = Math.max(0, Number(walletRow?.wallet) || 0)
+      const next = Math.max(0, current - walletUsed)
+      const { error: walletErr } = await supabase
+        .from('customers')
+        .update({ wallet: next, updatedAt: now })
+        .eq('id', customerId)
+      if (walletErr) {
+        console.error('[orders POST] failed to debit customer wallet:', walletErr)
+      }
+    }
+
     // Log edit history
     await appendEditHistory({
       entityType: 'order',
@@ -559,9 +611,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         order: enrichedOrder,
-        warning: csAttachmentsStripped
-          ? 'تم حفظ الطلب بدون مرفقات خدمة العملاء — العمود csAttachments غير موجود في قاعدة البيانات. شغّل data/cs-attachments-migration.sql'
-          : null,
+        warning: walletUsedStripped
+          ? 'تم حفظ الطلب لكن لم يُخصم الرصيد — العمود walletUsed غير موجود في قاعدة البيانات. شغّل data/wallet-used-migration.sql'
+          : csAttachmentsStripped
+            ? 'تم حفظ الطلب بدون مرفقات خدمة العملاء — العمود csAttachments غير موجود في قاعدة البيانات. شغّل data/cs-attachments-migration.sql'
+            : null,
       },
       { status: 201 },
     )
