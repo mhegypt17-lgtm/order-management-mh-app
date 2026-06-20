@@ -3,6 +3,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 
+interface ShiftAssignment {
+  agentName: string
+  startTime: string
+  endTime: string
+  notes?: string
+}
+
 interface Shift {
   id: string
   name: string
@@ -10,6 +17,7 @@ interface Shift {
   endTime: string
   daysOfWeek: number[]
   agents: string[]
+  assignments?: ShiftAssignment[]
   active: boolean
   createdAt: string
   updatedAt: string
@@ -31,6 +39,7 @@ function emptyForm() {
     endTime: '17:00',
     daysOfWeek: [0, 1, 2, 3, 4, 6] as number[], // Sun-Thu + Sat (Egypt-ish)
     agents: [] as string[],
+    assignments: [] as ShiftAssignment[],
     active: true,
   }
 }
@@ -74,12 +83,26 @@ export default function ShiftPlannerView() {
 
   const startEdit = (s: Shift) => {
     setEditingId(s.id)
+    const existing: ShiftAssignment[] = (s.assignments && s.assignments.length > 0)
+      ? s.assignments.map((a) => ({
+          agentName: a.agentName,
+          startTime: a.startTime,
+          endTime: a.endTime,
+          notes: a.notes || '',
+        }))
+      : s.agents.map((name) => ({
+          agentName: name,
+          startTime: s.startTime,
+          endTime: s.endTime,
+          notes: '',
+        }))
     setForm({
       name: s.name,
       startTime: s.startTime,
       endTime: s.endTime,
       daysOfWeek: [...s.daysOfWeek],
       agents: [...s.agents],
+      assignments: existing,
       active: s.active,
     })
     setAgentInput('')
@@ -97,18 +120,45 @@ export default function ShiftPlannerView() {
   const addAgent = (name: string) => {
     const v = name.trim()
     if (!v) return
-    setForm((prev) => prev.agents.includes(v) ? prev : { ...prev, agents: [...prev.agents, v] })
+    setForm((prev) => {
+      if (prev.assignments.some((a) => a.agentName === v)) return prev
+      const newAssignment: ShiftAssignment = {
+        agentName: v,
+        startTime: prev.startTime,
+        endTime: prev.endTime,
+        notes: '',
+      }
+      return {
+        ...prev,
+        agents: prev.agents.includes(v) ? prev.agents : [...prev.agents, v],
+        assignments: [...prev.assignments, newAssignment],
+      }
+    })
     setAgentInput('')
   }
 
-  const removeAgent = (name: string) => {
-    setForm((prev) => ({ ...prev, agents: prev.agents.filter((a) => a !== name) }))
+  const updateAssignment = (idx: number, patch: Partial<ShiftAssignment>) => {
+    setForm((prev) => {
+      const next = prev.assignments.map((a, i) => (i === idx ? { ...a, ...patch } : a))
+      const agents = Array.from(new Set(next.map((a) => a.agentName).filter(Boolean)))
+      return { ...prev, assignments: next, agents }
+    })
+  }
+
+  const removeAssignment = (idx: number) => {
+    setForm((prev) => {
+      const next = prev.assignments.filter((_, i) => i !== idx)
+      const agents = Array.from(new Set(next.map((a) => a.agentName).filter(Boolean)))
+      return { ...prev, assignments: next, agents }
+    })
   }
 
   const saveShift = async () => {
     if (!form.name.trim()) return toast.error('اسم الوردية مطلوب')
     if (form.daysOfWeek.length === 0) return toast.error('اختر يوماً واحداً على الأقل')
-    if (form.agents.length === 0) return toast.error('أضف وكيلاً واحداً على الأقل')
+    if (form.assignments.length === 0) return toast.error('أضف وكيلاً واحداً على الأقل')
+    const incomplete = form.assignments.find((a) => !a.agentName.trim() || !a.startTime || !a.endTime)
+    if (incomplete) return toast.error('أكمل اسم الوكيل وتوقيته في كل الصفوف')
     setSaving(true)
     try {
       const method = editingId ? 'PUT' : 'POST'
@@ -121,6 +171,8 @@ export default function ShiftPlannerView() {
         const j = await res.json().catch(() => ({}))
         throw new Error(j?.error || 'failed')
       }
+      const j = await res.json().catch(() => ({}))
+      if (j?.warning) toast(j.warning, { icon: '⚠️', duration: 6000 })
       toast.success(editingId ? 'تم تحديث الوردية' : 'تمت إضافة الوردية')
       resetForm()
       fetchAll()
@@ -315,21 +367,84 @@ export default function ShiftPlannerView() {
         </div>
 
         <div className="mb-4">
-          <label className="block text-xs font-bold text-gray-700 mb-2">الوكلاء على الوردية</label>
-          <div className="flex flex-wrap gap-2 mb-2">
-            {form.agents.map((a) => (
-              <span key={a} className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-blue-100 text-blue-800 text-xs font-bold border border-blue-300">
-                {a}
-                <button type="button" onClick={() => removeAgent(a)} className="text-blue-600 hover:text-red-600 font-bold">×</button>
-              </span>
-            ))}
-            {form.agents.length === 0 && (
-              <span className="text-xs text-gray-400">لم يتم إضافة وكلاء بعد</span>
+          <label className="block text-xs font-bold text-gray-700 mb-2">
+            الوكلاء على الوردية — لكل وكيل توقيت وملاحظات خاصة
+          </label>
+
+          {/* Per-agent rows */}
+          <div className="space-y-2 mb-3">
+            {form.assignments.length === 0 && (
+              <p className="text-xs text-gray-400 px-2 py-3 bg-gray-50 rounded-lg text-center">
+                لم يتم إضافة وكلاء بعد — استخدم الأزرار أدناه أو اكتب اسماً جديداً.
+              </p>
             )}
+            {form.assignments.map((asg, idx) => (
+              <div
+                key={idx}
+                className="grid grid-cols-12 gap-2 items-start bg-gray-50 border border-gray-200 rounded-lg p-2"
+              >
+                <div className="col-span-12 md:col-span-3">
+                  <label className="block text-[10px] text-gray-500 mb-1">الوكيل</label>
+                  <input
+                    type="text"
+                    value={asg.agentName}
+                    onChange={(e) => updateAssignment(idx, { agentName: e.target.value })}
+                    list="agent-suggestions"
+                    placeholder="اسم الوكيل"
+                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm font-bold"
+                  />
+                </div>
+                <div className="col-span-6 md:col-span-2">
+                  <label className="block text-[10px] text-gray-500 mb-1">من</label>
+                  <input
+                    type="time"
+                    value={asg.startTime}
+                    onChange={(e) => updateAssignment(idx, { startTime: e.target.value })}
+                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                  />
+                </div>
+                <div className="col-span-6 md:col-span-2">
+                  <label className="block text-[10px] text-gray-500 mb-1">إلى</label>
+                  <input
+                    type="time"
+                    value={asg.endTime}
+                    onChange={(e) => updateAssignment(idx, { endTime: e.target.value })}
+                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                  />
+                </div>
+                <div className="col-span-10 md:col-span-4">
+                  <label className="block text-[10px] text-gray-500 mb-1">ملاحظات</label>
+                  <input
+                    type="text"
+                    value={asg.notes || ''}
+                    onChange={(e) => updateAssignment(idx, { notes: e.target.value })}
+                    placeholder="مثال: فيس بوك وتساب / متابعة"
+                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                  />
+                </div>
+                <div className="col-span-2 md:col-span-1 flex items-end justify-end h-full">
+                  <button
+                    type="button"
+                    onClick={() => removeAssignment(idx)}
+                    className="px-2 py-1.5 rounded text-xs font-bold bg-red-100 text-red-700 hover:bg-red-200"
+                    title="حذف هذا الصف"
+                  >
+                    🗑️
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
+
+          {/* Datalist for autocomplete inside the agent rows */}
+          <datalist id="agent-suggestions">
+            {SUGGESTED_AGENTS.map((a) => <option key={a} value={a} />)}
+          </datalist>
+
+          {/* Quick-add suggestions */}
           <div className="flex flex-wrap gap-2 mb-2">
-            <span className="text-[11px] text-gray-500 self-center">اقتراحات:</span>
-            {SUGGESTED_AGENTS.filter((a) => !form.agents.includes(a)).map((a) => (
+            <span className="text-[11px] text-gray-500 self-center">إضافة سريعة:</span>
+            {SUGGESTED_AGENTS.filter((a) => !form.assignments.some((x) => x.agentName === a)).map((a) => (
               <button
                 key={a}
                 type="button"
@@ -340,6 +455,8 @@ export default function ShiftPlannerView() {
               </button>
             ))}
           </div>
+
+          {/* Free-text add */}
           <div className="flex gap-2">
             <input
               type="text"
@@ -428,7 +545,16 @@ export default function ShiftPlannerView() {
                   holiday
                     ? `🎉 ${holiday.label}`
                     : dayShifts.length > 0
-                    ? dayShifts.map((s) => `${s.name} (${s.startTime}-${s.endTime}): ${s.agents.join('، ')}`).join('\n')
+                    ? dayShifts
+                        .map((s) => {
+                          const lines = (s.assignments && s.assignments.length > 0)
+                            ? s.assignments.map((a) =>
+                                `  • ${a.agentName} (${a.startTime}–${a.endTime})${a.notes ? ' — ' + a.notes : ''}`
+                              ).join('\n')
+                            : `  • ${s.agents.join('، ')}`
+                          return `${s.name} (${s.startTime}–${s.endTime}):\n${lines}`
+                        })
+                        .join('\n\n')
                     : ''
                 }
               >
@@ -497,11 +623,31 @@ export default function ShiftPlannerView() {
                     </span>
                   ))}
                 </div>
-                <div className="flex flex-wrap gap-1">
-                  {s.agents.map((a) => (
-                    <span key={a} className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-white text-blue-700 border border-blue-300">👤 {a}</span>
-                  ))}
-                </div>
+                {/* Per-agent assignments */}
+                {(s.assignments && s.assignments.length > 0) ? (
+                  <div className="space-y-1">
+                    {s.assignments.map((a, i) => (
+                      <div
+                        key={i}
+                        className="flex flex-wrap items-center gap-2 text-xs bg-white border border-blue-200 rounded-lg px-2 py-1.5"
+                      >
+                        <span className="font-bold text-blue-800">👤 {a.agentName}</span>
+                        <span className="text-gray-600">⏰ {a.startTime}–{a.endTime}</span>
+                        {a.notes && (
+                          <span className="text-gray-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
+                            📝 {a.notes}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-1">
+                    {s.agents.map((a) => (
+                      <span key={a} className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-white text-blue-700 border border-blue-300">👤 {a}</span>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>
