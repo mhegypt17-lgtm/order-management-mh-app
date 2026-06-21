@@ -229,6 +229,11 @@ export default function CRMView({ role }: CRMViewProps) {
   const [editAddrStreet, setEditAddrStreet] = useState('')
   const [editAddrMaps, setEditAddrMaps] = useState('')
 
+  // Inline customer-notes card (overview tab). Lets agents jot preferences
+  // (e.g. chicken weight, "do not call") without opening the full edit modal.
+  const [notesDraft, setNotesDraft] = useState('')
+  const [savingNotes, setSavingNotes] = useState(false)
+
   // Per-address modal (add or edit a single address row).
   const [addrModal, setAddrModal] = useState<{ mode: 'add' | 'edit'; addrId?: string } | null>(null)
   const [addrLabel, setAddrLabel] = useState('Home')
@@ -396,6 +401,30 @@ export default function CRMView({ role }: CRMViewProps) {
       toast.error('تعذر حفظ التعديلات')
     } finally {
       setSaving(false)
+    }
+  }
+
+  // Save just the notes from the inline overview card (no address round-trip).
+  const handleSaveNotes = async () => {
+    if (!profile) return
+    setSavingNotes(true)
+    try {
+      const res = await fetch(`/api/crm/customers/${profile.customer.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes: notesDraft.trim() }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(data?.error || 'تعذر حفظ الملاحظات')
+        return
+      }
+      toast.success('✅ تم حفظ الملاحظات')
+      setProfile((prev) => (prev ? { ...prev, customer: { ...prev.customer, notes: notesDraft.trim() } } : prev))
+    } catch {
+      toast.error('تعذر حفظ الملاحظات')
+    } finally {
+      setSavingNotes(false)
     }
   }
 
@@ -590,6 +619,7 @@ export default function CRMView({ role }: CRMViewProps) {
       }
       const data = await res.json()
       setProfile(data)
+      setNotesDraft(data?.customer?.notes || '')
     } catch (err: any) {
       console.error('loadProfile error:', err)
       toast.error(`خطأ في تحميل بيانات العميل${err?.message ? ': ' + err.message : ''}`)
@@ -836,6 +866,44 @@ export default function CRMView({ role }: CRMViewProps) {
             {/* ── Tab: Overview ──────────────────────────────────────────── */}
             {activeTab === 'overview' && (
               <div className="space-y-4">
+                {/* Customer notes — agent jots preferences (chicken weight,
+                    "do not call", etc.). Editable + clearable inline; persisted
+                    to the customers table for future reference. */}
+                <div className="bg-white rounded-xl shadow-sm border border-yellow-200 p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-sm font-bold text-gray-700">📝 ملاحظات العميل</h3>
+                    <span className="text-[11px] text-gray-400">
+                      مثال: وزن الفراخ المفضل، عدم الاتصال هاتفياً…
+                    </span>
+                  </div>
+                  <textarea
+                    value={notesDraft}
+                    onChange={(e) => setNotesDraft(e.target.value)}
+                    rows={3}
+                    dir="rtl"
+                    placeholder="اكتب ملاحظات حول تفضيلات العميل هنا…"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-300"
+                  />
+                  <div className="flex items-center justify-end gap-2 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => setNotesDraft('')}
+                      disabled={savingNotes || notesDraft.trim() === ''}
+                      className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 disabled:opacity-50"
+                    >
+                      🗑️ مسح
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveNotes}
+                      disabled={savingNotes || notesDraft === (profile.customer.notes || '')}
+                      className="text-xs font-semibold px-4 py-1.5 rounded-lg bg-yellow-500 hover:bg-yellow-600 text-white disabled:opacity-50"
+                    >
+                      {savingNotes ? 'جاري الحفظ…' : '💾 حفظ الملاحظات'}
+                    </button>
+                  </div>
+                </div>
+
                 {/* Addresses */}
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
                   <div className="flex items-center justify-between mb-3">
