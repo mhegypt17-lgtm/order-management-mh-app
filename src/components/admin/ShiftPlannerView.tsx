@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 
 interface ShiftAssignment {
@@ -57,6 +57,11 @@ export default function ShiftPlannerView() {
   const [holidayLabel, setHolidayLabel] = useState('')
   const [savingHoliday, setSavingHoliday] = useState(false)
 
+  // The form lives at the top of the page while the shift list (with the
+  // تعديل button) is below it. Without scrolling, pressing تعديل looks like
+  // nothing happened. Scroll the form into view when an edit starts.
+  const formRef = useRef<HTMLDivElement | null>(null)
+
   const fetchAll = async () => {
     setLoading(true)
     try {
@@ -83,6 +88,10 @@ export default function ShiftPlannerView() {
 
   const startEdit = (s: Shift) => {
     setEditingId(s.id)
+    // Defer to next paint so the form has the populated values before we scroll.
+    requestAnimationFrame(() => {
+      formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
     const existing: ShiftAssignment[] = (s.assignments && s.assignments.length > 0)
       ? s.assignments.map((a) => ({
           agentName: a.agentName,
@@ -307,7 +316,10 @@ export default function ShiftPlannerView() {
       </div>
 
       {/* SHIFT FORM */}
-      <div className="bg-white rounded-xl border-2 border-blue-200 p-5 shadow-sm">
+      <div
+        ref={formRef}
+        className={`bg-white rounded-xl border-2 p-5 shadow-sm scroll-mt-4 ${editingId ? 'border-blue-500 ring-2 ring-blue-200' : 'border-blue-200'}`}
+      >
         <h2 className="text-lg font-bold text-blue-900 mb-4">
           {editingId ? '✏️ تعديل وردية' : '➕ إضافة وردية جديدة'}
         </h2>
