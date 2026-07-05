@@ -14,7 +14,17 @@ import {
   readOrderDelivery,
   readOrders,
   readDeliveryZones,
+  readCustomersByIds,
+  readAddressesByIds,
+  readOrderItemsByOrderIds,
+  readOrderDeliveryByOrderIds,
+  readProductsByIds,
 } from '@/lib/omsData'
+
+// Short server-side cache — a burst of dashboard loaders in the same minute
+// share one DB read. Individual mutations (POST/PUT) don't need this route
+// to be fresh instantly; the client already refetches after edits.
+export const revalidate = 60
 
 function generateTextId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
@@ -110,9 +120,11 @@ async function enrichOrder(
   }
 }
 
-// Default to a 90-day rolling window unless caller specifies from/to/all.
-// This keeps the per-request payload bounded as the orders table grows.
-const DEFAULT_WINDOW_DAYS = 90
+// Default to a 35-day rolling window unless caller specifies from/to/all.
+// Covers the longest calendar month + a small buffer for month-boundary
+// dashboards. Was 90 days — dropped after profiling showed the dashboard
+// never displays orders that old (older ones require an explicit filter).
+const DEFAULT_WINDOW_DAYS = 35
 
 export async function GET(request: NextRequest) {
   try {
@@ -129,7 +141,7 @@ export async function GET(request: NextRequest) {
     if (!all) {
       if (from) query = query.gte('orderDate', from)
       else {
-        // Default rolling window — orderDate >= today − 90 days (UTC ok; granularity is days)
+        // Default rolling window — orderDate >= today − DEFAULT_WINDOW_DAYS
         const cutoff = new Date(Date.now() - DEFAULT_WINDOW_DAYS * 24 * 60 * 60 * 1000)
           .toISOString()
           .slice(0, 10)
@@ -146,16 +158,32 @@ export async function GET(request: NextRequest) {
 
     const orderList = (orders || []) as OrderRecord[]
 
-    // Hoist enrichment lookups OUT of the per-order loop. Previously
-    // enrichOrder ran 5 full-table reads PER ORDER (N×5 redundant reads).
-    // Load each lookup table once, index by id, then enrich in-memory.
-    const [customers, addresses, orderItems, orderDelivery, products] = await Promise.all([
-      readCustomers(),
-      readAddresses(),
-      readOrderItems(),
-      readOrderDelivery(),
-      readProducts(),
+    // Scoped enrichment — instead of reading five entire lookup tables and
+    // building indexes, fetch ONLY the rows referenced by the orders in this
+    // window. Products are further scoped by the product ids that actually
+    // appear in the fetched order_items. Result: same JSON shape, but egress
+    // is bounded by "orders in window" instead of "all history in the DB".
+    const customerIds = orderList
+      .map((o) => o.customerId)
+      .filter((v): v is string => Boolean(v))
+    const addressIds = orderList
+      .map((o) => o.deliveryAddressId)
+      .filter((v): v is string => Boolean(v))
+    const orderIds = orderList.map((o) => o.id)
+
+    const [customers, addresses, orderItems, orderDelivery] = await Promise.all([
+      readCustomersByIds(customerIds),
+      readAddressesByIds(addressIds),
+      readOrderItemsByOrderIds(orderIds),
+      readOrderDeliveryByOrderIds(orderIds),
     ])
+
+    // Products are only needed for the productIds actually referenced by the
+    // items above — a second, dependent fetch keeps the payload minimal.
+    const productIds = (orderItems as OrderItemRecord[])
+      .map((it) => it.productId)
+      .filter((v): v is string => Boolean(v))
+    const products = await readProductsByIds(productIds)
 
     const customersById = new Map<string, any>()
     for (const c of customers) customersById.set(c.id, c)
@@ -164,17 +192,17 @@ export async function GET(request: NextRequest) {
     for (const a of addresses) addressesById.set(a.id, a)
 
     const itemsByOrderId = new Map<string, OrderItemRecord[]>()
-    for (const it of orderItems) {
+    for (const it of orderItems as OrderItemRecord[]) {
       const arr = itemsByOrderId.get(it.orderId)
       if (arr) arr.push(it)
       else itemsByOrderId.set(it.orderId, [it])
     }
 
     const deliveryByOrderId = new Map<string, any>()
-    for (const d of orderDelivery) deliveryByOrderId.set(d.orderId, d)
+    for (const d of orderDelivery as any[]) deliveryByOrderId.set(d.orderId, d)
 
     const productsById = new Map<string, any>()
-    for (const p of products) productsById.set(p.id, p)
+    for (const p of products as any[]) productsById.set(p.id, p)
 
     const ctx = { customersById, addressesById, itemsByOrderId, deliveryByOrderId, productsById }
     const enriched = await Promise.all(orderList.map((o) => enrichOrder(o, ctx)))
