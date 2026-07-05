@@ -544,6 +544,60 @@ async function fetchAllRows<T = any>(
   return all
 }
 
+// ─── Scoped fetch helpers (egress optimization) ──────────────────────────────
+// Fetch only rows whose `column` value is in the given id list, chunked to
+// stay under Supabase's PostgREST `in()` URL length limit. Deduplicates ids
+// and skips the query entirely when the list is empty. Used by hot enrichment
+// paths (/api/orders GET, /api/branch/orders/[id] GET) to avoid reading the
+// entire lookup tables just to hydrate a small window of orders.
+async function fetchRowsIn<T = any>(
+  table: string,
+  column: string,
+  values: string[],
+): Promise<T[]> {
+  const uniq = Array.from(new Set(values.filter((v) => v != null && v !== '')))
+  if (uniq.length === 0) return []
+  // 200 ids per chunk keeps the encoded URL well under typical 8 KB limits.
+  const chunkSize = 200
+  const all: T[] = []
+  for (let i = 0; i < uniq.length; i += chunkSize) {
+    const chunk = uniq.slice(i, i + chunkSize)
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .in(column, chunk)
+    if (error) {
+      console.error(`Error reading ${table} by ${column}:`, error)
+      continue
+    }
+    if (data && data.length) all.push(...(data as T[]))
+  }
+  return all
+}
+
+// Named helpers alongside the existing full-table readers. The full-table
+// versions (readCustomers/readAddresses/readOrderItems/readOrderDelivery) are
+// still used by other API routes and MUST remain in place.
+export async function readCustomersByIds(ids: string[]): Promise<CustomerRecord[]> {
+  return fetchRowsIn<CustomerRecord>('customers', 'id', ids)
+}
+
+export async function readAddressesByIds(ids: string[]): Promise<CustomerAddressRecord[]> {
+  return fetchRowsIn<CustomerAddressRecord>('customer_addresses', 'id', ids)
+}
+
+export async function readOrderItemsByOrderIds(orderIds: string[]): Promise<OrderItemRecord[]> {
+  return fetchRowsIn<OrderItemRecord>('order_items', 'orderId', orderIds)
+}
+
+export async function readOrderDeliveryByOrderIds(orderIds: string[]): Promise<OrderDeliveryRecord[]> {
+  return fetchRowsIn<OrderDeliveryRecord>('order_delivery', 'orderId', orderIds)
+}
+
+export async function readProductsByIds(ids: string[]): Promise<any[]> {
+  return fetchRowsIn<any>('products', 'id', ids)
+}
+
 export async function readCustomers(): Promise<CustomerRecord[]> {
   return fetchAllRows<CustomerRecord>('customers')
 }
