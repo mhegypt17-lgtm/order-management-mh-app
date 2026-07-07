@@ -42,6 +42,26 @@ function lastSeenKey(userId: string) {
   return `notif:lastSeen:${userId}`
 }
 
+// Silent hours window (Phase 2D.2): between 22:00 and 08:00 Cairo local time
+// we suppress ALL audio (regular chime AND urgent alarm). Toasts still render
+// silently — the queue is preserved, only the sound is skipped. Users can
+// still see the badge count and toast history when they return.
+function isCairoSilentHours(): boolean {
+  try {
+    const hourStr = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Africa/Cairo',
+      hour: '2-digit',
+      hour12: false,
+    }).format(new Date())
+    const hour = parseInt(hourStr, 10)
+    if (!Number.isFinite(hour)) return false
+    // Silent window: 22:00 up to (but not including) 08:00.
+    return hour >= 22 || hour < 8
+  } catch {
+    return false
+  }
+}
+
 function formatRelative(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()
   const min = Math.floor(diff / 60000)
@@ -156,17 +176,20 @@ export default function NotificationBell({ user }: NotificationBellProps) {
           (n) => new Date(n.createdAt).getTime() > lastSeenRef.current
         )
         if (reallyNew.length > 0) {
+          // Phase 2D.2: silence audio during Cairo silent hours (22:00–08:00).
+          // Toasts still render so the user has full visual context on wake.
+          const silent = isCairoSilentHours()
           const urgent = reallyNew.find((n) => n.priority === 'urgent' || n.type === 'priority-order')
           if (urgent) {
-            playAlarm()
+            if (!silent) playAlarm()
             toast(`${urgent.title}\n${urgent.body}`, {
               duration: 8000,
               icon: '🚨',
               style: { textAlign: 'right', direction: 'rtl', background: '#fee2e2', color: '#7f1d1d', fontWeight: 'bold', border: '2px solid #dc2626' },
             })
           } else {
-            // Audio chime
-            playChime()
+            // Audio chime (skipped during silent hours)
+            if (!silent) playChime()
             // Toast for the most recent (avoid spamming)
             const top = reallyNew[0]
             toast(`${top.title}\n${top.body}`, {
