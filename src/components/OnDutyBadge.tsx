@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { useVisibilityPoll } from '@/hooks/useVisibilityPoll'
 
 interface Shift {
   id: string
@@ -26,46 +27,25 @@ export default function OnDutyBadge() {
   const [data, setData] = useState<CurrentResponse | null>(null)
   const [open, setOpen] = useState(false)
 
-  useEffect(() => {
-    let alive = true
-    const load = async () => {
-      try {
-        const res = await fetch('/api/shifts/current', { cache: 'no-store' })
-        if (!res.ok) return
-        const json = (await res.json()) as CurrentResponse
-        if (alive) setData(json)
-      } catch { /* silent */ }
-    }
-    load()
-
-    // Only poll while the tab is visible. Hidden tabs were burning egress
-    // every 60s for data nobody could see.
-    let id: ReturnType<typeof setInterval> | null = null
-    const startPoll = () => {
-      if (id != null) return
-      id = setInterval(() => {
-        if (document.visibilityState === 'visible') load()
-      }, POLL_MS)
-    }
-    const stopPoll = () => {
-      if (id == null) return
-      clearInterval(id)
-      id = null
-    }
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') { load(); startPoll() } else { stopPoll() }
-    }
-    if (typeof document !== 'undefined' && document.visibilityState === 'visible') startPoll()
-    document.addEventListener('visibilitychange', onVisibility)
-    window.addEventListener('focus', onVisibility)
-
-    return () => {
-      alive = false
-      stopPoll()
-      document.removeEventListener('visibilitychange', onVisibility)
-      window.removeEventListener('focus', onVisibility)
-    }
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch('/api/shifts/current', { cache: 'no-store' })
+      if (!res.ok) return
+      const json = (await res.json()) as CurrentResponse
+      setData(json)
+    } catch { /* silent */ }
   }, [])
+
+  // Initial fetch on mount; visibility-gated poll + focus refetch via hook.
+  // Phase 2D.3: unified with NotificationBell / ChatButton polling pattern.
+  // (True endpoint multiplex — combining /api/notifications and
+  // /api/shifts/current into one call — was evaluated but the remaining
+  // baseline traffic is low enough that the added complexity isn't worth it.)
+  useEffect(() => {
+    load()
+  }, [load])
+
+  useVisibilityPoll(load, POLL_MS)
 
   if (!data) return null
 
