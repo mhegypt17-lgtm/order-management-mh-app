@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import toast from 'react-hot-toast'
 import type { User } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
+import { useVisibilityPoll } from '@/hooks/useVisibilityPoll'
 
 interface ChatMessage {
   id: string
@@ -17,9 +18,11 @@ interface ChatButtonProps {
   user: User
 }
 
-// Polling fallback when Realtime is unavailable / disconnected. Set high
-// because Realtime should normally cover us; this is just a safety net.
-const FALLBACK_POLL_MS = 60_000
+// Phase 2D.1a: dropped the 60s fallback poll entirely. Realtime provides
+// live INSERTs (see subscribe below) and useVisibilityPoll(fetchMessages,
+// null) still catches us up when the tab regains focus, which is when the
+// user actually looks at the chat panel. This eliminates a per-user
+// background request every minute across every open tab.
 const MAX_MESSAGES = 200
 const lastSeenKey = (userId: string) => `chat:lastSeen:${userId}`
 
@@ -119,7 +122,10 @@ export default function ChatButton({ user }: ChatButtonProps) {
     }
   }, [mergeMessages])
 
-  // Initial fetch + Realtime subscription + visibility-aware fallback poll.
+  // Initial fetch + Realtime subscription. Visibility handling & focus
+  // refetch live in the useVisibilityPoll hook below (no periodic poll:
+  // Realtime is authoritative, and focus refetch handles the reconnect
+  // corner case).
   useEffect(() => {
     // 1) Initial load (last 200 messages).
     fetchMessages()
@@ -137,42 +143,15 @@ export default function ChatButton({ user }: ChatButtonProps) {
       )
       .subscribe()
 
-    // 3) Fallback poll — only when the tab is visible. When hidden we
-    //    rely entirely on Realtime (which keeps its websocket alive).
-    let intervalId: ReturnType<typeof setInterval> | null = null
-    const startPoll = () => {
-      if (intervalId != null) return
-      intervalId = setInterval(() => {
-        if (document.visibilityState === 'visible') fetchMessages()
-      }, FALLBACK_POLL_MS)
-    }
-    const stopPoll = () => {
-      if (intervalId == null) return
-      clearInterval(intervalId)
-      intervalId = null
-    }
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        // Tab regained focus — catch up immediately, then resume polling.
-        fetchMessages()
-        startPoll()
-      } else {
-        stopPoll()
-      }
-    }
-    if (typeof document !== 'undefined' && document.visibilityState === 'visible') startPoll()
-    document.addEventListener('visibilitychange', onVisibility)
-    window.addEventListener('focus', onVisibility)
-
     return () => {
-      stopPoll()
-      document.removeEventListener('visibilitychange', onVisibility)
-      window.removeEventListener('focus', onVisibility)
       supabase.removeChannel(channel)
     }
     // fetchMessages is stable thanks to refs; mergeMessages too.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Refetch when tab regains focus (no periodic poll — pass null).
+  useVisibilityPoll(fetchMessages, null)
 
   // Outside click to close
   useEffect(() => {

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
 import type { User } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
+import { useVisibilityPoll } from '@/hooks/useVisibilityPoll'
 
 interface NotificationItem {
   id: string
@@ -24,8 +25,10 @@ interface NotificationBellProps {
 // Fallback poll when Realtime is unavailable / tab regains focus.
 // Was 20s on every page — the single biggest egress source.
 // Realtime subscriptions to orders/tasks/etc. now provide near-instant
-// updates, so the poll is just a safety net.
-const FALLBACK_POLL_MS = 90_000
+// updates, so the poll is just a safety net. Bumped 90s → 180s in
+// Phase 2D.1a now that visibility gating + focus refetch are guaranteed
+// by useVisibilityPoll (background tabs make zero requests).
+const FALLBACK_POLL_MS = 180_000
 // Debounce window after a Realtime event — collapses bursts (e.g. when
 // CS rapidly updates multiple orders) into a single refetch. Bumped from
 // 2.5s → 5s (Phase 2B.1) so bigger bursts collapse into one API call.
@@ -181,12 +184,15 @@ export default function NotificationBell({ user }: NotificationBellProps) {
     }
   }, [user.role, user.name, playChime, playAlarm])
 
-  // Initial fetch + Realtime triggers + visibility-aware fallback poll.
+  // Initial fetch + Realtime triggers. Fallback polling & focus refetch
+  // are handled by useVisibilityPoll below — this effect only owns the
+  // one-shot initial fetch and the Supabase channel lifecycle.
+  //
   // Phase 2B.1 narrowing:
   //   • Kept orders/tasks/complaints with event:'*' — status updates,
   //     priority flips, and comment appends all drive live notifications.
-  //   • Dropped daily_briefings sub — briefings are rare and the 90s
-  //     fallback poll surfaces them fast enough.
+  //   • Dropped daily_briefings sub — briefings are rare and the fallback
+  //     poll surfaces them fast enough.
   //   • Dropped edit_history INSERT sub — every edit_history row is
   //     written as a side-effect of an orders/tasks/complaints change
   //     already covered above, so it was 100 % duplicate traffic.
@@ -210,38 +216,14 @@ export default function NotificationBell({ user }: NotificationBellProps) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'complaints' }, scheduleRefetch)
       .subscribe()
 
-    let intervalId: ReturnType<typeof setInterval> | null = null
-    const startPoll = () => {
-      if (intervalId != null) return
-      intervalId = setInterval(() => {
-        if (document.visibilityState === 'visible') fetchNotifications()
-      }, FALLBACK_POLL_MS)
-    }
-    const stopPoll = () => {
-      if (intervalId == null) return
-      clearInterval(intervalId)
-      intervalId = null
-    }
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        fetchNotifications()
-        startPoll()
-      } else {
-        stopPoll()
-      }
-    }
-    if (typeof document !== 'undefined' && document.visibilityState === 'visible') startPoll()
-    document.addEventListener('visibilitychange', onVisibility)
-    window.addEventListener('focus', onVisibility)
-
     return () => {
-      stopPoll()
       if (debounceTimer) clearTimeout(debounceTimer)
-      document.removeEventListener('visibilitychange', onVisibility)
-      window.removeEventListener('focus', onVisibility)
       supabase.removeChannel(channel)
     }
   }, [fetchNotifications])
+
+  // Visibility-gated fallback poll (180 s) + immediate refetch on tab focus.
+  useVisibilityPoll(fetchNotifications, FALLBACK_POLL_MS)
 
   // Close on outside click
   useEffect(() => {
