@@ -20,6 +20,7 @@ import {
   readOrderDeliveryByOrderIds,
   readProductsByIds,
   readOrdersWindow,
+  DELIVERY_COLUMNS_LIST,
 } from '@/lib/omsData'
 
 // Short server-side cache — a burst of dashboard loaders in the same minute
@@ -176,7 +177,12 @@ export async function GET(request: NextRequest) {
       readCustomersByIds(customerIds),
       readAddressesByIds(addressIds),
       readOrderItemsByOrderIds(orderIds),
-      readOrderDeliveryByOrderIds(orderIds),
+      // Phase 2E.1: dashboard list view never renders delivery photos, so we
+      // ask for the stripped column set (no base64 productPhotos /
+      // invoicePhoto). Single-order detail views — /api/orders/[id] and
+      // /api/branch/orders/[id] — still pull DELIVERY_COLUMNS_FULL because
+      // they DO render the photos.
+      readOrderDeliveryByOrderIds(orderIds, DELIVERY_COLUMNS_LIST),
     ])
 
     // Products are only needed for the productIds actually referenced by the
