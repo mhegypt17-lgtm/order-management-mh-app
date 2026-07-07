@@ -545,6 +545,57 @@ async function fetchAllRows<T = any>(
 }
 
 // ─── Scoped fetch helpers (egress optimization) ──────────────────────────────
+// Column allowlists — enumerate the fields client code actually consumes.
+// Explicit allowlists (vs SELECT *) protect against future DB additions
+// silently inflating the response and make it easy to strip heavy columns
+// (photos, base64 blobs) from list views. Sourced from the record interfaces
+// declared at the top of this file — keep them in sync when adding fields.
+export const ORDER_COLUMNS = [
+  'id', 'appOrderNo', 'orderDate', 'orderTime', 'orderType', 'orderReceiver',
+  'orderMethod', 'customerType', 'customerSource', 'orderStatus', 'cancellationReason',
+  'paymentMethod', 'customerId', 'deliveryAddressId', 'notes', 'followUp', 'followUpNotes',
+  'subtotal', 'deliveryFee', 'orderTotal', 'createdBy', 'createdAt', 'updatedAt',
+  'isScheduled', 'scheduledDate', 'scheduledTimeSlot', 'scheduledSpecificTime',
+  'isPriority', 'priorityReason',
+  'discountCode', 'discountAmount', 'netTotal', 'walletUsed',
+  'csAttachments',
+].join(',')
+
+export const CUSTOMER_COLUMNS = [
+  'id', 'phone', 'customerName', 'email', 'notes', 'wallet', 'createdAt', 'updatedAt',
+  'status', 'statusReason', 'statusUpdatedAt', 'statusUpdatedBy',
+  'doNotFollowUp', 'followUpSnoozeUntil',
+].join(',')
+
+export const ADDRESS_COLUMNS = [
+  'id', 'customerId', 'addressLabel', 'area', 'subArea',
+  'streetAddress', 'googleMapsLink', 'createdAt',
+].join(',')
+
+export const ORDER_ITEM_COLUMNS = [
+  'id', 'orderId', 'productId', 'quantity', 'weightGrams', 'unitPrice', 'lineTotal',
+  'specialInstructions', 'createdAt', 'originalQuantity', 'originalWeightGrams',
+].join(',')
+
+// Delivery columns — the "list" variant excludes the heavy productPhotos +
+// invoicePhoto base64 fields. Only single-order detail views should ask for
+// DELIVERY_COLUMNS_FULL. The stripped variant is used by dashboard list APIs.
+export const DELIVERY_COLUMNS_LIST = [
+  'id', 'orderId', 'deliveryStatus', 'branchComments', 'deliveredAt',
+  'updatedBy', 'updatedAt', 'acceptedAt', 'readyAt', 'outForDeliveryAt',
+].join(',')
+
+export const DELIVERY_COLUMNS_FULL = [
+  DELIVERY_COLUMNS_LIST,
+  'productPhotos', 'invoicePhoto',
+].join(',')
+
+// Products — minimal set consumed by order/item enrichment. Other product
+// routes still SELECT * (via the local readProducts() helper in their files).
+export const PRODUCT_COLUMNS = [
+  'id', 'productName', 'productCategory', 'pricingMode', 'basePrice', 'offerPrice',
+].join(',')
+
 // Fetch only rows whose `column` value is in the given id list, chunked to
 // stay under Supabase's PostgREST `in()` URL length limit. Deduplicates ids
 // and skips the query entirely when the list is empty. Used by hot enrichment
@@ -554,6 +605,7 @@ async function fetchRowsIn<T = any>(
   table: string,
   column: string,
   values: string[],
+  columns: string = '*',
 ): Promise<T[]> {
   const uniq = Array.from(new Set(values.filter((v) => v != null && v !== '')))
   if (uniq.length === 0) return []
@@ -564,7 +616,7 @@ async function fetchRowsIn<T = any>(
     const chunk = uniq.slice(i, i + chunkSize)
     const { data, error } = await supabase
       .from(table)
-      .select('*')
+      .select(columns)
       .in(column, chunk)
     if (error) {
       console.error(`Error reading ${table} by ${column}:`, error)
@@ -577,25 +629,92 @@ async function fetchRowsIn<T = any>(
 
 // Named helpers alongside the existing full-table readers. The full-table
 // versions (readCustomers/readAddresses/readOrderItems/readOrderDelivery) are
-// still used by other API routes and MUST remain in place.
-export async function readCustomersByIds(ids: string[]): Promise<CustomerRecord[]> {
-  return fetchRowsIn<CustomerRecord>('customers', 'id', ids)
+// still used by other API routes and MUST remain in place. Each scoped helper
+// now applies its column allowlist by default; callers that need every column
+// (rare — writes handled directly) can pass '*' explicitly.
+export async function readCustomersByIds(
+  ids: string[],
+  columns: string = CUSTOMER_COLUMNS,
+): Promise<CustomerRecord[]> {
+  return fetchRowsIn<CustomerRecord>('customers', 'id', ids, columns)
 }
 
-export async function readAddressesByIds(ids: string[]): Promise<CustomerAddressRecord[]> {
-  return fetchRowsIn<CustomerAddressRecord>('customer_addresses', 'id', ids)
+export async function readAddressesByIds(
+  ids: string[],
+  columns: string = ADDRESS_COLUMNS,
+): Promise<CustomerAddressRecord[]> {
+  return fetchRowsIn<CustomerAddressRecord>('customer_addresses', 'id', ids, columns)
 }
 
-export async function readOrderItemsByOrderIds(orderIds: string[]): Promise<OrderItemRecord[]> {
-  return fetchRowsIn<OrderItemRecord>('order_items', 'orderId', orderIds)
+export async function readOrderItemsByOrderIds(
+  orderIds: string[],
+  columns: string = ORDER_ITEM_COLUMNS,
+): Promise<OrderItemRecord[]> {
+  return fetchRowsIn<OrderItemRecord>('order_items', 'orderId', orderIds, columns)
 }
 
-export async function readOrderDeliveryByOrderIds(orderIds: string[]): Promise<OrderDeliveryRecord[]> {
-  return fetchRowsIn<OrderDeliveryRecord>('order_delivery', 'orderId', orderIds)
+export async function readOrderDeliveryByOrderIds(
+  orderIds: string[],
+  columns: string = DELIVERY_COLUMNS_FULL,
+): Promise<OrderDeliveryRecord[]> {
+  return fetchRowsIn<OrderDeliveryRecord>('order_delivery', 'orderId', orderIds, columns)
 }
 
-export async function readProductsByIds(ids: string[]): Promise<any[]> {
-  return fetchRowsIn<any>('products', 'id', ids)
+export async function readProductsByIds(
+  ids: string[],
+  columns: string = PRODUCT_COLUMNS,
+): Promise<any[]> {
+  return fetchRowsIn<any>('products', 'id', ids, columns)
+}
+
+// Windowed orders fetch — applies the column allowlist + optional date filter.
+// `fromDate` / `toDate` are YYYY-MM-DD strings compared against orders.orderDate.
+// When both are undefined and `all=false`, caller is expected to apply its own
+// window; this helper does no default windowing so it stays composable.
+//
+// Graceful fallback: if the DB is missing the optional `csAttachments` column
+// (deployments that haven't run cs-attachments-migration.sql), the initial
+// SELECT fails; we retry once with the column stripped so the endpoint
+// keeps working in older environments.
+export async function readOrdersWindow(opts: {
+  fromDate?: string
+  toDate?: string
+  columns?: string
+  limit?: number
+  offset?: number
+}): Promise<OrderRecord[]> {
+  const cols = opts.columns || ORDER_COLUMNS
+  const run = async (selectCols: string) => {
+    let q = supabase
+      .from('orders')
+      .select(selectCols)
+      .order('createdAt', { ascending: false })
+    if (opts.fromDate) q = q.gte('orderDate', opts.fromDate)
+    if (opts.toDate) q = q.lte('orderDate', opts.toDate)
+    if (typeof opts.limit === 'number' && opts.limit > 0) {
+      const start = Math.max(0, opts.offset || 0)
+      q = q.range(start, start + opts.limit - 1)
+    }
+    return q
+  }
+  const { data, error } = await run(cols)
+  if (!error) return (data || []) as unknown as OrderRecord[]
+
+  // Retry without csAttachments if that's the only missing column — matches
+  // the fallback pattern used by the orders POST/PUT handlers.
+  const msg = String(error.message || '')
+  if (/csAttachments|column .* does not exist/i.test(msg) && cols.includes('csAttachments')) {
+    const fallbackCols = cols
+      .split(',')
+      .filter((c) => c.trim() !== 'csAttachments')
+      .join(',')
+    const retry = await run(fallbackCols)
+    if (!retry.error) return (retry.data || []) as unknown as OrderRecord[]
+    console.error('Error reading orders window (retry):', retry.error)
+    return []
+  }
+  console.error('Error reading orders window:', error)
+  return []
 }
 
 export async function readCustomers(): Promise<CustomerRecord[]> {

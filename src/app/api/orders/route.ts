@@ -19,6 +19,7 @@ import {
   readOrderItemsByOrderIds,
   readOrderDeliveryByOrderIds,
   readProductsByIds,
+  readOrdersWindow,
 } from '@/lib/omsData'
 
 // Short server-side cache — a burst of dashboard loaders in the same minute
@@ -132,31 +133,31 @@ export async function GET(request: NextRequest) {
     const all = url.searchParams.get('all') === '1'
     const from = url.searchParams.get('from') // YYYY-MM-DD (orderDate)
     const to = url.searchParams.get('to') // YYYY-MM-DD (orderDate)
+    // Optional pagination — unset by default so existing callers see zero change.
+    const limitParam = url.searchParams.get('limit')
+    const offsetParam = url.searchParams.get('offset')
+    const limit = limitParam ? Math.max(1, parseInt(limitParam, 10) || 0) : undefined
+    const offset = offsetParam ? Math.max(0, parseInt(offsetParam, 10) || 0) : undefined
 
-    let query = supabase
-      .from('orders')
-      .select('*')
-      .order('createdAt', { ascending: false })
-
+    // Resolve the effective window. `all=1` skips filtering; otherwise apply
+    // the caller-provided from/to or fall back to a 35-day rolling window.
+    let effectiveFrom: string | undefined
+    const effectiveTo: string | undefined = to || undefined
     if (!all) {
-      if (from) query = query.gte('orderDate', from)
+      if (from) effectiveFrom = from
       else {
-        // Default rolling window — orderDate >= today − DEFAULT_WINDOW_DAYS
-        const cutoff = new Date(Date.now() - DEFAULT_WINDOW_DAYS * 24 * 60 * 60 * 1000)
+        effectiveFrom = new Date(Date.now() - DEFAULT_WINDOW_DAYS * 24 * 60 * 60 * 1000)
           .toISOString()
           .slice(0, 10)
-        query = query.gte('orderDate', cutoff)
       }
-      if (to) query = query.lte('orderDate', to)
     }
 
-    const { data: orders, error } = await query
-
-    if (error) {
-      return NextResponse.json({ error: 'Failed to fetch orders' }, { status: 500 })
-    }
-
-    const orderList = (orders || []) as OrderRecord[]
+    const orderList = await readOrdersWindow({
+      fromDate: effectiveFrom,
+      toDate: effectiveTo,
+      limit,
+      offset,
+    })
 
     // Scoped enrichment — instead of reading five entire lookup tables and
     // building indexes, fetch ONLY the rows referenced by the orders in this
@@ -207,7 +208,22 @@ export async function GET(request: NextRequest) {
     const ctx = { customersById, addressesById, itemsByOrderId, deliveryByOrderId, productsById }
     const enriched = await Promise.all(orderList.map((o) => enrichOrder(o, ctx)))
 
-    return NextResponse.json({ orders: enriched }, { status: 200 })
+    // Additive meta object — existing clients destructure `orders` only and
+    // ignore extra top-level fields. Useful for observability / pagination.
+    return NextResponse.json(
+      {
+        orders: enriched,
+        meta: {
+          count: enriched.length,
+          windowDays: all ? null : DEFAULT_WINDOW_DAYS,
+          from: effectiveFrom ?? null,
+          to: effectiveTo ?? null,
+          limit: limit ?? null,
+          offset: offset ?? null,
+        },
+      },
+      { status: 200 },
+    )
   } catch {
     return NextResponse.json({ error: 'Failed to fetch orders' }, { status: 500 })
   }
