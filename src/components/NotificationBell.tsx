@@ -42,6 +42,14 @@ function lastSeenKey(userId: string) {
   return `notif:lastSeen:${userId}`
 }
 
+// Per-user quiet mode (Phase 2D.5): when the user toggles the bell to
+// "quiet", all chimes and alarms are suppressed regardless of the time of
+// day. Toasts still render. Stored in localStorage so the preference
+// survives reloads / login.
+function quietModeKey(userId: string) {
+  return `notif:quietMode:${userId}`
+}
+
 // Silent hours window (Phase 2D.2): between 22:00 and 08:00 Cairo local time
 // we suppress ALL audio (regular chime AND urgent alarm). Toasts still render
 // silently — the queue is preserved, only the sound is skipped. Users can
@@ -82,6 +90,14 @@ export default function NotificationBell({ user }: NotificationBellProps) {
     const v = window.localStorage.getItem(lastSeenKey(user.id))
     return v ? parseInt(v, 10) : 0
   })
+  const [quietMode, setQuietMode] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    return window.localStorage.getItem(quietModeKey(user.id)) === '1'
+  })
+  // Latest quietMode read inside fetch callback via ref, so toggling
+  // doesn't invalidate the fetchNotifications closure.
+  const quietModeRef = useRef(quietMode)
+  useEffect(() => { quietModeRef.current = quietMode }, [quietMode])
   const knownIdsRef = useRef<Set<string>>(new Set())
   const initialLoadRef = useRef(true)
   const dropdownRef = useRef<HTMLDivElement | null>(null)
@@ -176,9 +192,9 @@ export default function NotificationBell({ user }: NotificationBellProps) {
           (n) => new Date(n.createdAt).getTime() > lastSeenRef.current
         )
         if (reallyNew.length > 0) {
-          // Phase 2D.2: silence audio during Cairo silent hours (22:00–08:00).
-          // Toasts still render so the user has full visual context on wake.
-          const silent = isCairoSilentHours()
+          // Audio is suppressed if EITHER (a) user has toggled quiet mode
+          // (Phase 2D.5) OR (b) we're inside Cairo silent hours (Phase 2D.2).
+          const silent = quietModeRef.current || isCairoSilentHours()
           const urgent = reallyNew.find((n) => n.priority === 'urgent' || n.type === 'priority-order')
           if (urgent) {
             if (!silent) playAlarm()
@@ -269,6 +285,14 @@ export default function NotificationBell({ user }: NotificationBellProps) {
     setLastSeen(now)
   }
 
+  const toggleQuietMode = () => {
+    setQuietMode((prev) => {
+      const next = !prev
+      window.localStorage.setItem(quietModeKey(user.id), next ? '1' : '0')
+      return next
+    })
+  }
+
   const handleItemClick = (item: NotificationItem) => {
     setOpen(false)
     // Mark read up to this item's timestamp at minimum
@@ -310,14 +334,23 @@ export default function NotificationBell({ user }: NotificationBellProps) {
         >
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 bg-gray-50">
             <span className="text-sm font-bold text-gray-800">🔔 الإشعارات</span>
-            {unreadCount > 0 && (
+            <div className="flex items-center gap-3">
               <button
-                onClick={markAllRead}
-                className="text-xs text-blue-600 hover:underline"
+                onClick={toggleQuietMode}
+                className={`text-xs hover:underline ${quietMode ? 'text-orange-600 font-semibold' : 'text-gray-500'}`}
+                title={quietMode ? 'تفعيل الأصوات' : 'إيقاف الأصوات لهذا المتصفح'}
               >
-                تعليم الكل كمقروء
+                {quietMode ? '🔕 صامت' : '🔔 فعّال'}
               </button>
-            )}
+              {unreadCount > 0 && (
+                <button
+                  onClick={markAllRead}
+                  className="text-xs text-blue-600 hover:underline"
+                >
+                  تعليم الكل كمقروء
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="max-h-96 overflow-y-auto">
