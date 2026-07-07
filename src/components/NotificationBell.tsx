@@ -27,8 +27,13 @@ interface NotificationBellProps {
 // updates, so the poll is just a safety net.
 const FALLBACK_POLL_MS = 90_000
 // Debounce window after a Realtime event — collapses bursts (e.g. when
-// CS rapidly updates multiple orders) into a single refetch.
-const REALTIME_DEBOUNCE_MS = 2_500
+// CS rapidly updates multiple orders) into a single refetch. Bumped from
+// 2.5s → 5s (Phase 2B.1) so bigger bursts collapse into one API call.
+const REALTIME_DEBOUNCE_MS = 5_000
+// Cap the badge count display to keep the DOM cheap when the queue is
+// deep. Was 99+ — dropped to 20+ so re-renders stay lightweight and the
+// user isn't overwhelmed by a huge red pill.
+const BADGE_CAP = 20
 
 function lastSeenKey(userId: string) {
   return `notif:lastSeen:${userId}`
@@ -177,9 +182,17 @@ export default function NotificationBell({ user }: NotificationBellProps) {
   }, [user.role, user.name, playChime, playAlarm])
 
   // Initial fetch + Realtime triggers + visibility-aware fallback poll.
-  // The five subscribed tables cover every notification source. When any
-  // of them changes we debounce a single refetch — so a CS agent updating
-  // 10 orders in 30 seconds triggers ~1 refetch instead of 90 polls.
+  // Phase 2B.1 narrowing:
+  //   • Kept orders/tasks/complaints with event:'*' — status updates,
+  //     priority flips, and comment appends all drive live notifications.
+  //   • Dropped daily_briefings sub — briefings are rare and the 90s
+  //     fallback poll surfaces them fast enough.
+  //   • Dropped edit_history INSERT sub — every edit_history row is
+  //     written as a side-effect of an orders/tasks/complaints change
+  //     already covered above, so it was 100 % duplicate traffic.
+  // When any subscribed table changes we debounce a single refetch — so a
+  // CS agent updating 10 orders in 30 seconds triggers ~1 refetch instead
+  // of 90 polls.
   useEffect(() => {
     fetchNotifications()
 
@@ -195,8 +208,6 @@ export default function NotificationBell({ user }: NotificationBellProps) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, scheduleRefetch)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, scheduleRefetch)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'complaints' }, scheduleRefetch)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'daily_briefings' }, scheduleRefetch)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'edit_history' }, scheduleRefetch)
       .subscribe()
 
     let intervalId: ReturnType<typeof setInterval> | null = null
@@ -282,7 +293,7 @@ export default function NotificationBell({ user }: NotificationBellProps) {
         <span className="text-xl">🔔</span>
         {unreadCount > 0 && (
           <span className="absolute -top-0.5 -right-0.5 bg-red-600 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center border-2 border-white">
-            {unreadCount > 99 ? '99+' : unreadCount}
+            {unreadCount > BADGE_CAP ? `${BADGE_CAP}+` : unreadCount}
           </span>
         )}
       </button>
