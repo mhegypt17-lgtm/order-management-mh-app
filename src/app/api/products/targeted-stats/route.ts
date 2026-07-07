@@ -1,18 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
-  readProducts,
-  readOrders,
-  readOrderItems,
-  readOrderDelivery,
   readOrderSettings,
+  fetchRowsIn,
 } from '@/lib/omsData'
+import { supabase } from '@/lib/supabase'
 import { cairoFirstDayOfMonth, cairoLastDayOfMonth, cairoYMD } from '@/lib/cairoTime'
 
-export const dynamic = 'force-dynamic'
-export const revalidate = 0
+// This aggregate changes slowly (once per order edit, which is minutes apart)
+// so a 5-minute cache is safe and dramatically reduces DB reads when multiple
+// dashboards refresh in the same window.
+export const revalidate = 300
 
 // Aggregates units sold of targeted products in the CURRENT calendar month.
-// Successful orders only (orderStatus === 'تم').
+// Successful orders only (orderStatus === 'تم' OR branch delivered).
 // Query params:
 //   ?scope=cs|admin (default admin)
 //   ?agent=<name>   (CS view: filter to one agent)
@@ -26,10 +26,18 @@ export const revalidate = 0
 //   perAgent: [{ agent, units }],    // admin only
 //   myUnits: number                  // only when ?agent= passed
 // }
+//
+// Egress note (Phase 2C.2): previously read FOUR entire tables (all products,
+// all orders, all items, all deliveries) then filtered in JS. New flow uses
+// scoped fetches keyed off (targeted product ids) + (current-month order ids)
+// so egress is bounded by the current month + targeted-product count rather
+// than by lifetime history.
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
-    const scope = (searchParams.get('scope') || 'admin').toLowerCase()
+    // scope param kept for backwards-compat with callers even though we no
+    // longer branch on it — agent scoping is driven by ?agent alone.
+    void (searchParams.get('scope') || 'admin').toLowerCase()
     const agent = (searchParams.get('agent') || '').trim()
 
     const { year, month } = cairoYMD()
@@ -37,48 +45,68 @@ export async function GET(req: NextRequest) {
     const lastDay = cairoLastDayOfMonth()
     const monthLabel = `${String(month).padStart(2, '0')}/${year}`
 
-    const [products, orders, items, deliveries, settings] = await Promise.all([
-      readProducts(),
-      readOrders(),
-      readOrderItems(),
-      readOrderDelivery(),
+    // 1) Targeted products, month orders, settings — parallel.
+    const [targetedRes, monthOrdersRes, settings] = await Promise.all([
+      supabase.from('products').select('id,productName').eq('isTargeted', true),
+      supabase
+        .from('orders')
+        .select('id,orderDate,orderStatus,orderReceiver,createdBy')
+        .gte('orderDate', firstDay)
+        .lte('orderDate', lastDay),
       readOrderSettings(),
     ])
 
     const monthlyGoal = Math.max(0, Number((settings as any)?.monthlyTargetedUnitsGoal) || 0)
-
-    const targeted = products.filter((p: any) => Boolean(p.isTargeted))
+    const targeted = ((targetedRes.data as unknown as { id: string; productName: string }[]) || [])
     const targetedIds = new Set(targeted.map((p) => p.id))
 
-    if (targetedIds.size === 0) {
-      return NextResponse.json({
+    const emptyResponse = (productCount: number) =>
+      NextResponse.json({
         monthLabel,
         totalUnits: 0,
-        productCount: 0,
-        targetedProducts: [],
+        productCount,
+        targetedProducts: targeted.map((p) => ({ id: p.id, productName: p.productName })),
         perAgent: [],
         myUnits: 0,
         monthlyGoal,
         achievementPct: 0,
       })
-    }
 
-    // Build delivered set: orderId -> true when branch marked as 'تم التوصيل'.
+    if (targetedIds.size === 0) return emptyResponse(0)
+
+    const monthOrders = (monthOrdersRes.data as any[]) || []
+    if (monthOrders.length === 0) return emptyResponse(targeted.length)
+    const monthOrderIds = monthOrders.map((o) => o.id)
+
+    // 2) Deliveries for month orders + items for targeted products — parallel.
+    //    fetchRowsIn chunks the ID list to stay under the URL length limit.
+    const [deliveryRows, targetedItems] = await Promise.all([
+      fetchRowsIn<{ orderId: string; deliveryStatus: string }>(
+        'order_delivery',
+        'orderId',
+        monthOrderIds,
+        'orderId,deliveryStatus',
+      ),
+      fetchRowsIn<{ orderId: string; productId: string; quantity: number }>(
+        'order_items',
+        'productId',
+        Array.from(targetedIds),
+        'orderId,productId,quantity',
+      ),
+    ])
+
     const deliveredOrderIds = new Set<string>()
-    for (const d of deliveries) {
+    for (const d of deliveryRows) {
       if (d.deliveryStatus === 'تم التوصيل') deliveredOrderIds.add(d.orderId)
     }
 
-    // An order COUNTS if:
-    //   - it is in the current calendar month, AND
-    //   - orderStatus === 'تم'  OR  branch marked it 'تم التوصيل'.
-    const monthOrders = orders.filter((o: any) => {
-      const d = String(o.orderDate || '').slice(0, 10)
-      if (!(d >= firstDay && d <= lastDay)) return false
-      return o.orderStatus === 'تم' || deliveredOrderIds.has(o.id)
-    })
-    const orderById = new Map<string, any>()
-    for (const o of monthOrders) orderById.set(o.id, o)
+    // Effective month orders = completed OR branch-delivered.
+    const effectiveById = new Map<string, any>()
+    for (const o of monthOrders) {
+      if (o.orderStatus === 'تم' || deliveredOrderIds.has(o.id)) {
+        effectiveById.set(o.id, o)
+      }
+    }
 
     // Sum quantities of targeted items linked to those orders.
     // Group by orderReceiver (the متلقي الطلب field on the order), falling back
@@ -87,9 +115,8 @@ export async function GET(req: NextRequest) {
     const perAgentMap: Record<string, number> = {}
     let myUnits = 0
 
-    for (const it of items) {
-      if (!targetedIds.has(it.productId)) continue
-      const o = orderById.get(it.orderId)
+    for (const it of targetedItems) {
+      const o = effectiveById.get(it.orderId)
       if (!o) continue
       const qty = Number(it.quantity) || 0
       if (qty <= 0) continue

@@ -612,7 +612,7 @@ export const COMPLAINT_COLUMNS = [
 // and skips the query entirely when the list is empty. Used by hot enrichment
 // paths (/api/orders GET, /api/branch/orders/[id] GET) to avoid reading the
 // entire lookup tables just to hydrate a small window of orders.
-async function fetchRowsIn<T = any>(
+export async function fetchRowsIn<T = any>(
   table: string,
   column: string,
   values: string[],
