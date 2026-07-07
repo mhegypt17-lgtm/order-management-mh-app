@@ -7,47 +7,88 @@ import {
   addComplaintComment,
   readOrders,
   readCustomers,
+  COMPLAINT_COLUMNS,
+  type ComplaintRecord,
 } from '@/lib/omsData'
+import { supabase } from '@/lib/supabase'
+
+// Short server-side cache — a burst of dashboard loaders in the same minute
+// share one DB read. Mutations (POST/PUT/DELETE) don't need this to be
+// fresh instantly; the client refetches after edits.
+export const revalidate = 60
+
+// Default rolling window for the complaints list. Complaints older than
+// ~3 months are archival and callers must opt in with ?all=1 or ?from=<date>.
+const DEFAULT_COMPLAINTS_WINDOW_DAYS = 90
 
 export async function GET(request: NextRequest) {
   try {
-    const complaints = await readComplaints()
-    
-    // Optional filters
-    const status = request.nextUrl.searchParams.get('status')
-    const channel = request.nextUrl.searchParams.get('channel')
-    const assignedTo = request.nextUrl.searchParams.get('assignedTo')
-    
-    let filtered = complaints
-    
-    if (status) {
-      filtered = filtered.filter((c) => c.status === status)
-    }
-    if (channel) {
-      filtered = filtered.filter((c) => c.channel === channel)
-    }
-    if (assignedTo) {
-      filtered = filtered.filter((c) => c.assignedTo === assignedTo)
+    const url = request.nextUrl
+    // Optional filters — pushed down to Supabase (was JS-side .filter()).
+    const status = url.searchParams.get('status')
+    const channel = url.searchParams.get('channel')
+    const assignedTo = url.searchParams.get('assignedTo')
+    // Windowing — ?all=1 bypasses; ?from=<ISO> overrides the 90-day default.
+    const all = url.searchParams.get('all') === '1'
+    const from = url.searchParams.get('from') // ISO string or YYYY-MM-DD
+
+    let cutoffISO: string | undefined
+    if (!all) {
+      if (from) {
+        // Accept plain YYYY-MM-DD or a full ISO — Postgres treats both correctly.
+        cutoffISO = from
+      } else {
+        cutoffISO = new Date(
+          Date.now() - DEFAULT_COMPLAINTS_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+        ).toISOString()
+      }
     }
 
-    // Sort: open first, then by priority (high > medium > low), then newest
-    const sorted = filtered.sort((a, b) => {
-      if (a.status !== b.status) {
-        const statusOrder = { open: 0, 'in-progress': 1, closed: 2 }
-        return statusOrder[a.status as keyof typeof statusOrder] - statusOrder[b.status as keyof typeof statusOrder]
-      }
-      const priorityOrder = { high: 0, medium: 1, low: 2 }
-      if (priorityOrder[a.priority as keyof typeof priorityOrder] !== priorityOrder[b.priority as keyof typeof priorityOrder]) {
-        return priorityOrder[a.priority as keyof typeof priorityOrder] - priorityOrder[b.priority as keyof typeof priorityOrder]
-      }
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    })
+    let q = supabase.from('complaints').select(COMPLAINT_COLUMNS)
+    if (cutoffISO) q = q.gte('openedAt', cutoffISO)
+    if (status) q = q.eq('status', status)
+    if (channel) q = q.eq('channel', channel)
+    if (assignedTo) q = q.eq('assignedTo', assignedTo)
 
-    return NextResponse.json(sorted)
+    const { data, error } = await q
+
+    if (error) {
+      // Preserve legacy fallback behaviour — if the scoped query fails for
+      // any reason (missing column, RLS mismatch, etc.), fall back to the
+      // old full-table read + JS filter so the endpoint never hard-fails.
+      console.warn('[complaints GET] scoped query failed, falling back:', error.message)
+      const legacy = await readComplaints()
+      const filtered = legacy.filter(
+        (c) =>
+          (!status || c.status === status) &&
+          (!channel || c.channel === channel) &&
+          (!assignedTo || c.assignedTo === assignedTo),
+      )
+      return NextResponse.json(sortComplaints(filtered))
+    }
+
+    // Sort: open first, then by priority (high > medium > low), then newest.
+    // Custom ordering can't be pushed to Postgres cleanly, but the row count
+    // is now bounded (window + filters) so the JS sort is cheap.
+    return NextResponse.json(sortComplaints((data || []) as unknown as ComplaintRecord[]))
   } catch (error) {
     console.error('Error reading complaints:', error)
     return NextResponse.json({ error: 'Failed to read complaints' }, { status: 500 })
   }
+}
+
+function sortComplaints(rows: ComplaintRecord[]): ComplaintRecord[] {
+  const statusOrder: Record<string, number> = { open: 0, 'in-progress': 1, closed: 2 }
+  const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 }
+  return [...rows].sort((a, b) => {
+    if (a.status !== b.status) {
+      return (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99)
+    }
+    const ap = priorityOrder[a.priority] ?? 99
+    const bp = priorityOrder[b.priority] ?? 99
+    if (ap !== bp) return ap - bp
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  })
 }
 
 export async function POST(request: NextRequest) {

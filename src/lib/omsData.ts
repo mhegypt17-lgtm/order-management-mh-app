@@ -596,6 +596,17 @@ export const PRODUCT_COLUMNS = [
   'id', 'productName', 'productCategory', 'pricingMode', 'basePrice', 'offerPrice',
 ].join(',')
 
+// Complaints — all fields from ComplaintRecord. `comments` is a jsonb array
+// that can grow large on chatty tickets, but callers (dashboard list + bell)
+// need at least the count so we keep it in the default allowlist.
+export const COMPLAINT_COLUMNS = [
+  'id', 'ticketNumber', 'channel', 'subject', 'description', 'reason',
+  'status', 'priority',
+  'customerId', 'customerName', 'customerPhone', 'linkedOrderId',
+  'assignedTo', 'createdBy', 'compensationAmount', 'productIds',
+  'comments', 'openedAt', 'closedAt', 'createdAt', 'updatedAt',
+].join(',')
+
 // Fetch only rows whose `column` value is in the given id list, chunked to
 // stay under Supabase's PostgREST `in()` URL length limit. Deduplicates ids
 // and skips the query entirely when the list is empty. Used by hot enrichment
