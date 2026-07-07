@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 
+// Product catalog changes rarely (admins add/edit products occasionally). It
+// is read on nearly every order-creation and every dashboard render, so a
+// 5-minute cache dramatically reduces egress. Edits happen through POST/PUT
+// below, so freshness is bounded to <=5 minutes after an admin change.
+export const revalidate = 300
+
 function generateId() {
   return `prod_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 }
@@ -23,7 +29,17 @@ export async function GET() {
       isTargeted: Boolean(product.isTargeted),
     }))
 
-    return NextResponse.json({ products: normalized }, { status: 200 })
+    return NextResponse.json(
+      { products: normalized },
+      {
+        status: 200,
+        // Belt-and-braces: also send explicit Cache-Control so CDNs / the
+        // browser can serve cached responses without hitting the origin.
+        headers: {
+          'Cache-Control': 'public, max-age=0, s-maxage=300, stale-while-revalidate=600',
+        },
+      },
+    )
   } catch (error) {
     console.error('Error fetching products:', error)
     return NextResponse.json(

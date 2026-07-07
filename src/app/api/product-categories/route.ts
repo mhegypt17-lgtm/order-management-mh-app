@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { PRODUCT_CATEGORY_ORDER } from '@/lib/omsData'
 
-export const dynamic = 'force-dynamic'
-export const revalidate = 0
+// Categories are read on every product / order form load but only change
+// when an admin edits the lookup list. 5-minute cache matches /api/products
+// and /api/order-settings, so all three cheap lookups stay in sync.
+export const revalidate = 300
 
 type CategoryRow = {
   id: string
@@ -66,7 +68,15 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    return NextResponse.json({ categories: data || [] }, { status: 200 })
+    return NextResponse.json(
+      { categories: data || [] },
+      {
+        status: 200,
+        headers: {
+          'Cache-Control': 'public, max-age=0, s-maxage=300, stale-while-revalidate=600',
+        },
+      },
+    )
   } catch (e: any) {
     return NextResponse.json(
       { error: 'Failed to fetch product categories', details: e?.message, fallback: PRODUCT_CATEGORY_ORDER },
