@@ -7,6 +7,13 @@ import {
   RetentionConfig,
 } from '@/lib/omsData'
 
+// Order settings change rarely (only when an admin edits a lookup list in the
+// settings screen) but are read on nearly every page load and by several
+// server-side aggregates. A 5-minute cache eliminates the vast majority of
+// redundant reads. Admin edits go through PUT/PATCH which are always dynamic,
+// so staleness is bounded to at most 5 minutes after a change.
+export const revalidate = 300
+
 // Patch: Add missing OrderSettingsRecord type with slaHours
 type OrderSettingsRecord = {
   orderReceivers: LookupValueRecord[]
