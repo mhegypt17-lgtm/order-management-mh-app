@@ -128,6 +128,63 @@ async function enrichOrder(
 // never displays orders that old (older ones require an explicit filter).
 const DEFAULT_WINDOW_DAYS = 35
 
+// Phase 2F.2 — try the orders_dashboard_v1 view first (single JOIN read
+// instead of 4 PostgREST round trips). Returns { orderList, maps } shaped
+// exactly like the fallback path, or null if the view is missing / errors
+// (schema drift, view not yet created, etc.) — in which case the caller
+// falls back to the classic multi-fetch path below.
+async function tryReadDashboardWindow(params: {
+  fromDate?: string
+  toDate?: string
+  limit?: number
+  offset?: number
+}): Promise<{
+  orderList: OrderRecord[]
+  customersById: Map<string, any>
+  addressesById: Map<string, any>
+  deliveryByOrderId: Map<string, any>
+} | null> {
+  try {
+    let q = supabase.from('orders_dashboard_v1').select('*')
+    if (params.fromDate) q = q.gte('orderDate', params.fromDate)
+    if (params.toDate) q = q.lte('orderDate', params.toDate)
+    q = q.order('orderDate', { ascending: false })
+    if (typeof params.limit === 'number') {
+      const from = params.offset ?? 0
+      q = q.range(from, from + params.limit - 1)
+    } else if (typeof params.offset === 'number') {
+      q = q.range(params.offset, params.offset + 999)
+    }
+    const { data, error } = await q
+    if (error) {
+      const msg = String(error.message || '')
+      // Missing view / relation → signal caller to use fallback.
+      if (/orders_dashboard_v1|relation .* does not exist|view .* does not exist/i.test(msg)) {
+        return null
+      }
+      // Any other error: also fall back rather than 500 the dashboard.
+      console.warn('[orders GET] orders_dashboard_v1 query failed, falling back:', msg)
+      return null
+    }
+    const rows = Array.isArray(data) ? data : []
+    const orderList: OrderRecord[] = []
+    const customersById = new Map<string, any>()
+    const addressesById = new Map<string, any>()
+    const deliveryByOrderId = new Map<string, any>()
+    for (const row of rows as any[]) {
+      const { customer, address, delivery, ...orderCols } = row
+      orderList.push(orderCols as OrderRecord)
+      if (customer && customer.id) customersById.set(customer.id, customer)
+      if (address && address.id) addressesById.set(address.id, address)
+      if (delivery && delivery.id) deliveryByOrderId.set(orderCols.id, delivery)
+    }
+    return { orderList, customersById, addressesById, deliveryByOrderId }
+  } catch (e) {
+    console.warn('[orders GET] orders_dashboard_v1 threw, falling back:', e)
+    return null
+  }
+}
+
 export async function GET(request: NextRequest) {
   try {
     const url = new URL(request.url)
@@ -153,37 +210,72 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const orderList = await readOrdersWindow({
+    // Try the JOINed view first — one round trip instead of four.
+    const viewResult = await tryReadDashboardWindow({
       fromDate: effectiveFrom,
       toDate: effectiveTo,
       limit,
       offset,
     })
 
-    // Scoped enrichment — instead of reading five entire lookup tables and
-    // building indexes, fetch ONLY the rows referenced by the orders in this
-    // window. Products are further scoped by the product ids that actually
-    // appear in the fetched order_items. Result: same JSON shape, but egress
-    // is bounded by "orders in window" instead of "all history in the DB".
-    const customerIds = orderList
-      .map((o) => o.customerId)
-      .filter((v): v is string => Boolean(v))
-    const addressIds = orderList
-      .map((o) => o.deliveryAddressId)
-      .filter((v): v is string => Boolean(v))
-    const orderIds = orderList.map((o) => o.id)
+    let orderList: OrderRecord[]
+    let customersById: Map<string, any>
+    let addressesById: Map<string, any>
+    let deliveryByOrderId: Map<string, any>
+    let usedView = false
 
-    const [customers, addresses, orderItems, orderDelivery] = await Promise.all([
-      readCustomersByIds(customerIds),
-      readAddressesByIds(addressIds),
-      readOrderItemsByOrderIds(orderIds),
-      // Phase 2E.1: dashboard list view never renders delivery photos, so we
-      // ask for the stripped column set (no base64 productPhotos /
-      // invoicePhoto). Single-order detail views — /api/orders/[id] and
-      // /api/branch/orders/[id] — still pull DELIVERY_COLUMNS_FULL because
-      // they DO render the photos.
-      readOrderDeliveryByOrderIds(orderIds, DELIVERY_COLUMNS_LIST),
-    ])
+    if (viewResult) {
+      usedView = true
+      orderList = viewResult.orderList
+      customersById = viewResult.customersById
+      addressesById = viewResult.addressesById
+      deliveryByOrderId = viewResult.deliveryByOrderId
+    } else {
+      orderList = await readOrdersWindow({
+        fromDate: effectiveFrom,
+        toDate: effectiveTo,
+        limit,
+        offset,
+      })
+
+      // Scoped enrichment — instead of reading five entire lookup tables and
+      // building indexes, fetch ONLY the rows referenced by the orders in this
+      // window. Products are further scoped by the product ids that actually
+      // appear in the fetched order_items. Result: same JSON shape, but egress
+      // is bounded by "orders in window" instead of "all history in the DB".
+      const customerIds = orderList
+        .map((o) => o.customerId)
+        .filter((v): v is string => Boolean(v))
+      const addressIds = orderList
+        .map((o) => o.deliveryAddressId)
+        .filter((v): v is string => Boolean(v))
+      const orderIdsForLookup = orderList.map((o) => o.id)
+
+      const [customers, addresses, orderDelivery] = await Promise.all([
+        readCustomersByIds(customerIds),
+        readAddressesByIds(addressIds),
+        // Phase 2E.1: dashboard list view never renders delivery photos, so we
+        // ask for the stripped column set (no base64 productPhotos /
+        // invoicePhoto). Single-order detail views — /api/orders/[id] and
+        // /api/branch/orders/[id] — still pull DELIVERY_COLUMNS_FULL because
+        // they DO render the photos.
+        readOrderDeliveryByOrderIds(orderIdsForLookup, DELIVERY_COLUMNS_LIST),
+      ])
+
+      customersById = new Map<string, any>()
+      for (const c of customers) customersById.set(c.id, c)
+
+      addressesById = new Map<string, any>()
+      for (const a of addresses) addressesById.set(a.id, a)
+
+      deliveryByOrderId = new Map<string, any>()
+      for (const d of orderDelivery as any[]) deliveryByOrderId.set(d.orderId, d)
+    }
+
+    // Items + products are 1:many and stay as their own scoped fetches
+    // regardless of which path fetched the orders/customers/addresses.
+    const orderIds = orderList.map((o) => o.id)
+    const orderItems = await readOrderItemsByOrderIds(orderIds)
 
     // Products are only needed for the productIds actually referenced by the
     // items above — a second, dependent fetch keeps the payload minimal.
@@ -192,21 +284,12 @@ export async function GET(request: NextRequest) {
       .filter((v): v is string => Boolean(v))
     const products = await readProductsByIds(productIds)
 
-    const customersById = new Map<string, any>()
-    for (const c of customers) customersById.set(c.id, c)
-
-    const addressesById = new Map<string, any>()
-    for (const a of addresses) addressesById.set(a.id, a)
-
     const itemsByOrderId = new Map<string, OrderItemRecord[]>()
     for (const it of orderItems as OrderItemRecord[]) {
       const arr = itemsByOrderId.get(it.orderId)
       if (arr) arr.push(it)
       else itemsByOrderId.set(it.orderId, [it])
     }
-
-    const deliveryByOrderId = new Map<string, any>()
-    for (const d of orderDelivery as any[]) deliveryByOrderId.set(d.orderId, d)
 
     const productsById = new Map<string, any>()
     for (const p of products as any[]) productsById.set(p.id, p)
@@ -226,6 +309,7 @@ export async function GET(request: NextRequest) {
           to: effectiveTo ?? null,
           limit: limit ?? null,
           offset: offset ?? null,
+          source: usedView ? 'orders_dashboard_v1' : 'multi_fetch',
         },
       },
       { status: 200 },
