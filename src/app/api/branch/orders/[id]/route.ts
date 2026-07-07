@@ -13,6 +13,15 @@ import {
   readOrderItems,
   readOrders,
   readOrderSettings,
+  ORDER_COLUMNS,
+  CUSTOMER_COLUMNS,
+  ADDRESS_COLUMNS,
+  ORDER_ITEM_COLUMNS,
+  DELIVERY_COLUMNS_FULL,
+  PRODUCT_COLUMNS,
+  readOrderItemsByOrderIds,
+  readOrderDeliveryByOrderIds,
+  readProductsByIds,
 } from '@/lib/omsData'
 
 async function readProducts() {
@@ -29,43 +38,83 @@ async function readProducts() {
 }
 
 export const dynamic = 'force-dynamic'
-export const revalidate = 0
+// Short server-side cache — branch users need fresher data than the CS
+// dashboard (they may refresh after every status flip), so keep this at
+// 30s instead of the 60s used by /api/orders.
+export const revalidate = 30
 
+// Fetch a single order + its related rows with scoped queries. Replaces the
+// previous implementation that read six ENTIRE tables (readOrders, readCustomers,
+// readAddresses, readOrderItems, readProducts, readOrderDelivery) just to
+// hydrate one order. New flow: one indexed lookup on orders, then id-scoped
+// fetches on each related table. Response JSON shape is preserved exactly —
+// including the synthesised default delivery row when no order_delivery row
+// exists yet.
 async function enrich(orderId: string) {
-  const orders = await readOrders()
-  const customers = await readCustomers()
-  const addresses = await readAddresses()
-  const items = await readOrderItems()
-  const products = await readProducts()
-  const deliveryRows = await readOrderDelivery()
+  // 1) Fetch the single order with the column allowlist. Fall back gracefully
+  //    if the deployment lacks the optional csAttachments column.
+  const runOrder = (cols: string) =>
+    supabase.from('orders').select(cols).eq('id', orderId).maybeSingle()
 
-  const order = orders.find((o) => o.id === orderId)
-  if (!order) return null
+  let orderRes = await runOrder(ORDER_COLUMNS)
+  if (
+    orderRes.error &&
+    /csAttachments|column .* does not exist/i.test(String(orderRes.error.message || ''))
+  ) {
+    const fallbackCols = ORDER_COLUMNS.split(',')
+      .filter((c) => c.trim() !== 'csAttachments')
+      .join(',')
+    orderRes = await runOrder(fallbackCols)
+  }
+  if (orderRes.error || !orderRes.data) return null
+  const order = orderRes.data as any
 
-  const customer = customers.find((c) => c.id === order.customerId) || null
-  const address = addresses.find((a) => a.id === order.deliveryAddressId) || null
+  // 2) Scoped lookups keyed off THIS order's ids only.
+  const customerId: string = order.customerId
+  const addressId: string = order.deliveryAddressId
 
-  const orderItems = items
-    .filter((i) => i.orderId === order.id)
-    .map((item) => {
-      const product = products.find((p: any) => p.id === item.productId)
-      const pricingMode: 'unit' | 'weight' =
-        product?.pricingMode === 'weight' ? 'weight' : 'unit'
-      const pricePerKg =
-        pricingMode === 'weight'
-          ? Number(product?.offerPrice && Number(product.offerPrice) > 0
-              ? product.offerPrice
-              : product?.basePrice || 0)
-          : 0
-      return {
-        ...item,
-        productName: product?.productName || 'منتج محذوف',
-        pricingMode,
-        pricePerKg,
-      }
-    })
+  const [customerRes, addressRes, itemRows, deliveryRows] = await Promise.all([
+    customerId
+      ? supabase.from('customers').select(CUSTOMER_COLUMNS).eq('id', customerId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    addressId
+      ? supabase.from('customer_addresses').select(ADDRESS_COLUMNS).eq('id', addressId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    readOrderItemsByOrderIds([orderId], ORDER_ITEM_COLUMNS),
+    readOrderDeliveryByOrderIds([orderId], DELIVERY_COLUMNS_FULL),
+  ])
 
-  let delivery = deliveryRows.find((d) => d.orderId === order.id)
+  const customer = customerRes.data || null
+  const address = addressRes.data || null
+
+  // 3) Products scoped to product ids actually referenced by this order's items.
+  const productIds = (itemRows as OrderItemRecord[])
+    .map((i) => i.productId)
+    .filter((v): v is string => Boolean(v))
+  const productRows = await readProductsByIds(productIds, PRODUCT_COLUMNS)
+  const productsById = new Map<string, any>()
+  for (const p of productRows as any[]) productsById.set(p.id, p)
+
+  const orderItems = (itemRows as OrderItemRecord[]).map((item) => {
+    const product = productsById.get(item.productId)
+    const pricingMode: 'unit' | 'weight' =
+      product?.pricingMode === 'weight' ? 'weight' : 'unit'
+    const pricePerKg =
+      pricingMode === 'weight'
+        ? Number(product?.offerPrice && Number(product.offerPrice) > 0
+            ? product.offerPrice
+            : product?.basePrice || 0)
+        : 0
+    return {
+      ...item,
+      productName: product?.productName || 'منتج محذوف',
+      pricingMode,
+      pricePerKg,
+    }
+  })
+
+  // 4) Delivery — auto-create the row on first read (preserved behaviour).
+  let delivery = (deliveryRows as OrderDeliveryRecord[])[0]
   if (!delivery) {
     delivery = {
       id: generateId('del'),
