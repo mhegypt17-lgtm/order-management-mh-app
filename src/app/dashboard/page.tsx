@@ -69,6 +69,7 @@ function getRecentDates(days: number) {
 
 export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true)
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [orders, setOrders] = useState<DashboardOrder[]>([])
   const [complaints, setComplaints] = useState<DashboardComplaint[]>([])
   const [monthlyCompensationBudget, setMonthlyCompensationBudget] = useState(0)
@@ -139,6 +140,9 @@ export default function DashboardPage() {
       }
     } finally {
       setIsLoading(false)
+      // Stamp the timestamp on both success and failure paths so the user
+      // sees when the last attempt completed (Phase 2D.1b).
+      setLastUpdated(new Date())
     }
   }
 
@@ -338,11 +342,25 @@ export default function DashboardPage() {
           >
             هذا الشهر
           </button>
+          {lastUpdated && (
+            <span
+              className="text-xs text-gray-500 self-center whitespace-nowrap"
+              title={lastUpdated.toISOString()}
+            >
+              آخر تحديث:{' '}
+              {lastUpdated.toLocaleTimeString('ar-EG', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+              })}
+            </span>
+          )}
           <button
             onClick={fetchOrders}
-            className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold"
+            disabled={isLoading}
+            className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:bg-red-300 disabled:cursor-not-allowed text-white font-semibold"
           >
-            تحديث البيانات
+            {isLoading ? '⏳ جاري التحديث...' : '🔄 تحديث البيانات'}
           </button>
         </div>
       </div>
