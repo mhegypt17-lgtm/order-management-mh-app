@@ -70,7 +70,7 @@ async function computeDeliveryFeeByArea(subtotal: number, area?: string, subArea
   return computeDeliveryFee(subtotal, area, subArea)
 }
 
-async function enrichOrder(order: OrderRecord) {
+async function enrichOrder(order: OrderRecord, opts: { includePhotos: boolean } = { includePhotos: false }) {
   const customers = await readCustomers()
   const addresses = await readAddresses()
   const orderItems = await readOrderItems()
@@ -89,7 +89,7 @@ async function enrichOrder(order: OrderRecord) {
       }
     })
 
-  const delivery =
+  const fullDelivery =
     orderDelivery.find((d) => d.orderId === order.id) ||
     {
       id: '',
@@ -103,20 +103,49 @@ async function enrichOrder(order: OrderRecord) {
       updatedAt: order.updatedAt,
     }
 
+  // Phase 2H — same lazy-load pattern as /api/branch/orders/[id]:
+  // strip productPhotos/invoicePhoto/csAttachments by default and expose
+  // counts so the UI can show "N صور محفوظة — اضغط للعرض" without paying
+  // egress for photos the user never asks to see. Client re-fetches the
+  // bytes from /api/orders/[id]/photos on demand.
+  const productPhotosCount = Array.isArray((fullDelivery as any).productPhotos)
+    ? (fullDelivery as any).productPhotos.length
+    : 0
+  const hasInvoicePhoto = Boolean((fullDelivery as any).invoicePhoto)
+  const hasCsAttachments =
+    Array.isArray((order as any).csAttachments) && (order as any).csAttachments.length > 0
+  const csAttachmentsCount = Array.isArray((order as any).csAttachments)
+    ? (order as any).csAttachments.length
+    : 0
+
+  let delivery: any = fullDelivery
+  let orderOut: any = { ...order }
+  if (!opts.includePhotos) {
+    delivery = { ...fullDelivery, productPhotos: [], invoicePhoto: '' }
+    delete orderOut.csAttachments
+  }
+
   return {
-    ...order,
+    ...orderOut,
     customer,
     address,
     items,
     delivery,
+    productPhotosCount,
+    hasInvoicePhoto,
+    hasCsAttachments,
+    csAttachmentsCount,
+    photosLoaded: opts.includePhotos,
   }
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
+    const url = new URL(request.url)
+    const includePhotos = url.searchParams.get('includePhotos') === '1'
     const orders = await readOrders()
     const order = orders.find((o) => o.id === params.id)
 
@@ -124,7 +153,10 @@ export async function GET(
       return NextResponse.json({ error: 'Order not found' }, { status: 404 })
     }
 
-    return NextResponse.json({ order: await enrichOrder(order) }, { status: 200 })
+    return NextResponse.json(
+      { order: await enrichOrder(order, { includePhotos }) },
+      { status: 200 },
+    )
   } catch {
     return NextResponse.json({ error: 'Failed to fetch order' }, { status: 500 })
   }

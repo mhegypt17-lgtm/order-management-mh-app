@@ -306,6 +306,19 @@ export default function OrderForm({ mode, orderId }: Props) {
   const [deliveryData, setDeliveryData] = useState<DeliveryData | null>(null)
   const [loadedOrderInfo, setLoadedOrderInfo] = useState<{ appOrderNo: string } | null>(null)
 
+  // Phase 2H — lazy-load state for photos + CS attachments. On edit, the
+  // initial GET returns empty arrays plus counts; we hydrate the real bytes
+  // only when the user clicks a "عرض" button, or automatically before
+  // add/remove so new items append instead of overwriting. `photosLoaded`
+  // also gates the save payload: when false, we omit `csAttachments` so
+  // the server keeps whatever is already in the DB (see the PUT handler's
+  // `Array.isArray(body.csAttachments) ? body.csAttachments : existing`).
+  const [photosLoaded, setPhotosLoaded] = useState(mode === 'create')
+  const [isLoadingPhotos, setIsLoadingPhotos] = useState(false)
+  const [savedCsCount, setSavedCsCount] = useState(0)
+  const [savedProductPhotosCount, setSavedProductPhotosCount] = useState(0)
+  const [savedHasInvoicePhoto, setSavedHasInvoicePhoto] = useState(false)
+
   const setDirtyFlag = (dirty: boolean) => {
     if (typeof window === 'undefined' || mode !== 'create') return
     window.sessionStorage.setItem('order-form-dirty', dirty ? 'true' : 'false')
@@ -419,8 +432,19 @@ export default function OrderForm({ mode, orderId }: Props) {
             scheduledDate: order.scheduledDate || '',
             scheduledTimeSlot: (order.scheduledTimeSlot as OrderFormModel['scheduledTimeSlot']) || '',
             scheduledSpecificTime: order.scheduledSpecificTime || '',
+            // Phase 2H — never seed csAttachments from the light GET; that
+            // response no longer includes the base64 bytes. The state stays
+            // empty until the user clicks "عرض المرفقات" (see
+            // ensurePhotosLoaded below).
             csAttachments: Array.isArray(order.csAttachments) ? order.csAttachments : [],
           })
+
+          // Phase 2H — capture the server-provided metadata so the UI can
+          // render "N مرفقات محفوظة — اضغط للعرض" without paying egress.
+          setPhotosLoaded(Boolean(order.photosLoaded))
+          setSavedCsCount(Number(order.csAttachmentsCount) || 0)
+          setSavedProductPhotosCount(Number(order.productPhotosCount) || 0)
+          setSavedHasInvoicePhoto(Boolean(order.hasInvoicePhoto))
 
           // Best-effort: load other addresses for this customer (non-fatal).
           if (order.customer?.phone) {
@@ -662,8 +686,54 @@ export default function OrderForm({ mode, orderId }: Props) {
   // on save, and 15-20× smaller egress on every subsequent read. Non-image
   // files (PDFs) pass through unchanged.
   const MAX_CS_ATTACHMENT_BYTES = 5 * 1024 * 1024 // 5 MB per file
+
+  // Phase 2H — pull the actual photo bytes on demand. The initial order GET
+  // returns empty arrays + counts; this fetch hydrates them so the UI can
+  // render thumbnails and so any subsequent add/remove operates on the full
+  // saved set (rather than overwriting saved photos with a new-only array).
+  const ensurePhotosLoaded = async (): Promise<boolean> => {
+    if (photosLoaded) return true
+    if (!orderId) {
+      // create mode — no server photos to fetch.
+      setPhotosLoaded(true)
+      return true
+    }
+    if (savedCsCount === 0 && savedProductPhotosCount === 0 && !savedHasInvoicePhoto) {
+      setPhotosLoaded(true)
+      return true
+    }
+    setIsLoadingPhotos(true)
+    try {
+      const res = await fetch(`/api/orders/${orderId}/photos`, { cache: 'no-store' })
+      if (!res.ok) throw new Error('Failed to load photos')
+      const data = await res.json()
+      const csList: CSAttachmentForm[] = Array.isArray(data.csAttachments) ? data.csAttachments : []
+      setForm((prev) => ({ ...prev, csAttachments: csList }))
+      setDeliveryData((prev) =>
+        prev
+          ? {
+              ...prev,
+              productPhotos: Array.isArray(data.productPhotos) ? data.productPhotos : [],
+              invoicePhoto: (data.invoicePhoto as string) || '',
+            }
+          : prev,
+      )
+      setPhotosLoaded(true)
+      return true
+    } catch {
+      toast.error('تعذر تحميل الصور')
+      return false
+    } finally {
+      setIsLoadingPhotos(false)
+    }
+  }
+
   const handleAddCsAttachments = async (files: FileList | null) => {
     if (!files || files.length === 0) return
+    // Phase 2H — ensure any existing attachments are loaded first so we
+    // append rather than overwrite.
+    const ok = await ensurePhotosLoaded()
+    if (!ok) return
     const newOnes: CSAttachmentForm[] = []
     for (const file of Array.from(files)) {
       if (file.size > MAX_CS_ATTACHMENT_BYTES) {
@@ -861,8 +931,18 @@ export default function OrderForm({ mode, orderId }: Props) {
   // the csAttachments array is sent. All other order fields stay frozen on
   // the server. CS uses this to upload proof-of-payment / receipt photos
   // that arrive after the branch has marked the order as delivered.
+  //
+  // Phase 2H — this path only fires after the user has interacted with
+  // attachments (upload/add flow calls ensurePhotosLoaded first), so
+  // `form.csAttachments` here IS authoritative and safe to send.
   const saveAttachmentsOnly = async () => {
     if (!orderId) return
+    if (!photosLoaded) {
+      // Defensive: if somehow we get here without having loaded the
+      // existing attachments, refuse rather than wipe the DB.
+      const ok = await ensurePhotosLoaded()
+      if (!ok) return
+    }
     setIsSaving(true)
     try {
       const response = await fetch(`/api/orders/${orderId}`, {
@@ -984,8 +1064,16 @@ export default function OrderForm({ mode, orderId }: Props) {
     setIsSaving(true)
 
     try {
-      const payload = {
-        ...form,
+      // Phase 2H — when photos/attachments haven't been loaded from the
+      // server yet, we MUST NOT send csAttachments in the payload. The
+      // server's PUT handler treats "no csAttachments key" as "keep the
+      // existing DB value", but treats "csAttachments: []" as "wipe them".
+      // form.csAttachments would be [] in that case → data loss risk.
+      const { csAttachments: formCsAttachments, ...formSansAttachments } = form
+      const shouldSendAttachments = photosLoaded || mode === 'create'
+
+      const payload: any = {
+        ...(shouldSendAttachments ? form : formSansAttachments),
         isScheduled: form.orderStatus === 'حجز',
         deliveryArea: resolvedDeliveryArea,
         deliverySubArea: form.deliverySubArea || '',
@@ -1651,13 +1739,41 @@ export default function OrderForm({ mode, orderId }: Props) {
           pattern (data URLs) but exposes a caption per attachment so the
           admin/branch can tell at a glance what each image represents. */}
       <details
-        open={(form.csAttachments && form.csAttachments.length > 0) || false}
+        open={
+          (form.csAttachments && form.csAttachments.length > 0) ||
+          (!photosLoaded && savedCsCount > 0) ||
+          false
+        }
         className="bg-white rounded-lg border border-emerald-200 p-4"
       >
         <summary className="font-bold text-emerald-900 cursor-pointer">
-          � مرفقات خدمة العملاء {form.csAttachments?.length ? `(${form.csAttachments.length})` : ''}
+          📎 مرفقات خدمة العملاء{' '}
+          {photosLoaded
+            ? form.csAttachments?.length
+              ? `(${form.csAttachments.length})`
+              : ''
+            : savedCsCount > 0
+              ? `(${savedCsCount})`
+              : ''}
         </summary>
         <div className="mt-3 space-y-3">
+          {/* Phase 2H — lazy-load banner. Shows when there are saved
+              attachments but their bytes haven't been fetched yet. */}
+          {!photosLoaded && savedCsCount > 0 && (
+            <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded px-3 py-2 text-sm">
+              <span className="text-blue-800">
+                📎 {savedCsCount} مرفقات محفوظة (لم يتم تحميلها لتوفير البيانات)
+              </span>
+              <button
+                type="button"
+                onClick={ensurePhotosLoaded}
+                disabled={isLoadingPhotos}
+                className="px-3 py-1 rounded bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-semibold"
+              >
+                {isLoadingPhotos ? '... جاري التحميل' : 'عرض المرفقات'}
+              </button>
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1 text-right">
               إضافة مرفقات (إيصال تحويل، صورة بطاقة، أي مستند ذي صلة)
@@ -1745,6 +1861,29 @@ export default function OrderForm({ mode, orderId }: Props) {
                 <div className="px-3 py-2 bg-gray-100 rounded-lg text-gray-700 text-right whitespace-pre-wrap">
                   {deliveryData.branchComments}
                 </div>
+              </div>
+            )}
+
+            {/* Phase 2H — lazy-load banner for branch photos. When photos
+                haven't been fetched, we show a button instead of img tags
+                so we don't burn egress on views that never scroll here. */}
+            {!photosLoaded && (savedProductPhotosCount > 0 || savedHasInvoicePhoto) && (
+              <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded px-3 py-2 text-sm">
+                <span className="text-blue-800">
+                  🖼️{' '}
+                  {savedProductPhotosCount > 0 && `${savedProductPhotosCount} صور منتجات`}
+                  {savedProductPhotosCount > 0 && savedHasInvoicePhoto && ' + '}
+                  {savedHasInvoicePhoto && 'صورة فاتورة'}{' '}
+                  محفوظة (لم يتم تحميلها لتوفير البيانات)
+                </span>
+                <button
+                  type="button"
+                  onClick={ensurePhotosLoaded}
+                  disabled={isLoadingPhotos}
+                  className="px-3 py-1 rounded bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-semibold"
+                >
+                  {isLoadingPhotos ? '... جاري التحميل' : 'عرض الصور'}
+                </button>
               </div>
             )}
 

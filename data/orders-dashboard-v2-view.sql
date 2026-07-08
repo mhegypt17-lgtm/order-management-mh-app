@@ -18,8 +18,17 @@
 -- 3. Idempotent — safe to re-run.
 -- 4. The API has a graceful fallback path if the view is missing, so
 --    running this out of order will not break Production.
+--
+-- NOTE: We `drop view` first because Postgres refuses to remove columns
+-- from an existing view via `create or replace view` (ERROR 42P16). The
+-- previous v1 view exposed `csAttachments` via `o.*`; the new definition
+-- has no such column, which is exactly the change that triggers the error.
+-- Dropping and recreating in the same transaction is safe — the view has
+-- no dependants (nothing else in the DB references it).
 
-create or replace view public.orders_dashboard_v1 as
+drop view if exists public.orders_dashboard_v1;
+
+create view public.orders_dashboard_v1 as
 select
   -- ORDER columns — explicit allowlist (mirrors ORDER_COLUMNS_LIST in
   -- src/lib/omsData.ts). csAttachments is intentionally OMITTED.
