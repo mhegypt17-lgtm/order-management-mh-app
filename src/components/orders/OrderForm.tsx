@@ -728,14 +728,18 @@ export default function OrderForm({ mode, orderId }: Props) {
     }
   }
 
-  const handleAddCsAttachments = async (files: FileList | null) => {
+  // Phase 2H — accept File[] (not a live FileList). The caller snapshots the
+  // list synchronously in onChange and then resets `input.value`; if we took
+  // a FileList reference here, the `await` inside would let the reset run
+  // first and empty the list, silently dropping the upload.
+  const handleAddCsAttachments = async (files: File[]) => {
     if (!files || files.length === 0) return
     // Phase 2H — ensure any existing attachments are loaded first so we
     // append rather than overwrite.
     const ok = await ensurePhotosLoaded()
     if (!ok) return
     const newOnes: CSAttachmentForm[] = []
-    for (const file of Array.from(files)) {
+    for (const file of files) {
       if (file.size > MAX_CS_ATTACHMENT_BYTES) {
         toast.error(`الملف "${file.name}" أكبر من 5MB — اختر صورة أصغر`)
         continue
@@ -1783,8 +1787,11 @@ export default function OrderForm({ mode, orderId }: Props) {
               accept="image/*"
               multiple
               onChange={(e) => {
-                handleAddCsAttachments(e.target.files)
+                // Snapshot into a File[] BEFORE clearing the input, so the
+                // async handler is not looking at a stale/empty live FileList.
+                const captured = e.target.files ? Array.from(e.target.files) : []
                 e.target.value = ''
+                handleAddCsAttachments(captured)
               }}
               className="w-full text-sm"
             />

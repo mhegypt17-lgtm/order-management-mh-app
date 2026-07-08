@@ -188,16 +188,20 @@ export default function BranchOrderDetailPage() {
     }
   }
 
-  const handleAddProductPhotos = async (files: FileList | null) => {
+  // Phase 2H — accept a File[] snapshot (not a live FileList) because callers
+  // reset the file input's `.value` synchronously after invoking us. A live
+  // FileList reference goes empty after that reset, which used to silently
+  // swallow the upload once we introduced `await ensurePhotosLoaded()`.
+  const handleAddProductPhotos = async (files: File[]) => {
     if (!files || files.length === 0) return
     const ok = await ensurePhotosLoaded()
     if (!ok) return
-    const list = Array.from(files).slice(0, 5)
+    const list = files.slice(0, 5)
     const urls = await Promise.all(list.map((f) => compressImage(f)))
     setProductPhotos((prev) => [...prev, ...urls].slice(0, 10))
   }
 
-  const handleInvoicePhoto = async (files: FileList | null) => {
+  const handleInvoicePhoto = async (files: File[]) => {
     if (!files || files.length === 0) return
     const ok = await ensurePhotosLoaded()
     if (!ok) return
@@ -681,7 +685,20 @@ export default function BranchOrderDetailPage() {
                 </button>
               </div>
             )}
-            <input type="file" accept="image/*" multiple onChange={(e) => { handleAddProductPhotos(e.target.files); e.target.value = '' }} className="w-full" />
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={(e) => {
+                // Snapshot into a File[] BEFORE clearing the input, because the
+                // clear invalidates the live FileList reference we'd otherwise
+                // capture in the async handler.
+                const captured = e.target.files ? Array.from(e.target.files) : []
+                e.target.value = ''
+                handleAddProductPhotos(captured)
+              }}
+              className="w-full"
+            />
             <div className="mt-2 grid grid-cols-3 gap-2">
               {productPhotos.map((photo, idx) => (
                 <div key={idx} className="relative group">
@@ -715,7 +732,16 @@ export default function BranchOrderDetailPage() {
                 </button>
               </div>
             )}
-            <input type="file" accept="image/*" onChange={(e) => { handleInvoicePhoto(e.target.files); e.target.value = '' }} className="w-full" />
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => {
+                const captured = e.target.files ? Array.from(e.target.files) : []
+                e.target.value = ''
+                handleInvoicePhoto(captured)
+              }}
+              className="w-full"
+            />
             <div className="mt-2">
               {invoicePhoto ? (
                 <div className="relative group">
