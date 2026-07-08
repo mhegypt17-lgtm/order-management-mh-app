@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
 import { cairoDateString, cairoTimeString, formatCairoFriendly } from '@/lib/cairoTime'
+import { compressImage } from '@/lib/imageCompression'
 import WhatsAppShare from './WhatsAppShare'
 
 type Product = {
@@ -655,6 +656,11 @@ export default function OrderForm({ mode, orderId }: Props) {
   // used for branch productPhotos / invoicePhoto — and persist them as a
   // JSONB column on the order row. Each file is converted client-side
   // before save so the PUT/POST payload is the only network round-trip.
+  //
+  // Phase 2H — images are downscaled + re-encoded to JPEG q=0.72 client-side
+  // (see @/lib/imageCompression). Typical result: 4 MB camera photo → ~250 KB
+  // on save, and 15-20× smaller egress on every subsequent read. Non-image
+  // files (PDFs) pass through unchanged.
   const MAX_CS_ATTACHMENT_BYTES = 5 * 1024 * 1024 // 5 MB per file
   const handleAddCsAttachments = async (files: FileList | null) => {
     if (!files || files.length === 0) return
@@ -665,12 +671,7 @@ export default function OrderForm({ mode, orderId }: Props) {
         continue
       }
       try {
-        const dataUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader()
-          reader.onload = () => resolve(String(reader.result || ''))
-          reader.onerror = () => reject(reader.error)
-          reader.readAsDataURL(file)
-        })
+        const dataUrl = await compressImage(file)
         newOnes.push({
           id: `cs-att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           url: dataUrl,

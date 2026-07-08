@@ -561,6 +561,22 @@ export const ORDER_COLUMNS = [
   'csAttachments',
 ].join(',')
 
+// Phase 2H — same as ORDER_COLUMNS but WITHOUT the heavy `csAttachments`
+// base64 blob. List endpoints (/api/orders GET dashboard, filters, exports)
+// must NEVER return csAttachments — CS attachments are only rendered inside
+// the single-order edit view, so paying for their egress on every dashboard
+// poll was pure waste. Detail endpoints (/api/orders/[id], /api/branch/orders/[id])
+// keep using ORDER_COLUMNS so the edit form can display them.
+export const ORDER_COLUMNS_LIST = [
+  'id', 'appOrderNo', 'orderDate', 'orderTime', 'orderType', 'orderReceiver',
+  'orderMethod', 'customerType', 'customerSource', 'orderStatus', 'cancellationReason',
+  'paymentMethod', 'customerId', 'deliveryAddressId', 'notes', 'followUp', 'followUpNotes',
+  'subtotal', 'deliveryFee', 'orderTotal', 'createdBy', 'createdAt', 'updatedAt',
+  'isScheduled', 'scheduledDate', 'scheduledTimeSlot', 'scheduledSpecificTime',
+  'isPriority', 'priorityReason',
+  'discountCode', 'discountAmount', 'netTotal', 'walletUsed',
+].join(',')
+
 export const CUSTOMER_COLUMNS = [
   'id', 'phone', 'customerName', 'email', 'notes', 'wallet', 'createdAt', 'updatedAt',
   'status', 'statusReason', 'statusUpdatedAt', 'statusUpdatedBy',

@@ -21,6 +21,7 @@ import {
   readProductsByIds,
   readOrdersWindow,
   DELIVERY_COLUMNS_LIST,
+  ORDER_COLUMNS_LIST,
 } from '@/lib/omsData'
 
 // Short server-side cache — a burst of dashboard loaders in the same minute
@@ -145,7 +146,13 @@ async function tryReadDashboardWindow(params: {
   deliveryByOrderId: Map<string, any>
 } | null> {
   try {
-    let q = supabase.from('orders_dashboard_v1').select('*')
+    // Phase 2H — explicit column list instead of `*`. The view's `o.*` includes
+    // the heavy `csAttachments` jsonb blob, which the dashboard never renders.
+    // We select every ORDER_COLUMNS_LIST field plus the three joined jsonb
+    // objects the view exposes (customer, address, delivery) so csAttachments
+    // stays in the DB.
+    const viewSelect = `${ORDER_COLUMNS_LIST},customer,address,delivery`
+    let q = supabase.from('orders_dashboard_v1').select(viewSelect)
     if (params.fromDate) q = q.gte('orderDate', params.fromDate)
     if (params.toDate) q = q.lte('orderDate', params.toDate)
     q = q.order('orderDate', { ascending: false })
@@ -172,7 +179,9 @@ async function tryReadDashboardWindow(params: {
     const addressesById = new Map<string, any>()
     const deliveryByOrderId = new Map<string, any>()
     for (const row of rows as any[]) {
-      const { customer, address, delivery, ...orderCols } = row
+      // Belt-and-braces: even if the DB column list ever changes, ensure
+      // csAttachments cannot leak into the response.
+      const { customer, address, delivery, csAttachments: _cs, ...orderCols } = row
       orderList.push(orderCols as OrderRecord)
       if (customer && customer.id) customersById.set(customer.id, customer)
       if (address && address.id) addressesById.set(address.id, address)
@@ -231,9 +240,13 @@ export async function GET(request: NextRequest) {
       addressesById = viewResult.addressesById
       deliveryByOrderId = viewResult.deliveryByOrderId
     } else {
+      // Phase 2H — pass ORDER_COLUMNS_LIST so the fallback path also skips
+      // the heavy csAttachments jsonb blob. Detail routes still pull the full
+      // column set via readOrders() / ORDER_COLUMNS.
       orderList = await readOrdersWindow({
         fromDate: effectiveFrom,
         toDate: effectiveTo,
+        columns: ORDER_COLUMNS_LIST,
         limit,
         offset,
       })

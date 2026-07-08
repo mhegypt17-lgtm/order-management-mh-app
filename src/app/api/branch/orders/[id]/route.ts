@@ -14,10 +14,12 @@ import {
   readOrders,
   readOrderSettings,
   ORDER_COLUMNS,
+  ORDER_COLUMNS_LIST,
   CUSTOMER_COLUMNS,
   ADDRESS_COLUMNS,
   ORDER_ITEM_COLUMNS,
   DELIVERY_COLUMNS_FULL,
+  DELIVERY_COLUMNS_LIST,
   PRODUCT_COLUMNS,
   readOrderItemsByOrderIds,
   readOrderDeliveryByOrderIds,
@@ -50,18 +52,26 @@ export const revalidate = 30
 // fetches on each related table. Response JSON shape is preserved exactly —
 // including the synthesised default delivery row when no order_delivery row
 // exists yet.
-async function enrich(orderId: string) {
+//
+// Phase 2H — `includePhotos` is off by default. The initial page load returns
+// productPhotos=[], invoicePhoto='', csAttachments=[], plus size metadata so
+// the UI can show "3 صور محفوظة — اضغط للعرض" without paying the base64
+// egress cost. Client lazy-fetches the real bytes via /photos when the user
+// actually clicks to view them.
+async function enrich(orderId: string, opts: { includePhotos: boolean }) {
   // 1) Fetch the single order with the column allowlist. Fall back gracefully
   //    if the deployment lacks the optional csAttachments column.
+  const baseOrderCols = opts.includePhotos ? ORDER_COLUMNS : ORDER_COLUMNS_LIST
   const runOrder = (cols: string) =>
     supabase.from('orders').select(cols).eq('id', orderId).maybeSingle()
 
-  let orderRes = await runOrder(ORDER_COLUMNS)
+  let orderRes = await runOrder(baseOrderCols)
   if (
     orderRes.error &&
     /csAttachments|column .* does not exist/i.test(String(orderRes.error.message || ''))
   ) {
-    const fallbackCols = ORDER_COLUMNS.split(',')
+    const fallbackCols = baseOrderCols
+      .split(',')
       .filter((c) => c.trim() !== 'csAttachments')
       .join(',')
     orderRes = await runOrder(fallbackCols)
@@ -81,7 +91,11 @@ async function enrich(orderId: string) {
       ? supabase.from('customer_addresses').select(ADDRESS_COLUMNS).eq('id', addressId).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
     readOrderItemsByOrderIds([orderId], ORDER_ITEM_COLUMNS),
-    readOrderDeliveryByOrderIds([orderId], DELIVERY_COLUMNS_FULL),
+    // Phase 2H — only pull heavy photo columns when caller asked for them.
+    readOrderDeliveryByOrderIds(
+      [orderId],
+      opts.includePhotos ? DELIVERY_COLUMNS_FULL : DELIVERY_COLUMNS_LIST,
+    ),
   ])
 
   const customer = customerRes.data || null
@@ -130,21 +144,77 @@ async function enrich(orderId: string) {
     await supabase.from('order_delivery').insert([delivery])
   }
 
+  // Phase 2H — when photos are NOT included, expose size metadata so the UI
+  // can render "3 صور محفوظة — اضغط للعرض" without paying egress. We need to
+  // read a cheap count column, which DELIVERY_COLUMNS_LIST includes as
+  // `productPhotosCount` if the DB has it; otherwise fall back to 0/false.
+  let productPhotosCount = 0
+  let hasInvoicePhoto = false
+  let hasCsAttachments = false
+  if (opts.includePhotos) {
+    productPhotosCount = Array.isArray(delivery.productPhotos)
+      ? delivery.productPhotos.length
+      : 0
+    hasInvoicePhoto = Boolean(delivery.invoicePhoto)
+    hasCsAttachments = Array.isArray(order.csAttachments) && order.csAttachments.length > 0
+  } else {
+    // Cheap secondary lookup: count the array lengths server-side using
+    // PostgREST's jsonb_array_length so we don't pay to transfer the photos
+    // themselves. Two tiny reads (< 1 KB) instead of megabytes.
+    try {
+      const { data: metaDelivery } = await supabase
+        .from('order_delivery')
+        .select('productPhotos, invoicePhoto')
+        .eq('orderId', orderId)
+        .maybeSingle()
+      if (metaDelivery) {
+        productPhotosCount = Array.isArray((metaDelivery as any).productPhotos)
+          ? (metaDelivery as any).productPhotos.length
+          : 0
+        hasInvoicePhoto = Boolean((metaDelivery as any).invoicePhoto)
+      }
+    } catch {}
+    try {
+      const { data: metaOrder } = await supabase
+        .from('orders')
+        .select('csAttachments')
+        .eq('id', orderId)
+        .maybeSingle()
+      if (metaOrder) {
+        hasCsAttachments =
+          Array.isArray((metaOrder as any).csAttachments) &&
+          (metaOrder as any).csAttachments.length > 0
+      }
+    } catch {}
+    // Ensure the response is photo-free even if the row snuck them in.
+    delivery = { ...delivery, productPhotos: [], invoicePhoto: '' }
+  }
+
+  // Strip csAttachments from order unless explicitly requested. Add metadata.
+  const orderOut: any = { ...order }
+  if (!opts.includePhotos) delete orderOut.csAttachments
+
   return {
-    ...order,
+    ...orderOut,
     customer,
     address,
     items: orderItems,
     delivery,
+    productPhotosCount,
+    hasInvoicePhoto,
+    hasCsAttachments,
+    photosLoaded: opts.includePhotos,
   }
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const order = await enrich(params.id)
+    const url = new URL(request.url)
+    const includePhotos = url.searchParams.get('includePhotos') === '1'
+    const order = await enrich(params.id, { includePhotos })
     if (!order) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 })
     }
@@ -471,7 +541,11 @@ export async function PUT(
       }
     }
 
-    const order = await enrich(params.id)
+    // Phase 2H — PUT no longer echoes photos in the response. The client
+    // just sent them, so it already has them in state. No point paying
+    // egress to hand them back. The lazy-load endpoint is available when
+    // the client needs to re-fetch.
+    const order = await enrich(params.id, { includePhotos: false })
     return NextResponse.json({ order }, { status: 200 })
   } catch {
     return NextResponse.json({ error: 'Failed to update delivery data' }, { status: 500 })

@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
 import { formatCairoFriendly } from '@/lib/cairoTime'
+import { compressImage } from '@/lib/imageCompression'
 
 type OrderItemDetail = {
   id: string
@@ -43,6 +44,11 @@ type OrderDetail = {
     invoicePhoto: string
     deliveredAt: string | null
   }
+  // Phase 2H — lazy-load metadata. The initial GET returns empty photo arrays
+  // + these counts. Real photo bytes are fetched from /photos on demand.
+  productPhotosCount?: number
+  hasInvoicePhoto?: boolean
+  photosLoaded?: boolean
 }
 
 const STATUS_OPTIONS: Array<OrderDetail['delivery']['deliveryStatus']> = ['لم يخرج بعد', 'جاهز', 'في الطريق', 'تم التوصيل']
@@ -60,6 +66,18 @@ export default function BranchOrderDetailPage() {
   const [branchComments, setBranchComments] = useState('')
   const [productPhotos, setProductPhotos] = useState<string[]>([])
   const [invoicePhoto, setInvoicePhoto] = useState('')
+
+  // Phase 2H — lazy-load state. Photos are NOT fetched with the order.
+  // `photosLoaded` guards two things:
+  //   1) The "view saved photos" button + gallery visibility.
+  //   2) Whether PUT payloads include productPhotos/invoicePhoto keys — when
+  //      the user hasn't loaded them, we omit those keys so the server keeps
+  //      whatever is already in the DB (belt-and-braces against accidental
+  //      overwrites).
+  const [photosLoaded, setPhotosLoaded] = useState(false)
+  const [isLoadingPhotos, setIsLoadingPhotos] = useState(false)
+  const [savedPhotosCount, setSavedPhotosCount] = useState(0)
+  const [savedHasInvoice, setSavedHasInvoice] = useState(false)
 
   /** Per-line draft edits keyed by item id. */
   const [itemEdits, setItemEdits] = useState<
@@ -82,6 +100,10 @@ export default function BranchOrderDetailPage() {
     const load = async () => {
       setIsLoading(true)
       try {
+        // Phase 2H — initial load does NOT fetch photos. `data.order.delivery.productPhotos`
+        // will be an empty array on this response even if photos exist in the DB;
+        // the actual count is in `data.order.productPhotosCount`. When the user
+        // clicks "عرض الصور المحفوظة" we call /photos to hydrate.
         const res = await fetch(`/api/branch/orders/${params.id}`, { cache: 'no-store' })
         if (!res.ok) throw new Error('Failed to load')
         const data = await res.json()
@@ -89,8 +111,11 @@ export default function BranchOrderDetailPage() {
         setOrder(loaded)
         setDeliveryStatus(loaded.delivery.deliveryStatus)
         setBranchComments(loaded.delivery.branchComments || '')
-        setProductPhotos(loaded.delivery.productPhotos || [])
-        setInvoicePhoto(loaded.delivery.invoicePhoto || '')
+        setProductPhotos([])
+        setInvoicePhoto('')
+        setPhotosLoaded(Boolean(loaded.photosLoaded))
+        setSavedPhotosCount(Number(loaded.productPhotosCount) || 0)
+        setSavedHasInvoice(Boolean(loaded.hasInvoicePhoto))
         const drafts: Record<string, { quantity: number; weightGrams: number; weightDraft: string }> = {}
         for (const it of loaded.items || []) {
           drafts[it.id] = {
@@ -110,38 +135,91 @@ export default function BranchOrderDetailPage() {
     load()
   }, [params.id])
 
-  const fileToDataUrl = (file: File): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(String(reader.result || ''))
-      reader.onerror = reject
-      reader.readAsDataURL(file)
-    })
+  // Phase 2H — user clicks the "view saved photos" button. Fetch the photos
+  // bytes on demand from /photos and hydrate state. Idempotent; a second click
+  // is a no-op after the first success.
+  const handleLoadPhotos = async () => {
+    if (!order || photosLoaded || isLoadingPhotos) return
+    setIsLoadingPhotos(true)
+    try {
+      const res = await fetch(`/api/branch/orders/${order.id}/photos`, { cache: 'no-store' })
+      if (!res.ok) throw new Error('Failed to load photos')
+      const data = await res.json()
+      setProductPhotos(Array.isArray(data.productPhotos) ? data.productPhotos : [])
+      setInvoicePhoto((data.invoicePhoto as string) || '')
+      setPhotosLoaded(true)
+    } catch {
+      toast.error('تعذر تحميل الصور')
+    } finally {
+      setIsLoadingPhotos(false)
+    }
+  }
+
+  // Phase 2H — compress on client before upload. Was: raw FileReader → base64,
+  // which meant a 4 MB camera JPEG hit the DB as ~5.3 MB. Now: downscaled to
+  // max 1280px longest edge and re-encoded as JPEG q=0.72, typically ~250 KB.
+  // Saves 15-20× egress on every subsequent read of these photos.
+  //
+  // Also: if existing photos haven't been lazy-fetched yet, we fetch them
+  // FIRST so the new photo appends to the saved set instead of overwriting it.
+
+  const ensurePhotosLoaded = async () => {
+    if (photosLoaded) return true
+    if (!order) return false
+    // No existing photos to preserve — just mark loaded and continue.
+    if (savedPhotosCount === 0 && !savedHasInvoice) {
+      setPhotosLoaded(true)
+      return true
+    }
+    setIsLoadingPhotos(true)
+    try {
+      const res = await fetch(`/api/branch/orders/${order.id}/photos`, { cache: 'no-store' })
+      if (!res.ok) throw new Error('Failed to load photos')
+      const data = await res.json()
+      setProductPhotos(Array.isArray(data.productPhotos) ? data.productPhotos : [])
+      setInvoicePhoto((data.invoicePhoto as string) || '')
+      setPhotosLoaded(true)
+      return true
+    } catch {
+      toast.error('تعذر تحميل الصور الحالية')
+      return false
+    } finally {
+      setIsLoadingPhotos(false)
+    }
+  }
 
   const handleAddProductPhotos = async (files: FileList | null) => {
     if (!files || files.length === 0) return
+    const ok = await ensurePhotosLoaded()
+    if (!ok) return
     const list = Array.from(files).slice(0, 5)
-    const urls = await Promise.all(list.map(fileToDataUrl))
+    const urls = await Promise.all(list.map((f) => compressImage(f)))
     setProductPhotos((prev) => [...prev, ...urls].slice(0, 10))
   }
 
   const handleInvoicePhoto = async (files: FileList | null) => {
     if (!files || files.length === 0) return
-    const url = await fileToDataUrl(files[0])
+    const ok = await ensurePhotosLoaded()
+    if (!ok) return
+    const url = await compressImage(files[0])
     setInvoicePhoto(url)
   }
 
-  const handleRemoveProductPhoto = (idx: number) => {
+  const handleRemoveProductPhoto = async (idx: number) => {
     const ok = window.confirm('هل تريد حذف هذه الصورة؟')
     if (!ok) return
+    const loaded = await ensurePhotosLoaded()
+    if (!loaded) return
     setProductPhotos((prev) => prev.filter((_, i) => i !== idx))
     toast.success('🗑️ تم حذف الصورة. اضغط "حفظ" لتأكيد التغيير')
   }
 
-  const handleRemoveInvoicePhoto = () => {
-    if (!invoicePhoto) return
+  const handleRemoveInvoicePhoto = async () => {
     const ok = window.confirm('هل تريد حذف صورة الفاتورة؟')
     if (!ok) return
+    const loaded = await ensurePhotosLoaded()
+    if (!loaded) return
+    if (!invoicePhoto) return
     setInvoicePhoto('')
     toast.success('🗑️ تم حذف صورة الفاتورة. اضغط "حفظ" لتأكيد التغيير')
   }
@@ -150,12 +228,17 @@ export default function BranchOrderDetailPage() {
     setDeliveryStatus(newStatus)
     setIsSaving(true)
     try {
-      const payload = {
+      // Phase 2H — only send photo fields when the user has actually loaded
+      // them into state (or is adding fresh ones). Otherwise the server keeps
+      // whatever is in the DB (see PUT: `Array.isArray(body.productPhotos)`).
+      const payload: any = {
         deliveryStatus: newStatus,
         branchComments,
-        productPhotos,
-        invoicePhoto,
         updatedBy: user?.id || 'branch',
+      }
+      if (photosLoaded) {
+        payload.productPhotos = productPhotos
+        payload.invoicePhoto = invoicePhoto
       }
 
       const res = await fetch(`/api/branch/orders/${order?.id}`, {
@@ -167,9 +250,19 @@ export default function BranchOrderDetailPage() {
       if (!res.ok) throw new Error('Failed')
       // Merge the server's enriched response back into state so the
       // newly-set deliveredAt / acceptedAt / etc. appear immediately
-      // without a manual page refresh.
+      // without a manual page refresh. Note: PUT no longer returns
+      // photo bytes — we keep our own state authoritative for photos.
       const data = await res.json().catch(() => null)
-      if (data?.order) setOrder(data.order as OrderDetail)
+      if (data?.order) {
+        setOrder(data.order as OrderDetail)
+        // Server may return updated counts even when we didn't send photos.
+        if (typeof data.order.productPhotosCount === 'number') {
+          setSavedPhotosCount(data.order.productPhotosCount)
+        }
+        if (typeof data.order.hasInvoicePhoto === 'boolean') {
+          setSavedHasInvoice(data.order.hasInvoicePhoto)
+        }
+      }
       toast.success('✅ تم تحديث حالة التوصيل')
     } catch {
       toast.error('خطأ في تحديث الحالة')
@@ -183,12 +276,14 @@ export default function BranchOrderDetailPage() {
     if (!order) return
     setIsSaving(true)
     try {
-      const payload = {
+      const payload: any = {
         deliveryStatus,
         branchComments,
-        productPhotos,
-        invoicePhoto,
         updatedBy: user?.id || 'branch',
+      }
+      if (photosLoaded) {
+        payload.productPhotos = productPhotos
+        payload.invoicePhoto = invoicePhoto
       }
 
       const res = await fetch(`/api/branch/orders/${order.id}`, {
@@ -200,7 +295,15 @@ export default function BranchOrderDetailPage() {
       if (!res.ok) throw new Error('Failed')
 
       const data = await res.json().catch(() => null)
-      if (data?.order) setOrder(data.order as OrderDetail)
+      if (data?.order) {
+        setOrder(data.order as OrderDetail)
+        if (typeof data.order.productPhotosCount === 'number') {
+          setSavedPhotosCount(data.order.productPhotosCount)
+        }
+        if (typeof data.order.hasInvoicePhoto === 'boolean') {
+          setSavedHasInvoice(data.order.hasInvoicePhoto)
+        }
+      }
       toast.success('✅ تم حفظ البيانات')
     } catch {
       toast.error('حدث خطأ أثناء الحفظ')
@@ -560,6 +663,24 @@ export default function BranchOrderDetailPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1 text-right">صور المنتجات (متعددة)</label>
+            {/* Phase 2H — lazy-load banner. Shows count of saved photos when
+                we haven't fetched their bytes yet. Clicking the button
+                downloads the photos on demand. */}
+            {!photosLoaded && savedPhotosCount > 0 && (
+              <div className="mb-2 flex items-center justify-between bg-blue-50 border border-blue-200 rounded px-3 py-2 text-sm">
+                <span className="text-blue-800">
+                  🖼️ {savedPhotosCount} صور محفوظة (لم يتم تحميلها)
+                </span>
+                <button
+                  type="button"
+                  onClick={handleLoadPhotos}
+                  disabled={isLoadingPhotos}
+                  className="px-3 py-1 rounded bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-semibold"
+                >
+                  {isLoadingPhotos ? '... جاري التحميل' : 'عرض الصور'}
+                </button>
+              </div>
+            )}
             <input type="file" accept="image/*" multiple onChange={(e) => { handleAddProductPhotos(e.target.files); e.target.value = '' }} className="w-full" />
             <div className="mt-2 grid grid-cols-3 gap-2">
               {productPhotos.map((photo, idx) => (
@@ -581,6 +702,19 @@ export default function BranchOrderDetailPage() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1 text-right">صورة الفاتورة (مفردة)</label>
+            {!photosLoaded && savedHasInvoice && (
+              <div className="mb-2 flex items-center justify-between bg-blue-50 border border-blue-200 rounded px-3 py-2 text-sm">
+                <span className="text-blue-800">🧾 صورة فاتورة محفوظة (لم يتم تحميلها)</span>
+                <button
+                  type="button"
+                  onClick={handleLoadPhotos}
+                  disabled={isLoadingPhotos}
+                  className="px-3 py-1 rounded bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-semibold"
+                >
+                  {isLoadingPhotos ? '... جاري التحميل' : 'عرض الفاتورة'}
+                </button>
+              </div>
+            )}
             <input type="file" accept="image/*" onChange={(e) => { handleInvoicePhoto(e.target.files); e.target.value = '' }} className="w-full" />
             <div className="mt-2">
               {invoicePhoto ? (
@@ -598,7 +732,9 @@ export default function BranchOrderDetailPage() {
                 </div>
               ) : (
                 <div className="w-full h-28 border border-dashed border-gray-300 rounded flex items-center justify-center text-sm text-gray-500">
-                  لا توجد صورة فاتورة
+                  {!photosLoaded && savedHasInvoice
+                    ? 'اضغط "عرض الفاتورة" أعلاه لتحميل الصورة'
+                    : 'لا توجد صورة فاتورة'}
                 </div>
               )}
             </div>
