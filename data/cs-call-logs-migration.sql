@@ -25,3 +25,6 @@ create table if not exists public.cs_call_logs (
 create index if not exists cs_call_logs_phone_idx     on public.cs_call_logs (phone);
 create index if not exists cs_call_logs_calldate_idx  on public.cs_call_logs ("callDate");
 create index if not exists cs_call_logs_customer_idx  on public.cs_call_logs ("customerId");
+
+grant select, insert, update, delete on public.cs_call_logs
+  to anon, authenticated, service_role;
