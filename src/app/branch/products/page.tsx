@@ -61,7 +61,10 @@ export default function BranchProductsPage() {
   const fetchProducts = async () => {
     setIsLoading(true)
     try {
-      const res = await fetch('/api/products')
+      // no-store: stock edits happen here and users hit "تحديث" expecting
+      // fresh data — the 5-minute CDN cache on /api/products would otherwise
+      // serve stale stock badges right after a save.
+      const res = await fetch('/api/products', { cache: 'no-store' })
       const data = await res.json()
       const active = (data.products || []).filter((p: Product) => p.isActive)
       setProducts(active)

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidatePath } from 'next/cache'
 import { supabase } from '@/lib/supabase'
 
 type StockStatus = 'available' | 'low' | 'out'
@@ -63,7 +64,14 @@ export async function PATCH(request: NextRequest) {
       )
     }
 
-    return NextResponse.json({ product: updated })
+    // Bust the /api/products cache so branch / CS reads see the new stock
+    // status immediately instead of waiting up to 5 minutes for the CDN
+    // (s-maxage=300) or Next.js data cache (revalidate = 300) to expire.
+    try { revalidatePath('/api/products') } catch {}
+
+    return NextResponse.json({ product: updated }, {
+      headers: { 'Cache-Control': 'no-store' },
+    })
   } catch (err: any) {
     console.error('[products/stock] unexpected error', err)
     return NextResponse.json({ error: 'Failed to update stock', details: err?.message || null }, { status: 500 })
