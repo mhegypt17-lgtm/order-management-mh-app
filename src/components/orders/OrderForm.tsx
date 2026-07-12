@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
@@ -1349,7 +1349,6 @@ export default function OrderForm({ mode, orderId }: Props) {
                 <th className="p-2 text-right text-sm">الوزن (كج / جم)</th>
                 <th className="p-2 text-right text-sm">سعر الوحدة</th>
                 <th className="p-2 text-right text-sm">الإجمالي</th>
-                <th className="p-2 text-right text-sm">تعليمات خاصة</th>
                 <th className="p-2 text-center text-sm">حذف</th>
               </tr>
             </thead>
@@ -1380,7 +1379,8 @@ export default function OrderForm({ mode, orderId }: Props) {
                   ? 'border-b-2 border-amber-300 bg-amber-50'
                   : 'border-b border-gray-200'
                 return (
-                  <tr key={index} className={rowCls}>
+                  <Fragment key={index}>
+                  <tr className={rowCls}>
                     <td className="p-2 align-top">
                       <div className="flex items-center gap-1">
                         <input
@@ -1502,19 +1502,34 @@ export default function OrderForm({ mode, orderId }: Props) {
                       />
                     </td>
                     <td className="p-2 text-sm font-semibold text-gray-900">{lineTotal.toLocaleString()} ج.م</td>
-                    <td className="p-2">
-                      <input
-                        type="text"
-                        value={item.specialInstructions}
-                        onChange={(e) => updateItem(index, { specialInstructions: e.target.value })}
-                        className="w-full px-2 py-1 border rounded"
-                        dir="rtl"
-                      />
-                    </td>
                     <td className="p-2 text-center">
                       <button type="button" onClick={() => removeItem(index)} className="px-2 py-1 rounded bg-red-100 text-red-700">✖</button>
                     </td>
                   </tr>
+                  {/* Special-instructions row — full-width so it stays visible
+                      on mobile without horizontal scrolling. Renders as a
+                      multiline textarea with a clear label + highlight when
+                      non-empty. */}
+                  <tr className={rowCls}>
+                    <td colSpan={8} className="p-2 pt-0">
+                      <label className="block text-xs font-semibold text-gray-700 mb-1 text-right">
+                        📝 تعليمات خاصة {item.specialInstructions ? '✅' : ''}
+                      </label>
+                      <textarea
+                        value={item.specialInstructions}
+                        onChange={(e) => updateItem(index, { specialInstructions: e.target.value })}
+                        placeholder="أضف ملاحظات للمطبخ أو الفرع (اختياري)"
+                        rows={2}
+                        className={`w-full px-3 py-2 border-2 rounded-lg text-sm resize-y min-h-[56px] ${
+                          item.specialInstructions
+                            ? 'border-amber-300 bg-amber-50'
+                            : 'border-gray-200 bg-white'
+                        }`}
+                        dir="rtl"
+                      />
+                    </td>
+                  </tr>
+                  </Fragment>
                 )
               })}
             </tbody>
