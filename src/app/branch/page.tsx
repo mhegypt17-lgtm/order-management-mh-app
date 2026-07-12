@@ -17,6 +17,7 @@ type BranchOrder = {
   discountCode?: string | null
   discountAmount?: number | null
   netTotal?: number | null
+  walletUsed?: number | null
   createdBy: string
   customer: { customerName: string; phone: string } | null
   address: { streetAddress: string; googleMapsLink: string } | null
@@ -298,25 +299,48 @@ export default function BranchPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-sm font-semibold text-gray-900">
-                    {order.discountCode && Number(order.discountAmount) > 0 ? (
-                      <div className="flex flex-col items-end gap-0.5">
-                        <span className="text-xs text-gray-400 line-through">
-                          {Number(order.orderTotal || 0).toLocaleString()} ج.م
-                        </span>
-                        <span className="text-green-700 font-bold">
-                          {Number(order.netTotal ?? order.orderTotal ?? 0).toLocaleString()} ج.م
-                        </span>
-                        <span
-                          className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 font-mono"
-                          dir="ltr"
-                          title={`خصم ${Number(order.discountAmount).toLocaleString()} ج.م`}
-                        >
-                          🏷️ {order.discountCode}
-                        </span>
-                      </div>
-                    ) : (
-                      <>{Number(order.orderTotal || 0).toLocaleString()} ج.م</>
-                    )}
+                    {(() => {
+                      // Branch must see the *net* amount they should actually
+                      // collect from the customer. Show the breakdown badge
+                      // whenever a voucher discount and/or a wallet deduction
+                      // trims the raw orderTotal.
+                      const orderTotalNum = Number(order.orderTotal || 0)
+                      const discountNum = Number(order.discountAmount || 0)
+                      const walletNum = Number(order.walletUsed || 0)
+                      const netNum = Number(order.netTotal ?? orderTotalNum)
+                      const hasDiscount = Boolean(order.discountCode) && discountNum > 0
+                      const hasWallet = walletNum > 0
+                      if (!hasDiscount && !hasWallet) {
+                        return <>{orderTotalNum.toLocaleString()} ج.م</>
+                      }
+                      return (
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span className="text-xs text-gray-400 line-through">
+                            {orderTotalNum.toLocaleString()} ج.م
+                          </span>
+                          <span className="text-green-700 font-bold">
+                            {netNum.toLocaleString()} ج.م
+                          </span>
+                          {hasDiscount && (
+                            <span
+                              className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 font-mono"
+                              dir="ltr"
+                              title={`خصم ${discountNum.toLocaleString()} ج.م`}
+                            >
+                              🏷️ {order.discountCode}
+                            </span>
+                          )}
+                          {hasWallet && (
+                            <span
+                              className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300"
+                              title={`خصم من المحفظة ${walletNum.toLocaleString()} ج.م`}
+                            >
+                              💳 محفظة −{walletNum.toLocaleString()}
+                            </span>
+                          )}
+                        </div>
+                      )
+                    })()}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-700">{order.createdBy || '-'}</td>
                   <td className="px-4 py-3 text-sm">

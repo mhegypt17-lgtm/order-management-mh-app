@@ -352,7 +352,48 @@ export default function OrdersPage() {
                 <DeliveryProgressBar status={order.delivery?.deliveryStatus} compact />
               </div>
               <div className="mt-2 flex items-center justify-between gap-2 flex-wrap">
-                <span className="text-sm font-bold text-gray-900">{Number(order.orderTotal || 0).toLocaleString()} ج.م</span>
+                {(() => {
+                  // Show a breakdown badge (strike-through pre-total + net + tags)
+                  // whenever the customer actually pays *less* than the raw
+                  // orderTotal — i.e. a voucher discount and/or a wallet
+                  // deduction was applied. Otherwise show the plain total.
+                  const orderTotalNum = Number(order.orderTotal || 0)
+                  const discountNum = Number(order.discountAmount || 0)
+                  const walletNum = Number(order.walletUsed || 0)
+                  const netNum = Number(order.netTotal ?? orderTotalNum)
+                  const hasDiscount = Boolean(order.discountCode) && discountNum > 0
+                  const hasWallet = walletNum > 0
+                  if (!hasDiscount && !hasWallet) {
+                    return <span className="text-sm font-bold text-gray-900">{orderTotalNum.toLocaleString()} ج.م</span>
+                  }
+                  return (
+                    <div className="flex flex-col items-start gap-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] text-gray-400 line-through">{orderTotalNum.toLocaleString()}</span>
+                        <span className="text-sm font-bold text-green-700">{netNum.toLocaleString()} ج.م</span>
+                      </div>
+                      <div className="flex items-center gap-1 flex-wrap">
+                        {hasDiscount && (
+                          <span
+                            className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 font-mono"
+                            dir="ltr"
+                            title={`خصم ${discountNum.toLocaleString()} ج.م`}
+                          >
+                            🏷️ {order.discountCode}
+                          </span>
+                        )}
+                        {hasWallet && (
+                          <span
+                            className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300"
+                            title={`خصم من المحفظة ${walletNum.toLocaleString()} ج.م`}
+                          >
+                            💳 محفظة −{walletNum.toLocaleString()}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })()}
                 <span className="text-xs text-gray-500">👤 {order.createdBy || '-'}</span>
                 <button
                   disabled={duplicatingId === order.id}

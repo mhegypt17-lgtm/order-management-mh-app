@@ -71,6 +71,17 @@ export async function POST(
 
     const baseStatus = source.orderStatus === 'لاغي' ? 'تم' : source.orderStatus
 
+    // A reorder is a *fresh* charge to the customer. The wallet deduction
+    // from the source order was already debited on that order — reusing it
+    // here would silently apply credit the customer no longer has and pin
+    // the new order to a stale wallet balance. Reset wallet fields to zero
+    // and recompute netTotal from the surviving orderTotal / discount so
+    // the agent can apply wallet fresh from the customer's current balance
+    // when they open the reorder for review.
+    const sourceOrderTotal = Number(source.orderTotal) || 0
+    const sourceDiscount = Number(source.discountAmount) || 0
+    const recomputedNetTotal = Math.max(0, sourceOrderTotal - sourceDiscount)
+
     const newOrder: OrderRecord = {
       ...source,
       id: newOrderId,
@@ -78,7 +89,9 @@ export async function POST(
       orderDate,
       orderTime,
       orderStatus: baseStatus,
-      cancellationReason: baseStatus === 'لاغي' ? source.cancellationReason : null,
+      cancellationReason: (baseStatus as string) === 'لاغي' ? source.cancellationReason : null,
+      walletUsed: 0,
+      netTotal: recomputedNetTotal,
       createdBy,
       createdAt: nowISO,
       updatedAt: nowISO,

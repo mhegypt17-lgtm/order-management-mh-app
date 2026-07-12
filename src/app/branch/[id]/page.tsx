@@ -587,33 +587,62 @@ export default function BranchOrderDetailPage() {
                   </div>
                 </div>
               )}
-              <div className={`grid ${order.discountCode && Number(order.discountAmount) > 0 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'} gap-2 text-xs mt-2`}>
-                <div className="bg-gray-50 border border-gray-200 rounded px-2 py-1">
-                  <div className="text-gray-500">الإجمالي الفرعي</div>
-                  <div className="font-semibold text-gray-900">{order.subtotal ?? 0} ج.م</div>
-                </div>
-                <div className="bg-gray-50 border border-gray-200 rounded px-2 py-1">
-                  <div className="text-gray-500">رسوم التوصيل</div>
-                  <div className="font-semibold text-gray-900">{order.deliveryFee ?? 0} ج.م</div>
-                </div>
-                {order.discountCode && Number(order.discountAmount) > 0 ? (
-                  <>
-                    <div className="bg-gray-50 border border-gray-200 rounded px-2 py-1">
-                      <div className="text-gray-500">قبل الخصم</div>
-                      <div className="font-semibold text-gray-500 line-through">{order.orderTotal ?? 0} ج.م</div>
+              {Number((order as any).walletUsed) > 0 && (
+                <div className="mt-3 rounded-lg border-2 border-emerald-300 bg-emerald-50 p-3 text-right">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div>
+                      <div className="text-xs font-semibold text-emerald-800">💳 خصم من رصيد المحفظة</div>
+                      <div className="text-sm font-semibold text-emerald-900">تم خصم رصيد العميل من قبل</div>
                     </div>
-                    <div className="bg-green-50 border-2 border-green-400 rounded px-2 py-1">
-                      <div className="text-green-800 font-bold">💰 المطلوب تحصيله</div>
-                      <div className="font-bold text-green-800 text-base">{Number(order.netTotal ?? order.orderTotal ?? 0).toLocaleString()} ج.م</div>
+                    <div className="text-left">
+                      <div className="text-xs text-emerald-800">قيمة الخصم من المحفظة</div>
+                      <div className="text-lg font-bold text-emerald-900">
+                        −{Number((order as any).walletUsed).toLocaleString()} ج.م
+                      </div>
                     </div>
-                  </>
-                ) : (
-                  <div className="bg-red-50 border border-red-200 rounded px-2 py-1">
-                    <div className="text-red-700">الإجمالي الكلي</div>
-                    <div className="font-bold text-red-700">{order.orderTotal ?? 0} ج.م</div>
                   </div>
-                )}
-              </div>
+                  <div className="mt-2 text-[12px] text-emerald-900 bg-emerald-100 border border-emerald-200 rounded px-2 py-1.5">
+                    ⚠️ <strong>تنبيه للفرع:</strong> العميل استخدم رصيد المحفظة على هذا الطلب. اقبض فقط المبلغ <strong>المطلوب تحصيله</strong> الموضح أدناه باللون الأخضر — لا تحصِّل الإجمالي الكامل.
+                  </div>
+                </div>
+              )}
+              {(() => {
+                const hasDiscount = Boolean(order.discountCode) && Number(order.discountAmount) > 0
+                const hasWallet = Number((order as any).walletUsed) > 0
+                const showBreakdown = hasDiscount || hasWallet
+                const colClass = showBreakdown ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'
+                return (
+                  <div className={`grid ${colClass} gap-2 text-xs mt-2`}>
+                    <div className="bg-gray-50 border border-gray-200 rounded px-2 py-1">
+                      <div className="text-gray-500">الإجمالي الفرعي</div>
+                      <div className="font-semibold text-gray-900">{order.subtotal ?? 0} ج.م</div>
+                    </div>
+                    <div className="bg-gray-50 border border-gray-200 rounded px-2 py-1">
+                      <div className="text-gray-500">رسوم التوصيل</div>
+                      <div className="font-semibold text-gray-900">{order.deliveryFee ?? 0} ج.م</div>
+                    </div>
+                    {showBreakdown ? (
+                      <>
+                        <div className="bg-gray-50 border border-gray-200 rounded px-2 py-1">
+                          <div className="text-gray-500">
+                            {hasDiscount && hasWallet ? 'قبل الخصم والمحفظة' : hasDiscount ? 'قبل الخصم' : 'قبل خصم المحفظة'}
+                          </div>
+                          <div className="font-semibold text-gray-500 line-through">{order.orderTotal ?? 0} ج.م</div>
+                        </div>
+                        <div className="bg-green-50 border-2 border-green-400 rounded px-2 py-1">
+                          <div className="text-green-800 font-bold">💰 المطلوب تحصيله</div>
+                          <div className="font-bold text-green-800 text-base">{Number(order.netTotal ?? order.orderTotal ?? 0).toLocaleString()} ج.م</div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="bg-red-50 border border-red-200 rounded px-2 py-1">
+                        <div className="text-red-700">الإجمالي الكلي</div>
+                        <div className="font-bold text-red-700">{order.orderTotal ?? 0} ج.م</div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
             </>
           )}
         </section>
