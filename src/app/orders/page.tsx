@@ -357,10 +357,19 @@ export default function OrdersPage() {
                   // whenever the customer actually pays *less* than the raw
                   // orderTotal — i.e. a voucher discount and/or a wallet
                   // deduction was applied. Otherwise show the plain total.
+                  //
+                  // walletUsed is not always returned by the orders_dashboard_v1
+                  // view (the current v1 uses `o.*` frozen at creation time and
+                  // does not expose walletUsed), so infer it from the invariant
+                  // netTotal = orderTotal - discountAmount - walletUsed. This
+                  // way the wallet badge appears the moment migration #4 is
+                  // run OR whenever any explicit walletUsed value comes back.
                   const orderTotalNum = Number(order.orderTotal || 0)
                   const discountNum = Number(order.discountAmount || 0)
-                  const walletNum = Number(order.walletUsed || 0)
                   const netNum = Number(order.netTotal ?? orderTotalNum)
+                  const walletFromField = Number((order as any).walletUsed || 0)
+                  const walletInferred = Math.max(0, orderTotalNum - discountNum - netNum)
+                  const walletNum = walletFromField > 0 ? walletFromField : walletInferred
                   const hasDiscount = Boolean(order.discountCode) && discountNum > 0
                   const hasWallet = walletNum > 0
                   if (!hasDiscount && !hasWallet) {
@@ -487,7 +496,51 @@ export default function OrdersPage() {
                   <td className="px-4 py-3">
                     <DeliveryProgressBar status={order.delivery?.deliveryStatus} compact />
                   </td>
-                  <td className="px-4 py-3 text-sm font-semibold text-gray-900">{Number(order.orderTotal || 0).toLocaleString()} ج.م</td>
+                  <td className="px-4 py-3 text-sm font-semibold text-gray-900">
+                    {(() => {
+                      // Desktop table — same breakdown/badge logic as the
+                      // mobile card view above. Infers wallet from netTotal
+                      // when the view doesn't expose walletUsed.
+                      const orderTotalNum = Number(order.orderTotal || 0)
+                      const discountNum = Number(order.discountAmount || 0)
+                      const netNum = Number(order.netTotal ?? orderTotalNum)
+                      const walletFromField = Number((order as any).walletUsed || 0)
+                      const walletInferred = Math.max(0, orderTotalNum - discountNum - netNum)
+                      const walletNum = walletFromField > 0 ? walletFromField : walletInferred
+                      const hasDiscount = Boolean(order.discountCode) && discountNum > 0
+                      const hasWallet = walletNum > 0
+                      if (!hasDiscount && !hasWallet) {
+                        return <>{orderTotalNum.toLocaleString()} ج.م</>
+                      }
+                      return (
+                        <div className="flex flex-col items-start gap-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] text-gray-400 line-through">{orderTotalNum.toLocaleString()}</span>
+                            <span className="text-green-700">{netNum.toLocaleString()} ج.م</span>
+                          </div>
+                          <div className="flex items-center gap-1 flex-wrap">
+                            {hasDiscount && (
+                              <span
+                                className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 font-mono"
+                                dir="ltr"
+                                title={`خصم ${discountNum.toLocaleString()} ج.م`}
+                              >
+                                🏷️ {order.discountCode}
+                              </span>
+                            )}
+                            {hasWallet && (
+                              <span
+                                className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                title={`خصم من المحفظة ${walletNum.toLocaleString()} ج.م`}
+                              >
+                                💳 محفظة −{walletNum.toLocaleString()}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })()}
+                  </td>
                   <td className="px-4 py-3 text-sm text-gray-700">{order.createdBy || '-'}</td>
                   <td className="px-4 py-3 text-center">
                     <button

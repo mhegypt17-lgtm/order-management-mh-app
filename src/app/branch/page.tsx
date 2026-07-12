@@ -115,7 +115,13 @@ export default function BranchPage() {
   }, [orders, searchTerm, orderTypeFilter, orderStatusFilter])
 
   const summary = useMemo(() => {
-    const totalValue = filteredOrders.reduce((sum, o) => sum + Number(o.orderTotal || 0), 0)
+    // Branch KPI — sum the *net* amount actually collected from customers,
+    // not the raw orderTotal, so wallet and voucher deductions are reflected
+    // in the headline number the branch owner sees.
+    const totalValue = filteredOrders.reduce(
+      (sum, o) => sum + Number(o.netTotal ?? o.orderTotal ?? 0),
+      0,
+    )
     const delivered = filteredOrders.filter((o) => o.delivery.deliveryStatus === 'تم التوصيل').length
     const pending = filteredOrders.length - delivered
     return { count: filteredOrders.length, totalValue, delivered, pending }
@@ -303,11 +309,15 @@ export default function BranchPage() {
                       // Branch must see the *net* amount they should actually
                       // collect from the customer. Show the breakdown badge
                       // whenever a voucher discount and/or a wallet deduction
-                      // trims the raw orderTotal.
+                      // trims the raw orderTotal. Infer wallet from netTotal
+                      // so the badge works even if the API path doesn't return
+                      // walletUsed explicitly.
                       const orderTotalNum = Number(order.orderTotal || 0)
                       const discountNum = Number(order.discountAmount || 0)
-                      const walletNum = Number(order.walletUsed || 0)
                       const netNum = Number(order.netTotal ?? orderTotalNum)
+                      const walletFromField = Number(order.walletUsed || 0)
+                      const walletInferred = Math.max(0, orderTotalNum - discountNum - netNum)
+                      const walletNum = walletFromField > 0 ? walletFromField : walletInferred
                       const hasDiscount = Boolean(order.discountCode) && discountNum > 0
                       const hasWallet = walletNum > 0
                       if (!hasDiscount && !hasWallet) {
