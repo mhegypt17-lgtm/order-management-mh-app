@@ -4,8 +4,9 @@ import {
   OrderRecord,
   appendEditHistory,
   generateId,
-  readOrderItems,
-  readOrders,
+  readOrderItemsByOrderIds,
+  ORDER_COLUMNS,
+  ORDER_ITEM_COLUMNS,
 } from '@/lib/omsData'
 import { cairoDateString, cairoTimeString } from '@/lib/cairoTime'
 import { supabase } from '@/lib/supabase'
@@ -13,7 +14,8 @@ import { supabase } from '@/lib/supabase'
 /**
  * One-click reorder. Exact replica of the source order with ONLY today's
  * date/time, a fresh id, and a fresh appOrderNo. Everything else - items,
- * prices, address, payment, status, customerType, notes - is preserved.
+ * prices, address, payment, status, customerType, notes - is preserved
+ * (except walletUsed/netTotal — see the reset block below).
  */
 export async function POST(
   request: NextRequest,
@@ -23,14 +25,32 @@ export async function POST(
     const body = await request.json().catch(() => ({} as any))
     const createdBy = body.createdBy || 'unknown'
 
-    const orders = await readOrders()
-    const source = orders.find((o) => o.id === params.id)
-    if (!source) {
+    // Egress fix — previous version read the entire orders + order_items
+    // tables to find one source. Now: single indexed order lookup, scoped
+    // items fetch by orderId. Falls back gracefully if the deployment
+    // predates the csAttachments column.
+    const runSource = (cols: string) =>
+      supabase.from('orders').select(cols).eq('id', params.id).maybeSingle()
+    let sourceRes = await runSource(ORDER_COLUMNS)
+    if (
+      sourceRes.error &&
+      /csAttachments|column .* does not exist/i.test(String(sourceRes.error.message || ''))
+    ) {
+      const fallbackCols = ORDER_COLUMNS
+        .split(',')
+        .filter((c) => c.trim() !== 'csAttachments')
+        .join(',')
+      sourceRes = await runSource(fallbackCols)
+    }
+    if (sourceRes.error || !sourceRes.data) {
       return NextResponse.json({ error: 'Source order not found' }, { status: 404 })
     }
+    const source = sourceRes.data as unknown as OrderRecord
 
-    const allItems = await readOrderItems()
-    const sourceItems = allItems.filter((i) => i.orderId === source.id)
+    const sourceItems = (await readOrderItemsByOrderIds(
+      [source.id],
+      ORDER_ITEM_COLUMNS,
+    )) as OrderItemRecord[]
 
     const now = new Date()
     const orderDate = cairoDateString(now)

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import {
   CustomerAddressRecord,
+  OrderDeliveryRecord,
   OrderItemRecord,
   OrderRecord,
   appendEditHistory,
@@ -13,6 +14,17 @@ import {
   readOrderDelivery,
   readOrders,
   readDeliveryZones,
+  readOrderItemsByOrderIds,
+  readOrderDeliveryByOrderIds,
+  readProductsByIds,
+  ORDER_COLUMNS,
+  ORDER_COLUMNS_LIST,
+  CUSTOMER_COLUMNS,
+  ADDRESS_COLUMNS,
+  ORDER_ITEM_COLUMNS,
+  DELIVERY_COLUMNS_FULL,
+  DELIVERY_COLUMNS_LIST,
+  PRODUCT_COLUMNS,
 } from '@/lib/omsData'
 
 // Disable Next.js fetch caching — Supabase queries here must always
@@ -71,27 +83,53 @@ async function computeDeliveryFeeByArea(subtotal: number, area?: string, subArea
 }
 
 async function enrichOrder(order: OrderRecord, opts: { includePhotos: boolean } = { includePhotos: false }) {
-  const customers = await readCustomers()
-  const addresses = await readAddresses()
-  const orderItems = await readOrderItems()
-  const orderDelivery = await readOrderDelivery()
-  const products = await readProducts()
+  // Egress fix (mirrors /api/branch/orders/[id]::enrich). Previous version
+  // read FIVE full tables (customers, addresses, order_items, order_delivery,
+  // products) just to hydrate ONE order — every CS click paid ~1.5 MB of
+  // egress for that. This version uses scoped queries keyed off THIS order's
+  // ids only, with column allowlists so we never leak heavy fields.
+  const orderId = order.id
+  const customerId = (order as any).customerId as string | undefined
+  const addressId = (order as any).deliveryAddressId as string | undefined
 
-  const customer = customers.find((c: any) => c.id === order.customerId) || null
-  const address = addresses.find((a) => a.id === order.deliveryAddressId) || null
-  const items = orderItems
-    .filter((i) => i.orderId === order.id)
-    .map((item) => {
-      const product = products.find((p: any) => p.id === item.productId)
-      return {
-        ...item,
-        productName: product?.productName || 'منتج محذوف',
-      }
-    })
+  const [customerRes, addressRes, itemRows, deliveryRows] = await Promise.all([
+    customerId
+      ? supabase.from('customers').select(CUSTOMER_COLUMNS).eq('id', customerId).maybeSingle()
+      : Promise.resolve({ data: null, error: null } as any),
+    addressId
+      ? supabase.from('customer_addresses').select(ADDRESS_COLUMNS).eq('id', addressId).maybeSingle()
+      : Promise.resolve({ data: null, error: null } as any),
+    readOrderItemsByOrderIds([orderId], ORDER_ITEM_COLUMNS),
+    readOrderDeliveryByOrderIds(
+      [orderId],
+      // Phase 2H — DELIVERY_COLUMNS_LIST omits productPhotos/invoicePhoto.
+      opts.includePhotos ? DELIVERY_COLUMNS_FULL : DELIVERY_COLUMNS_LIST,
+    ),
+  ])
 
-  const fullDelivery =
-    orderDelivery.find((d) => d.orderId === order.id) ||
-    {
+  const customer = (customerRes as any)?.data || null
+  const address = (addressRes as any)?.data || null
+
+  // Products — only those actually referenced by this order's items, with a
+  // slim column list.
+  const productIds = (itemRows as OrderItemRecord[])
+    .map((i) => i.productId)
+    .filter((v): v is string => Boolean(v))
+  const productRows = await readProductsByIds(productIds, PRODUCT_COLUMNS)
+  const productsById = new Map<string, any>()
+  for (const p of productRows as any[]) productsById.set(p.id, p)
+
+  const items = (itemRows as OrderItemRecord[]).map((item) => {
+    const product = productsById.get(item.productId)
+    return {
+      ...item,
+      productName: product?.productName || 'منتج محذوف',
+    }
+  })
+
+  let fullDelivery = (deliveryRows as OrderDeliveryRecord[])[0]
+  if (!fullDelivery) {
+    fullDelivery = {
       id: '',
       orderId: order.id,
       deliveryStatus: 'لم يخرج بعد',
@@ -102,21 +140,57 @@ async function enrichOrder(order: OrderRecord, opts: { includePhotos: boolean } 
       updatedBy: '',
       updatedAt: order.updatedAt,
     }
+  }
 
   // Phase 2H — same lazy-load pattern as /api/branch/orders/[id]:
   // strip productPhotos/invoicePhoto/csAttachments by default and expose
   // counts so the UI can show "N صور محفوظة — اضغط للعرض" without paying
   // egress for photos the user never asks to see. Client re-fetches the
   // bytes from /api/orders/[id]/photos on demand.
-  const productPhotosCount = Array.isArray((fullDelivery as any).productPhotos)
-    ? (fullDelivery as any).productPhotos.length
-    : 0
-  const hasInvoicePhoto = Boolean((fullDelivery as any).invoicePhoto)
-  const hasCsAttachments =
-    Array.isArray((order as any).csAttachments) && (order as any).csAttachments.length > 0
-  const csAttachmentsCount = Array.isArray((order as any).csAttachments)
-    ? (order as any).csAttachments.length
-    : 0
+  let productPhotosCount = 0
+  let hasInvoicePhoto = false
+  let hasCsAttachments = false
+  let csAttachmentsCount = 0
+
+  if (opts.includePhotos) {
+    productPhotosCount = Array.isArray((fullDelivery as any).productPhotos)
+      ? (fullDelivery as any).productPhotos.length
+      : 0
+    hasInvoicePhoto = Boolean((fullDelivery as any).invoicePhoto)
+    hasCsAttachments =
+      Array.isArray((order as any).csAttachments) && (order as any).csAttachments.length > 0
+    csAttachmentsCount = Array.isArray((order as any).csAttachments)
+      ? (order as any).csAttachments.length
+      : 0
+  } else {
+    // Cheap size-only lookups so the UI can render the "N صور محفوظة" pill
+    // without downloading the base64 blobs.
+    try {
+      const { data: metaDelivery } = await supabase
+        .from('order_delivery')
+        .select('productPhotos, invoicePhoto')
+        .eq('orderId', orderId)
+        .maybeSingle()
+      if (metaDelivery) {
+        productPhotosCount = Array.isArray((metaDelivery as any).productPhotos)
+          ? (metaDelivery as any).productPhotos.length
+          : 0
+        hasInvoicePhoto = Boolean((metaDelivery as any).invoicePhoto)
+      }
+    } catch {}
+    try {
+      const { data: metaOrder } = await supabase
+        .from('orders')
+        .select('csAttachments')
+        .eq('id', orderId)
+        .maybeSingle()
+      if (metaOrder) {
+        const arr = (metaOrder as any).csAttachments
+        hasCsAttachments = Array.isArray(arr) && arr.length > 0
+        csAttachmentsCount = Array.isArray(arr) ? arr.length : 0
+      }
+    } catch {}
+  }
 
   let delivery: any = fullDelivery
   let orderOut: any = { ...order }
@@ -146,12 +220,31 @@ export async function GET(
   try {
     const url = new URL(request.url)
     const includePhotos = url.searchParams.get('includePhotos') === '1'
-    const orders = await readOrders()
-    const order = orders.find((o) => o.id === params.id)
 
-    if (!order) {
+    // Scoped order fetch — used to `readOrders()` (full table scan) and then
+    // `.find(id)` in memory. Now a single indexed lookup. Photo columns are
+    // excluded by default via ORDER_COLUMNS_LIST (they're re-fetched on
+    // demand by the /photos endpoint), and we gracefully fall back if a
+    // deployment predates the csAttachments column.
+    const baseOrderCols = includePhotos ? ORDER_COLUMNS : ORDER_COLUMNS_LIST
+    const runOrder = (cols: string) =>
+      supabase.from('orders').select(cols).eq('id', params.id).maybeSingle()
+
+    let orderRes = await runOrder(baseOrderCols)
+    if (
+      orderRes.error &&
+      /csAttachments|column .* does not exist/i.test(String(orderRes.error.message || ''))
+    ) {
+      const fallbackCols = baseOrderCols
+        .split(',')
+        .filter((c) => c.trim() !== 'csAttachments')
+        .join(',')
+      orderRes = await runOrder(fallbackCols)
+    }
+    if (orderRes.error || !orderRes.data) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 })
     }
+    const order = orderRes.data as unknown as OrderRecord
 
     return NextResponse.json(
       { order: await enrichOrder(order, { includePhotos }) },
@@ -170,23 +263,42 @@ export async function PUT(
     const body = await request.json()
     const now = new Date().toISOString()
 
-    const orders = await readOrders()
-    const orderItems = await readOrderItems()
-    const addresses = await readAddresses()
-
-    const orderIndex = orders.findIndex((o) => o.id === params.id)
-
-    if (orderIndex === -1) {
+    // Egress fix — previously read entire orders + order_items + addresses
+    // tables just to find one row. Now we do one indexed order lookup and
+    // one scoped items fetch. Addresses are pulled lazily below only when
+    // we actually need them (dedupe / edit path).
+    const runExisting = (cols: string) =>
+      supabase.from('orders').select(cols).eq('id', params.id).maybeSingle()
+    let existingRes = await runExisting(ORDER_COLUMNS)
+    if (
+      existingRes.error &&
+      /csAttachments|column .* does not exist/i.test(String(existingRes.error.message || ''))
+    ) {
+      const fb = ORDER_COLUMNS
+        .split(',')
+        .filter((c) => c.trim() !== 'csAttachments')
+        .join(',')
+      existingRes = await runExisting(fb)
+    }
+    if (existingRes.error || !existingRes.data) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 })
     }
+    const existing = existingRes.data as unknown as OrderRecord
+    const orderItems = (await readOrderItemsByOrderIds(
+      [params.id],
+      ORDER_ITEM_COLUMNS,
+    )) as OrderItemRecord[]
 
     // 🔒 Lock edits once branch starts delivery (unless admin)
     const requesterRole = String(body.role || new URL(request.url).searchParams.get('role') || '').toLowerCase()
     if (requesterRole !== 'admin') {
-      const deliveryRows = await readOrderDelivery()
-      const currentDelivery = deliveryRows.find((d) => d.orderId === params.id)
+      const { data: currentDelivery } = await supabase
+        .from('order_delivery')
+        .select('deliveryStatus')
+        .eq('orderId', params.id)
+        .maybeSingle()
       const lockingStatuses = ['في الطريق', 'تم التوصيل']
-      if (currentDelivery && lockingStatuses.includes(currentDelivery.deliveryStatus)) {
+      if (currentDelivery && lockingStatuses.includes((currentDelivery as any).deliveryStatus)) {
         // Exception: CS may still add/edit attachments (proof of payment,
         // post-delivery receipts, etc.) on a locked order. The client sends
         // `attachmentsOnly: true` to opt into this narrow patch; nothing
@@ -221,9 +333,9 @@ export async function PUT(
             action: 'updated',
             changedBy: body.createdBy || 'unknown',
             summary: 'تم تحديث مرفقات خدمة العملاء (الطلب مقفل بعد التوصيل)',
-            details: { attachmentCount: incomingAttachments.length, lockedStatus: currentDelivery.deliveryStatus },
+            details: { attachmentCount: incomingAttachments.length, lockedStatus: (currentDelivery as any).deliveryStatus },
           })
-          const refreshed = { ...orders[orderIndex], csAttachments: incomingAttachments, updatedAt: now } as OrderRecord
+          const refreshed = { ...existing, csAttachments: incomingAttachments, updatedAt: now } as OrderRecord
           return NextResponse.json(
             { order: await enrichOrder(refreshed), warning: null },
             { status: 200 },
@@ -232,7 +344,7 @@ export async function PUT(
         return NextResponse.json(
           {
             error: 'الطلب مقفل — الفرع بدأ التوصيل ولا يمكن التعديل',
-            deliveryStatus: currentDelivery.deliveryStatus,
+            deliveryStatus: (currentDelivery as any).deliveryStatus,
             locked: true,
           },
           { status: 423 }
@@ -243,28 +355,39 @@ export async function PUT(
     let deliveryAddress: CustomerAddressRecord | undefined
 
     if (body.deliveryAddressId && body.deliveryAddressId !== '__new') {
-      deliveryAddress = addresses.find((a) => a.id === body.deliveryAddressId)
+      // Scoped address lookup by id — replaces `addresses.find(a => a.id === …)`
+      // over the full table.
+      const { data: addr } = await supabase
+        .from('customer_addresses')
+        .select(ADDRESS_COLUMNS)
+        .eq('id', body.deliveryAddressId)
+        .maybeSingle()
+      deliveryAddress = (addr as unknown as CustomerAddressRecord) || undefined
     }
 
     // Dedupe by (customerId, addressLabel) — never create a second "Home" for the same customer.
     if (!deliveryAddress && body.streetAddress) {
-      const customerId = orders[orderIndex].customerId
+      const customerId = existing.customerId
       const incomingLabel = (body.addressLabel || 'Home').toString().trim()
       const normalizedLabel = incomingLabel.toLowerCase()
-      const sameLabel = addresses.find(
-        (a) =>
-          a.customerId === customerId &&
+      // Scoped fetch — only this customer's addresses (typically 1–3 rows).
+      const { data: customerAddresses } = await supabase
+        .from('customer_addresses')
+        .select(ADDRESS_COLUMNS)
+        .eq('customerId', customerId)
+      const sameLabel = ((customerAddresses as any[]) || []).find(
+        (a: any) =>
           String(a.addressLabel || '').trim().toLowerCase() === normalizedLabel
       )
       if (sameLabel) {
-        deliveryAddress = sameLabel
+        deliveryAddress = sameLabel as CustomerAddressRecord
       }
     }
 
     if (!deliveryAddress && body.streetAddress) {
       deliveryAddress = {
         id: generateId('addr'),
-        customerId: orders[orderIndex].customerId,
+        customerId: existing.customerId,
         addressLabel: body.addressLabel || 'Home',
         area: body.deliveryArea || '',
         subArea: body.deliverySubArea || '',
@@ -338,7 +461,8 @@ export async function PUT(
     )
     const orderTotal = subtotal + deliveryFee
 
-    const existing = orders[orderIndex]
+    // `existing` was already fetched via a scoped `.eq('id', params.id)` at
+    // the top of the handler — no need to re-index into a whole-table array.
 
     // Re-evaluate the discount against the new gross total. The client sends
     // `discountCode` only when CS explicitly applies/removes a voucher; when
