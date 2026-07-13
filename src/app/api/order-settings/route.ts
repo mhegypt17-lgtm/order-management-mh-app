@@ -44,17 +44,21 @@ type OrderSettingsRecord = {
 
 type SectionKey = keyof OrderSettingsRecord
 
-function normalizeRows(rows: unknown): LookupValueRecord[] {
+function normalizeRows(rows: unknown, section?: SectionKey): LookupValueRecord[] {
   if (!Array.isArray(rows)) return []
 
   const now = new Date().toISOString()
+  // Complaint reasons carry an optional nested `subReasons` list per parent.
+  // Every other section ignores the field so we drop it to keep payloads tight.
+  const preserveSubReasons = section === 'complaintReasons'
+
   return rows
     .map((row, idx) => {
       const source = row as Partial<LookupValueRecord>
       const label = String(source.label || '').trim()
       if (!label) return null
 
-      return {
+      const base: LookupValueRecord = {
         id: String(source.id || `lookup_${Date.now()}_${idx}`),
         label,
         isActive: source.isActive !== false,
@@ -62,6 +66,17 @@ function normalizeRows(rows: unknown): LookupValueRecord[] {
         createdAt: source.createdAt || now,
         updatedAt: now,
       }
+
+      if (preserveSubReasons) {
+        const rawSub = (source as any).subReasons
+        if (Array.isArray(rawSub) && rawSub.length > 0) {
+          const normalizedSub = normalizeRows(rawSub) // recurse without preserving further nesting
+          if (normalizedSub.length > 0) {
+            return { ...base, subReasons: normalizedSub }
+          }
+        }
+      }
+      return base
     })
     .filter((row): row is LookupValueRecord => Boolean(row))
     .sort((a, b) => a.sortOrder - b.sortOrder)
@@ -121,7 +136,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid section' }, { status: 400 })
     }
 
-    const normalizedItems = normalizeRows(items)
+    const normalizedItems = normalizeRows(items, section)
     if (normalizedItems.length === 0) {
       return NextResponse.json({ error: 'At least one value is required' }, { status: 400 })
     }

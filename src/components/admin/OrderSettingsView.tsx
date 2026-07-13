@@ -49,6 +49,10 @@ type LookupItem = {
   label: string
   isActive: boolean
   sortOrder: number
+  // Only populated for `complaintReasons` — each parent reason carries a
+  // nested list of sub-reasons the CS agent picks from. Other sections
+  // leave this undefined and it never gets sent to the server.
+  subReasons?: LookupItem[]
 }
 
 type SettingsState = Record<SectionKey, LookupItem[]>
@@ -66,11 +70,28 @@ const SECTION_META: { key: SectionKey; title: string; hint: string }[] = [
 
 function normalizeItems(items: LookupItem[]): LookupItem[] {
   return items
-    .map((item, idx) => ({
-      ...item,
-      label: String(item.label || '').trim(),
-      sortOrder: idx + 1,
-    }))
+    .map((item, idx) => {
+      const cleanSub = Array.isArray(item.subReasons)
+        ? item.subReasons
+            .map((s, sIdx) => ({
+              ...s,
+              label: String(s.label || '').trim(),
+              sortOrder: sIdx + 1,
+            }))
+            .filter((s) => s.label.length > 0)
+            .map((s, sIdx) => ({ ...s, sortOrder: sIdx + 1 }))
+        : undefined
+      const base: LookupItem = {
+        ...item,
+        label: String(item.label || '').trim(),
+        sortOrder: idx + 1,
+      }
+      // Only carry `subReasons` on the wire if there's at least one.
+      // Prevents empty arrays inflating the settings payload.
+      if (cleanSub && cleanSub.length > 0) base.subReasons = cleanSub
+      else delete base.subReasons
+      return base
+    })
     .filter((item) => item.label.length > 0)
 }
 
@@ -219,6 +240,75 @@ export default function OrderSettingsView() {
     })
   }
 
+  // ─── Sub-reason helpers (complaintReasons only) ────────────────────────
+  // These edit the nested `subReasons` array on a parent reason. All four
+  // funnel through `setSettings` so the existing "Save section" button
+  // persists the whole tree in one PUT.
+  const mutateSubReasons = (
+    parentId: string,
+    mutator: (subs: LookupItem[]) => LookupItem[],
+  ) => {
+    setSettings((prev) => ({
+      ...prev,
+      complaintReasons: prev.complaintReasons.map((parent) =>
+        parent.id === parentId
+          ? { ...parent, subReasons: mutator(parent.subReasons || []) }
+          : parent,
+      ),
+    }))
+  }
+
+  const addSubReason = (parentId: string, label: string) => {
+    const clean = label.trim()
+    if (!clean) return
+    mutateSubReasons(parentId, (subs) => {
+      const exists = subs.some((s) => s.label.toLowerCase() === clean.toLowerCase())
+      if (exists) {
+        toast.error('هذا السبب الفرعي موجود بالفعل')
+        return subs
+      }
+      return [
+        ...subs,
+        {
+          id: `tmp_sub_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          label: clean,
+          isActive: true,
+          sortOrder: subs.length + 1,
+        },
+      ]
+    })
+  }
+
+  const updateSubReason = (parentId: string, subId: string, patch: Partial<LookupItem>) => {
+    mutateSubReasons(parentId, (subs) =>
+      subs.map((s) => (s.id === subId ? { ...s, ...patch } : s)),
+    )
+  }
+
+  const removeSubReason = (parentId: string, subId: string) => {
+    mutateSubReasons(parentId, (subs) =>
+      subs
+        .filter((s) => s.id !== subId)
+        .map((s, idx) => ({ ...s, sortOrder: idx + 1 })),
+    )
+  }
+
+  const moveSubReason = (parentId: string, index: number, direction: 'up' | 'down') => {
+    mutateSubReasons(parentId, (subs) => {
+      const next = [...subs]
+      const target = direction === 'up' ? index - 1 : index + 1
+      if (target < 0 || target >= next.length) return subs
+      const cur = next[index]
+      next[index] = next[target]
+      next[target] = cur
+      return next.map((s, idx) => ({ ...s, sortOrder: idx + 1 }))
+    })
+  }
+
+  // Local per-parent input state for "add sub-reason" textboxes.
+  const [newSubValues, setNewSubValues] = useState<Record<string, string>>({})
+  const [expandedSubReasons, setExpandedSubReasons] = useState<Record<string, boolean>>({})
+
   const addItem = (section: SectionKey) => {
     const label = newValues[section].trim()
     if (!label) return
@@ -320,7 +410,8 @@ export default function OrderSettingsView() {
 
           <div className="space-y-2">
             {settings[meta.key].map((item, index) => (
-              <div key={item.id} className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_auto_auto] gap-2 items-center border border-gray-200 rounded-lg p-2">
+              <div key={item.id} className="border border-gray-200 rounded-lg p-2 space-y-2">
+                <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_auto_auto_auto] gap-2 items-center">
                 <input
                   value={item.label}
                   onChange={(e) => updateItem(meta.key, item.id, { label: e.target.value })}
@@ -349,6 +440,18 @@ export default function OrderSettingsView() {
                 >
                   ↓
                 </button>
+                {meta.key === 'complaintReasons' && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedSubReasons((prev) => ({ ...prev, [item.id]: !prev[item.id] }))
+                    }
+                    className="px-2 py-1 rounded bg-blue-100 text-blue-700 text-xs"
+                    title="إدارة الأسباب الفرعية"
+                  >
+                    {expandedSubReasons[item.id] ? '▲' : '▼'} فرعية ({item.subReasons?.length || 0})
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => removeItem(meta.key, item.id)}
@@ -356,6 +459,89 @@ export default function OrderSettingsView() {
                 >
                   حذف
                 </button>
+                </div>
+
+                {meta.key === 'complaintReasons' && expandedSubReasons[item.id] && (
+                  <div className="border-t border-gray-100 pt-2 mr-6 pl-2 space-y-1.5 bg-gray-50 rounded p-2">
+                    <div className="text-xs font-semibold text-gray-600 mb-1">
+                      الأسباب الفرعية لـ &quot;{item.label}&quot;
+                    </div>
+                    {(item.subReasons || []).map((sub, subIdx) => (
+                      <div
+                        key={sub.id}
+                        className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_auto_auto] gap-1.5 items-center bg-white border border-gray-200 rounded px-2 py-1"
+                      >
+                        <input
+                          value={sub.label}
+                          onChange={(e) =>
+                            updateSubReason(item.id, sub.id, { label: e.target.value })
+                          }
+                          className="px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-red-500"
+                          dir="rtl"
+                        />
+                        <label className="inline-flex items-center gap-1 text-xs text-gray-700">
+                          <input
+                            type="checkbox"
+                            checked={sub.isActive}
+                            onChange={(e) =>
+                              updateSubReason(item.id, sub.id, { isActive: e.target.checked })
+                            }
+                          />
+                          مفعل
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => moveSubReason(item.id, subIdx, 'up')}
+                          className="px-1.5 py-0.5 text-xs rounded bg-gray-100 text-gray-700"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveSubReason(item.id, subIdx, 'down')}
+                          className="px-1.5 py-0.5 text-xs rounded bg-gray-100 text-gray-700"
+                        >
+                          ↓
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeSubReason(item.id, sub.id)}
+                          className="px-1.5 py-0.5 text-xs rounded bg-red-100 text-red-700"
+                        >
+                          حذف
+                        </button>
+                      </div>
+                    ))}
+                    <div className="flex gap-1.5 pt-1">
+                      <input
+                        value={newSubValues[item.id] || ''}
+                        onChange={(e) =>
+                          setNewSubValues((prev) => ({ ...prev, [item.id]: e.target.value }))
+                        }
+                        placeholder="أضف سبب فرعي"
+                        className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-red-500"
+                        dir="rtl"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            addSubReason(item.id, newSubValues[item.id] || '')
+                            setNewSubValues((prev) => ({ ...prev, [item.id]: '' }))
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          addSubReason(item.id, newSubValues[item.id] || '')
+                          setNewSubValues((prev) => ({ ...prev, [item.id]: '' }))
+                        }}
+                        className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-800 hover:bg-gray-200"
+                      >
+                        + إضافة
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>

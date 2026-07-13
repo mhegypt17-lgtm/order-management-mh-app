@@ -12,6 +12,7 @@ interface Complaint {
   subject: string
   description: string
   reason: string
+  subReason?: string | null
   status: 'open' | 'in-progress' | 'closed'
   priority: 'low' | 'medium' | 'high'
   customerId: string | null
@@ -86,6 +87,16 @@ export default function ComplaintsSection() {
   const [complaints, setComplaints] = useState<Complaint[]>([])
   const [channels, setChannels] = useState<string[]>([])
   const [reasons, setReasons] = useState<string[]>([])
+  // Full complaint-reasons tree (parents + nested sub-reasons). Kept
+  // alongside the flat `reasons` list so existing usages don't break.
+  // Only entries with `isActive !== false` are considered for pickers.
+  const [reasonsTree, setReasonsTree] = useState<
+    Array<{
+      label: string
+      isActive: boolean
+      subReasons: Array<{ label: string; isActive: boolean }>
+    }>
+  >([])
   const [agents, setAgents] = useState(['رنا', 'مى', 'ميرنا', 'أمل'])
   const [orders, setOrders] = useState<Order[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -114,6 +125,7 @@ export default function ComplaintsSection() {
     subject: '',
     description: '',
     reason: '',
+    subReason: '',
     priority: 'medium' as const,
     customerSearch: '',
     orderSearch: '',
@@ -163,9 +175,31 @@ export default function ComplaintsSection() {
         const data = await settingsRes.json()
         // Use options.complaintChannels if available, otherwise fall back to settings.complaintChannels
         const chans = data.options?.complaintChannels || data.settings?.complaintChannels?.map((c: any) => c.label) || []
-        const reasonsList = data.options?.complaintReasons || data.settings?.complaintReasons?.map((r: any) => r.label) || []
+        // Prefer the full settings tree so we get nested sub-reasons; the
+        // `options.complaintReasons` list is only used as a last-resort
+        // fallback (flat labels, no sub-reasons will appear).
+        const rawTree = Array.isArray(data.settings?.complaintReasons)
+          ? data.settings.complaintReasons
+          : []
+        const tree = rawTree.map((r: any) => ({
+          label: String(r?.label || ''),
+          isActive: r?.isActive !== false,
+          subReasons: Array.isArray(r?.subReasons)
+            ? r.subReasons
+                .map((s: any) => ({
+                  label: String(s?.label || ''),
+                  isActive: s?.isActive !== false,
+                }))
+                .filter((s: any) => s.label)
+            : [],
+        })).filter((r: any) => r.label)
+        const reasonsList =
+          tree.length > 0
+            ? tree.filter((r: any) => r.isActive).map((r: any) => r.label)
+            : (data.options?.complaintReasons || [])
         setChannels(Array.isArray(chans) ? chans : [])
         setReasons(Array.isArray(reasonsList) ? reasonsList : [])
+        setReasonsTree(tree)
         // Load SLA hours from settings
         if (data.slaHours) {
           setSlaHours(data.slaHours)
@@ -195,6 +229,7 @@ export default function ComplaintsSection() {
       setComplaints([])
       setChannels([])
       setReasons([])
+      setReasonsTree([])
       setOrders([])
       setCustomers([])
       setProducts([])
@@ -206,6 +241,15 @@ export default function ComplaintsSection() {
   const handleCreateComplaint = async () => {
     if (!formData.channel || !formData.subject || !formData.description) {
       toast.error('يرجى ملء جميع الحقول المطلوبة')
+      return
+    }
+
+    // If the picked reason has active sub-reasons, force the CS agent to
+    // pick one — this is the whole point of the two-level hierarchy.
+    const parent = reasonsTree.find((r) => r.label === formData.reason)
+    const activeSubs = parent?.subReasons.filter((s) => s.isActive) || []
+    if (activeSubs.length > 0 && !formData.subReason) {
+      toast.error('يرجى اختيار السبب الفرعي')
       return
     }
 
@@ -222,6 +266,7 @@ export default function ComplaintsSection() {
           subject: formData.subject,
           description: formData.description,
           reason: formData.reason,
+          subReason: formData.subReason || null,
           priority: formData.priority,
           customerId: orderData?.customerId || null,
           customerName: customerData?.customerName || null,
@@ -241,6 +286,7 @@ export default function ComplaintsSection() {
         subject: '',
         description: '',
         reason: '',
+        subReason: '',
         priority: 'medium',
         customerSearch: '',
         orderSearch: '',
@@ -448,6 +494,7 @@ export default function ComplaintsSection() {
       subject: '',
       description: '',
       reason: '',
+      subReason: '',
       priority: 'medium',
       customerSearch: customerData?.phone || '',
       orderSearch: order.appOrderNo,
@@ -650,7 +697,11 @@ export default function ComplaintsSection() {
             {reasons.length > 0 ? (
               <select
                 value={formData.reason}
-                onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
+                onChange={(e) =>
+                  // Reset sub-reason whenever the parent reason changes
+                  // so we never persist a stale (parent, sub) pair.
+                  setFormData({ ...formData, reason: e.target.value, subReason: '' })
+                }
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:border-red-600"
               >
                 <option value="">-- اختر السبب --</option>
@@ -664,12 +715,41 @@ export default function ComplaintsSection() {
               <input
                 type="text"
                 value={formData.reason}
-                onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
+                onChange={(e) => setFormData({ ...formData, reason: e.target.value, subReason: '' })}
                 placeholder="مثال: جودة منتج، تأخير توصيل..."
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:border-red-600"
               />
             )}
           </div>
+
+          {/* Sub-reason (cascading) — only rendered when the picked parent
+              has at least one active sub-reason. If none are configured
+              for this parent, we hide the field entirely so the CS agent
+              is never blocked by an empty dropdown. */}
+          {(() => {
+            const parent = reasonsTree.find((r) => r.label === formData.reason)
+            const activeSubs = parent?.subReasons.filter((s) => s.isActive) || []
+            if (!formData.reason || activeSubs.length === 0) return null
+            return (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  السبب الفرعي <span className="text-red-600">*</span>
+                </label>
+                <select
+                  value={formData.subReason}
+                  onChange={(e) => setFormData({ ...formData, subReason: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:border-red-600"
+                >
+                  <option value="">-- اختر السبب الفرعي --</option>
+                  {activeSubs.map((s) => (
+                    <option key={s.label} value={s.label}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )
+          })()}
 
           {/* Description */}
           <div>
@@ -816,6 +896,7 @@ export default function ComplaintsSection() {
                   subject: '',
                   description: '',
                   reason: '',
+                  subReason: '',
                   priority: 'medium',
                   customerSearch: '',
                   orderSearch: '',
@@ -1086,7 +1167,11 @@ export default function ComplaintsSection() {
                   <strong className="text-gray-700">القناة:</strong> <span className="text-gray-600">{selectedComplaint.channel}</span>
                 </p>
                 <p>
-                  <strong className="text-gray-700">السبب:</strong> <span className="text-gray-600">{selectedComplaint.reason}</span>
+                  <strong className="text-gray-700">السبب:</strong>{' '}
+                  <span className="text-gray-600">
+                    {selectedComplaint.reason}
+                    {selectedComplaint.subReason ? ` › ${selectedComplaint.subReason}` : ''}
+                  </span>
                 </p>
                 <p>
                   <strong className="text-gray-700">الوقت المستغرق:</strong> <span className="text-gray-600">{calculateSLA(selectedComplaint)}</span>

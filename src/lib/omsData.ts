@@ -226,6 +226,12 @@ export interface LookupValueRecord {
   sortOrder: number
   createdAt: string
   updatedAt: string
+  // Optional nested lookups. Used only by `complaintReasons` today to give
+  // each parent reason (الجودة / التوصيل / ...) a list of specific
+  // sub-reasons the CS agent must pick from once the parent is chosen.
+  // Every other lookup category ignores this field — it stays undefined and
+  // costs nothing on the wire.
+  subReasons?: LookupValueRecord[]
 }
 
 export interface AgentNoticeRecord {
@@ -261,6 +267,10 @@ export interface ComplaintRecord {
   subject: string
   description: string
   reason: string
+  // Optional child of `reason`. Populated when the parent reason has a
+  // configured list of sub-reasons in order settings. Nullable so historical
+  // complaints created before the two-level hierarchy stay valid.
+  subReason?: string | null
   status: 'open' | 'in-progress' | 'closed'
   priority: 'low' | 'medium' | 'high'
   customerId: string | null
@@ -405,7 +415,74 @@ const DEFAULT_ORDER_TYPES = ['B2B', 'Online', 'Instashop', 'App']
 const DEFAULT_PAYMENT_METHODS = ['Instapay', 'Cash', 'Visa', 'Credit']
 const DEFAULT_ORDER_STATUSES = ['تم', 'مؤجل', 'لاغي', 'حجز']
 const DEFAULT_COMPLAINT_CHANNELS = ['Instashop', 'App', 'Branch', 'Breadfast']
-const DEFAULT_COMPLAINT_REASONS = ['تأخير التوصيل', 'جودة المنتج', 'اختلاف الطلب', 'سوء الخدمة', 'أخرى']
+
+// Two-level default for complaint reasons. Each parent maps to a list of
+// specific sub-reasons the CS agent picks from once the parent is chosen.
+// Admin can edit both levels in Order Settings → Complaint Reasons.
+const DEFAULT_COMPLAINT_REASON_TREE: Array<{ label: string; subReasons: string[] }> = [
+  { label: 'الجودة', subReasons: ['تالف', 'تغير في الطعم'] },
+  {
+    label: 'التوصيل',
+    subReasons: [
+      'تأخير',
+      'أسلوب غير لائق',
+      'عدم إحضار ماكينة فيزا',
+      'عدم الالتزام بالنظافة الشخصية',
+    ],
+  },
+  {
+    label: 'التغليف',
+    subReasons: [
+      'أكياس بها دم أو تغليف مفتوح',
+      'منتج مفكوك من التجميد',
+      'خطأ في نوع التغليف',
+      'الليبل غير مطابق للفاتورة',
+      'عدم توضيح تاريخ الصلاحية',
+      'تاريخ إنتاج قديم',
+    ],
+  },
+  {
+    label: 'عدم الالتزام بتفاصيل الطلب',
+    subReasons: [
+      'خطأ بالفاتورة',
+      'خطأ في الطلب',
+      'منتج ناقص',
+      'تغيير غير مصرح به',
+      'وصول منتج بدلا من المنتج المطلوب',
+    ],
+  },
+  {
+    label: 'المبيعات',
+    subReasons: [
+      'أسلوب غير لائق',
+      'خطأ في تسجيل أو صياغة الطلب',
+      'تأخير في الرد',
+    ],
+  },
+  { label: 'الفرع', subReasons: ['سوء التعامل', 'عدم النظافة'] },
+  {
+    label: 'التطبيق',
+    subReasons: [
+      'عدم مطابقة الصور للمنتج',
+      'معلومات غير واضحة بالشكل الكافي',
+    ],
+  },
+  {
+    label: 'تغيير في المواصفات',
+    subReasons: [
+      'وجود شعر أو ريش أو عدم النظافة',
+      'هدر مرتفع',
+      'تقطيع غير متناسق',
+      'المنتج يشد أثناء التسوية',
+      'يفك في الزيت',
+      'زفارة',
+      'نسبة دهن مرتفعة',
+      'تغير في اللون أو الرائحة',
+      'منتج تالف',
+      'عدم الالتزام بالمواصفات القياسية',
+    ],
+  },
+]
 const DEFAULT_CUSTOMER_SOURCES = [
   'Facebook',
   'Instashop',
@@ -433,6 +510,29 @@ function defaultsToLookupRows(values: string[]): LookupValueRecord[] {
   }))
 }
 
+// Convert the two-level complaint-reason default tree into LookupValueRecord[]
+// with nested subReasons populated. Used only on first boot / when the
+// complaintReasons setting has never been persisted.
+function defaultsToComplaintReasonTree(): LookupValueRecord[] {
+  const now = new Date().toISOString()
+  return DEFAULT_COMPLAINT_REASON_TREE.map((parent, idx) => ({
+    id: generateId('lookup'),
+    label: parent.label,
+    isActive: true,
+    sortOrder: idx + 1,
+    createdAt: now,
+    updatedAt: now,
+    subReasons: parent.subReasons.map((childLabel, cIdx) => ({
+      id: generateId('lookup'),
+      label: childLabel,
+      isActive: true,
+      sortOrder: cIdx + 1,
+      createdAt: now,
+      updatedAt: now,
+    })),
+  }))
+}
+
 function defaultOrderSettings(): OrderSettingsRecord {
   return {
     orderReceivers: defaultsToLookupRows(DEFAULT_ORDER_RECEIVERS),
@@ -442,7 +542,7 @@ function defaultOrderSettings(): OrderSettingsRecord {
     paymentMethods: defaultsToLookupRows(DEFAULT_PAYMENT_METHODS),
     orderStatuses: defaultsToLookupRows(DEFAULT_ORDER_STATUSES),
     complaintChannels: defaultsToLookupRows(DEFAULT_COMPLAINT_CHANNELS),
-    complaintReasons: defaultsToLookupRows(DEFAULT_COMPLAINT_REASONS),
+    complaintReasons: defaultsToComplaintReasonTree(),
     monthlyCompensationBudget: 5000,
     monthlyTargetedUnitsGoal: 0,
     slaHours: 4,
@@ -476,6 +576,46 @@ export function normalizeLookupRows(rows: unknown): LookupValueRecord[] {
         createdAt: source.createdAt || now,
         updatedAt: now,
       }
+    })
+    .filter((row): row is LookupValueRecord => Boolean(row))
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((row, idx) => ({ ...row, sortOrder: idx + 1 }))
+}
+
+// Same as `normalizeLookupRows` but recursively normalizes any nested
+// `subReasons` on each row. Used for `complaintReasons` where each parent
+// reason carries its own list of specific sub-reasons. Rows without a
+// `subReasons` array keep the field omitted so we don't pay bytes on the
+// wire for empty arrays.
+export function normalizeLookupRowsWithSubReasons(
+  rows: unknown,
+): LookupValueRecord[] {
+  if (!Array.isArray(rows)) return []
+
+  const now = new Date().toISOString()
+  return rows
+    .map((row, idx) => {
+      const source = row as Partial<LookupValueRecord>
+      const label = String(source.label || '').trim()
+      if (!label) return null
+
+      const rawSub = (source as any).subReasons
+      const subReasons =
+        Array.isArray(rawSub) && rawSub.length > 0
+          ? normalizeLookupRows(rawSub)
+          : undefined
+
+      const base: LookupValueRecord = {
+        id: source.id || generateId('lookup'),
+        label,
+        isActive: source.isActive !== false,
+        sortOrder: Number(source.sortOrder) || idx + 1,
+        createdAt: source.createdAt || now,
+        updatedAt: now,
+      }
+      return subReasons && subReasons.length > 0
+        ? { ...base, subReasons }
+        : base
     })
     .filter((row): row is LookupValueRecord => Boolean(row))
     .sort((a, b) => a.sortOrder - b.sortOrder)
@@ -616,7 +756,7 @@ export const PRODUCT_COLUMNS = [
 // that can grow large on chatty tickets, but callers (dashboard list + bell)
 // need at least the count so we keep it in the default allowlist.
 export const COMPLAINT_COLUMNS = [
-  'id', 'ticketNumber', 'channel', 'subject', 'description', 'reason',
+  'id', 'ticketNumber', 'channel', 'subject', 'description', 'reason', 'subReason',
   'status', 'priority',
   'customerId', 'customerName', 'customerPhone', 'linkedOrderId',
   'assignedTo', 'createdBy', 'compensationAmount', 'productIds',
@@ -1038,7 +1178,7 @@ export async function readOrderSettings(): Promise<OrderSettingsRecord> {
       paymentMethods: normalizeLookupRows(parsed.paymentMethods),
       orderStatuses: normalizeLookupRows(parsed.orderStatuses),
       complaintChannels: normalizeLookupRows(parsed.complaintChannels),
-      complaintReasons: normalizeLookupRows((parsed as any).complaintReasons),
+      complaintReasons: normalizeLookupRowsWithSubReasons((parsed as any).complaintReasons),
       monthlyCompensationBudget: Number(parsed.monthlyCompensationBudget) || 5000,
       monthlyTargetedUnitsGoal: Math.max(
         0,
@@ -1184,7 +1324,17 @@ export async function createComplaint(
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }
-  const { error } = await supabase.from('complaints').insert([newComplaint])
+  let { error } = await supabase.from('complaints').insert([newComplaint])
+  // If the DB hasn't had `complaint-sub-reason-migration.sql` applied yet,
+  // the `subReason` column won't exist and the INSERT fails. Fall back to
+  // an INSERT that drops the field so complaint creation keeps working
+  // until the admin runs the migration. Matches the csAttachments pattern.
+  if (error && /subReason|column .* does not exist/i.test(error.message || '')) {
+    const { subReason: _drop, ...withoutSubReason } = newComplaint
+    void _drop
+    const retry = await supabase.from('complaints').insert([withoutSubReason])
+    error = retry.error
+  }
   if (error) {
     console.error('Error creating complaint:', error)
   }
@@ -1196,12 +1346,27 @@ export async function updateComplaint(
   updates: Partial<Omit<ComplaintRecord, 'id' | 'ticketNumber' | 'createdAt'>>
 ): Promise<ComplaintRecord | null> {
   const updated = { ...updates, updatedAt: new Date().toISOString() }
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('complaints')
     .update(updated)
     .eq('id', id)
     .select()
     .single()
+
+  // Same DB-migration fallback as createComplaint — retry without subReason
+  // if the column isn't there yet.
+  if (error && /subReason|column .* does not exist/i.test(error.message || '')) {
+    const { subReason: _drop, ...withoutSubReason } = updated as any
+    void _drop
+    const retry = await supabase
+      .from('complaints')
+      .update(withoutSubReason)
+      .eq('id', id)
+      .select()
+      .single()
+    data = retry.data
+    error = retry.error
+  }
 
   if (error) {
     console.error('Error updating complaint:', error)

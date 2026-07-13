@@ -100,6 +100,9 @@ export async function POST(request: NextRequest) {
       subject: body.subject,
       description: body.description,
       reason: body.reason,
+      subReason: typeof body.subReason === 'string' && body.subReason.trim()
+        ? body.subReason.trim()
+        : null,
       status: 'open',
       priority: body.priority || 'medium',
       customerId: body.customerId || null,
@@ -149,6 +152,12 @@ export async function PUT(request: NextRequest) {
       assignedTo: body.assignedTo,
       compensationAmount: Number(body.compensationAmount) || 0,
       closedAt: body.status === 'closed' && !body.closedAt ? new Date().toISOString() : body.closedAt,
+    }
+    if (body.subReason !== undefined) {
+      updates.subReason =
+        typeof body.subReason === 'string' && body.subReason.trim()
+          ? body.subReason.trim()
+          : null
     }
     if (Array.isArray(body.productIds)) {
       updates.productIds = body.productIds.filter((id: any) => typeof id === 'string' && id)
