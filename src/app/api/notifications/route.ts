@@ -255,6 +255,10 @@ export async function GET(req: NextRequest) {
     const slaMs = slaHours * 60 * 60 * 1000
     const nowMsForSla = Date.now()
 
+    // Track complaints that breached SLA in this pass so we can create
+    // (idempotent) auto-tasks for their owners after the notification loop.
+    const slaBreachedComplaints: ComplaintRec[] = []
+
     for (const c of complaints) {
       const created = new Date(c.createdAt).getTime()
       if (isFinite(created) && created >= cutoff && c.createdBy !== userName) {
@@ -275,16 +279,27 @@ export async function GET(req: NextRequest) {
       const isStillOpen = c.status !== 'closed'
       if (isStillOpen && isFinite(openedMs) && nowMsForSla - openedMs > slaMs) {
         const overdueHours = Math.floor((nowMsForSla - openedMs) / (1000 * 60 * 60))
-        items.push({
-          id: `comp-sla:${c.id}`,
-          type: 'complaint-sla-breach',
-          title: '🚨 تذكرة تجاوزت SLA',
-          body: `#${c.ticketNumber || c.id.slice(-6)} — مفتوحة منذ ${overdueHours}س${c.assignedTo ? ' · ' + c.assignedTo : ''}`,
-          href: '/orders/complaints',
-          createdAt: new Date(openedMs + slaMs).toISOString(),
-          actor: c.assignedTo,
-          priority: 'urgent',
-        })
+        // Target the notification at the CS agent who OPENED the ticket
+        // (createdBy) — they own its resolution. Fall back to the current
+        // assignee if createdBy is empty (legacy tickets). Skip everyone
+        // else to keep the bell relevant.
+        const owner = c.createdBy || c.assignedTo || ''
+        const isForMe = !!userName && userName === owner
+        if (isForMe || !userName) {
+          items.push({
+            id: `comp-sla:${c.id}`,
+            type: 'complaint-sla-breach',
+            title: '🚨 تذكرة تجاوزت SLA',
+            body: `#${c.ticketNumber || c.id.slice(-6)} — مفتوحة منذ ${overdueHours}س${c.assignedTo ? ' · ' + c.assignedTo : ''}`,
+            href: '/orders/complaints',
+            createdAt: new Date(openedMs + slaMs).toISOString(),
+            actor: c.assignedTo,
+            priority: 'urgent',
+          })
+        }
+        // Remember this complaint for the auto-task pass below. We create
+        // one task per breached complaint (idempotent via `source`).
+        slaBreachedComplaints.push(c)
       }
 
       // Comments on the ticket (from someone else)
@@ -302,6 +317,69 @@ export async function GET(req: NextRequest) {
           actor: cm.authorName,
           priority: 'normal',
         })
+      }
+    }
+
+    // ── SLA breach → auto-task (idempotent) ───────────────────────────────
+    // For every complaint that has breached SLA, ensure a task exists in
+    // the Tasks board assigned to the CS agent who opened the ticket.
+    // Idempotent via `source: 'complaint-sla:<complaintId>'` so we don't
+    // create duplicates on subsequent polls. Runs only when at least one
+    // breach was detected — zero extra egress otherwise.
+    if (slaBreachedComplaints.length > 0) {
+      const CS_AGENTS: TaskRecord['assignedTo'][] = ['رنا', 'مى', 'ميرنا', 'أمل']
+      const isValidAgent = (name: string): name is TaskRecord['assignedTo'] =>
+        (CS_AGENTS as string[]).includes(name)
+
+      // Cheap existence check: pull only id+source for any past SLA task.
+      const existingSlaTasksRes = await supabase
+        .from('tasks')
+        .select('id,source')
+        .like('source', 'complaint-sla:%')
+      const existingSources = new Set(
+        ((existingSlaTasksRes.data as Array<{ source?: string }>) || [])
+          .map((t) => t.source || '')
+          .filter(Boolean),
+      )
+
+      for (const c of slaBreachedComplaints) {
+        const source = `complaint-sla:${c.id}`
+        if (existingSources.has(source)) continue
+
+        // Pick the assignee: prefer createdBy (ticket owner). Fall back to
+        // the current assignee. If neither is a known CS agent, skip the
+        // task (we can't assign to a value outside the enum).
+        const preferred = c.createdBy || c.assignedTo || ''
+        const fallback = c.assignedTo || c.createdBy || ''
+        const assignee = isValidAgent(preferred)
+          ? preferred
+          : isValidAgent(fallback)
+            ? fallback
+            : null
+        if (!assignee) continue
+
+        const openedMs = c.openedAt ? new Date(c.openedAt).getTime() : new Date(c.createdAt).getTime()
+        const overdueHours = Math.floor((nowMsForSla - openedMs) / (1000 * 60 * 60))
+
+        try {
+          await createTask({
+            title: `🚨 تصعيد شكوى #${c.ticketNumber || c.id.slice(-6)} — تجاوزت SLA (${overdueHours}س)`,
+            description: `تجاوزت التذكرة الحد المسموح (${slaHours}س). يرجى المتابعة أو التصعيد لإغلاق التذكرة.`,
+            assignedTo: assignee,
+            linkedOrderId: null,
+            linkedCustomerId: null,
+            source,
+            status: 'جديدة',
+            priority: 'عالية',
+            dueDate: null,
+            createdBy: 'system',
+          })
+          // Mark as created so a burst of parallel polls in the same
+          // request-batch don't double-insert.
+          existingSources.add(source)
+        } catch (err) {
+          console.error('Failed to create SLA breach task for complaint', c.id, err)
+        }
       }
     }
 

@@ -628,6 +628,85 @@ export default function ComplaintsSection() {
         <div className="bg-white border-2 border-red-200 rounded-xl p-6 space-y-4 shadow-lg">
           <h2 className="text-lg font-semibold text-gray-900">🎫 فتح تذكرة شكوى جديدة</h2>
 
+          {/* Inline order linking — lets the agent link/unlink an order to
+              this ticket without leaving the form. Uses the already-loaded
+              `orders` array (90d window) so no extra API call is made; if
+              the order is older than 90d, the agent can still use the
+              top-of-page Quick Search widget which auto-opens the form. */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            {selectedOrder ? (
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="text-sm space-y-0.5">
+                  <p className="font-semibold text-blue-900">
+                    🛒 الطلب المرتبط: <span className="font-bold">#{selectedOrder.appOrderNo}</span>
+                  </p>
+                  <p className="text-xs text-blue-800">
+                    {selectedOrder.customer?.customerName || 'غير محدد'} •{' '}
+                    {selectedOrder.customer?.phone || '—'} • {selectedOrder.orderDate}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedOrder(null)
+                    setFormData((prev) => ({
+                      ...prev,
+                      orderSearch: '',
+                      customerSearch: '',
+                      productIds: [],
+                    }))
+                    setProductSearch('')
+                  }}
+                  className="px-3 py-1.5 text-xs bg-white border border-blue-300 text-blue-700 rounded hover:bg-blue-100"
+                >
+                  ✕ إلغاء الربط
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-col md:flex-row gap-2 items-stretch md:items-end">
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-blue-900 mb-1">
+                    ربط الشكوى برقم طلب (اختياري)
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.orderSearch}
+                    onChange={(e) => setFormData({ ...formData, orderSearch: e.target.value })}
+                    placeholder="أدخل رقم الطلب مثل ORD001"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-600"
+                    onKeyDown={(e) => {
+                      if (e.nativeEvent.isComposing) return
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        const q = formData.orderSearch.trim().toLowerCase()
+                        const found = orders.find(
+                          (o) => o.appOrderNo.toLowerCase() === q,
+                        )
+                        if (found) handleSelectOrder(found)
+                        else toast.error('لم يتم العثور على الطلب في آخر 90 يوم — استخدم البحث السريع بالأعلى')
+                      }
+                    }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const q = formData.orderSearch.trim().toLowerCase()
+                    if (!q) return
+                    const found = orders.find(
+                      (o) => o.appOrderNo.toLowerCase() === q,
+                    )
+                    if (found) handleSelectOrder(found)
+                    else toast.error('لم يتم العثور على الطلب في آخر 90 يوم — استخدم البحث السريع بالأعلى')
+                  }}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg font-medium"
+                >
+                  🔗 ربط
+                </button>
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Channel */}
             <div>

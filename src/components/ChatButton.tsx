@@ -219,6 +219,13 @@ export default function ChatButton({ user }: ChatButtonProps) {
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // IME composition guard — Arabic keyboards (especially with
+    // autocomplete/prediction on Windows and mobile) fire an Enter key
+    // event to COMMIT the composed word, not to submit the message. If
+    // we don't skip these, every prediction-commit accidentally sends
+    // the message. `keyCode === 229` is the legacy signal some browsers
+    // still emit while composing.
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       sendMessage()
