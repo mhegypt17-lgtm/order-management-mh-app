@@ -9,10 +9,19 @@ import {
 
 // Order settings change rarely (only when an admin edits a lookup list in the
 // settings screen) but are read on nearly every page load and by several
-// server-side aggregates. A 5-minute cache eliminates the vast majority of
+// server-side aggregates. A 10-minute cache eliminates the vast majority of
 // redundant reads. Admin edits go through PUT/PATCH which are always dynamic,
-// so staleness is bounded to at most 5 minutes after a change.
-export const revalidate = 300
+// so staleness is bounded to at most 10 minutes after a change.
+export const revalidate = 600
+
+// Tier 1 caching: emit an explicit Cache-Control header on every GET response
+// so Vercel Edge (and any intermediate CDN) can share one cached response
+// across every user/tab within the window. This is what makes the Supabase
+// egress meter's "Cached Egress" pool actually get used.
+const CACHE_HEADERS = {
+  'Cache-Control':
+    'public, max-age=0, s-maxage=600, stale-while-revalidate=3600',
+}
 
 // Patch: Add missing OrderSettingsRecord type with slaHours
 type OrderSettingsRecord = {
@@ -83,7 +92,7 @@ export async function GET() {
           agentNotice: settings.agentNotice,
         },
       },
-      { status: 200 }
+      { status: 200, headers: CACHE_HEADERS }
     )
   } catch {
     return NextResponse.json({ error: 'Failed to fetch order settings' }, { status: 500 })

@@ -44,10 +44,14 @@ export async function GET(request: NextRequest) {
       { products: normalized },
       {
         status: 200,
-        // Belt-and-braces: also send explicit Cache-Control so CDNs / the
-        // browser can serve cached responses without hitting the origin.
+        // Tier 1 caching: Vercel Edge holds the response for s-maxage seconds
+        // and serves stale-while-revalidate up to swr seconds after that. All
+        // clients within the window share one cached response — zero DB egress
+        // for the repeat hits. Admin edits go through POST/PUT below (dynamic)
+        // so freshness is bounded to <= s-maxage seconds after a change.
         headers: {
-          'Cache-Control': 'public, max-age=0, s-maxage=300, stale-while-revalidate=600',
+          'Cache-Control':
+            'public, max-age=0, s-maxage=300, stale-while-revalidate=1800',
         },
       },
     )

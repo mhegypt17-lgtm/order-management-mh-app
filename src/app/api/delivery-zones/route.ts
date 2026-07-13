@@ -2,15 +2,26 @@ import { NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { DeliveryZoneRecord, generateId, readDeliveryZones } from '@/lib/omsData'
 
-// Prevent Vercel from edge-caching this route (especially the 405 that gets
-// served for non-GET methods if the route is treated as static).
-export const dynamic = 'force-dynamic'
-export const revalidate = 0
+// Delivery zones change rarely (ops team edits area/cost lists occasionally)
+// but are read on every OrderForm mount + several dashboard aggregates.
+// PUT/POST/DELETE handlers below are naturally non-cacheable, so it's safe to
+// let Next.js cache GET responses; the previous `force-dynamic` was overkill.
+export const revalidate = 600
 
 export async function GET() {
   try {
     const zones = await readDeliveryZones()
-    return NextResponse.json({ zones }, { status: 200 })
+    return NextResponse.json(
+      { zones },
+      {
+        status: 200,
+        // Tier 1 caching — shared across all users/tabs at the edge.
+        headers: {
+          'Cache-Control':
+            'public, max-age=0, s-maxage=600, stale-while-revalidate=3600',
+        },
+      },
+    )
   } catch {
     return NextResponse.json({ error: 'Failed to fetch delivery zones' }, { status: 500 })
   }
