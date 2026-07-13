@@ -66,7 +66,10 @@ function findMatchedProduct(products: any[], productNameInput?: string) {
 
 async function readProducts() {
   try {
-    const { data, error } = await supabase.from('products').select('*')
+    // Name-matching + pricing only — skip image/description blobs.
+    const { data, error } = await supabase
+      .from('products')
+      .select('id, productName, productCategory, pricingMode, basePrice, offerPrice')
     if (error) return []
     return Array.isArray(data) ? data : []
   } catch {

@@ -138,12 +138,20 @@ export default function ComplaintsSection() {
   const fetchData = async () => {
     try {
       setLoading(true)
+      // Complaints panel only needs recent orders (last 90 days) for the
+      // linked-order picker — older orders can be searched explicitly by
+      // phone/order-no via the search box. Previously pulled ALL enriched
+      // orders. `/api/products?columns=lite` drops any image/description
+      // blobs — the picker only needs id + productName + isActive.
+      const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10)
       const [complaintRes, settingsRes, ordersRes, customersRes, productsRes] = await Promise.all([
         fetch('/api/complaints'),
         fetch('/api/order-settings'),
-        fetch('/api/orders'),
+        fetch(`/api/orders?from=${ninetyDaysAgo}`),
         fetch('/api/customers'),
-        fetch('/api/products'),
+        fetch('/api/products?columns=lite'),
       ])
 
       if (complaintRes.ok) {

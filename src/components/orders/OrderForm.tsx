@@ -328,7 +328,7 @@ export default function OrderForm({ mode, orderId }: Props) {
     const loadBase = async () => {
       try {
         const [productsRes, zonesRes, settingsRes] = await Promise.all([
-          fetch('/api/products'),
+          fetch('/api/products?columns=lite'),
           fetch('/api/delivery-zones'),
           fetch('/api/order-settings'),
         ])

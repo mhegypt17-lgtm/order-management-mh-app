@@ -7,15 +7,26 @@ import { supabase } from '@/lib/supabase'
 // below, so freshness is bounded to <=5 minutes after an admin change.
 export const revalidate = 300
 
+// Lite column set — everything the order form + product pickers need,
+// minus any heavy blob columns (image URLs may be huge base64, description
+// text can be long-form Arabic marketing copy). Callers that need the
+// full row (product admin page, editing a product) can omit ?columns=lite.
+const PRODUCT_LITE_COLUMNS =
+  'id, productName, productCategory, packagingType, pricingMode, basePrice, offerPrice, weightGrams, isActive, isTargeted, stockStatus, stockQuantity, createdAt, updatedAt'
+
 function generateId() {
   return `prod_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const cols =
+      request.nextUrl.searchParams.get('columns') === 'lite'
+        ? PRODUCT_LITE_COLUMNS
+        : '*'
     const { data: products, error } = await supabase
       .from('products')
-      .select('*')
+      .select(cols)
     
     if (error) {
       console.error('Error fetching products:', error)

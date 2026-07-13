@@ -28,9 +28,10 @@ import {
 
 async function readProducts() {
   try {
+    // Name-matching + pricing only — skip image/description blobs.
     const { data: products, error } = await supabase
       .from('products')
-      .select('*')
+      .select('id, productName, productCategory, pricingMode, basePrice, offerPrice')
     
     if (error) return []
     return Array.isArray(products) ? products : []
