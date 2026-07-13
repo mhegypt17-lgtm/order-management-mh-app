@@ -98,8 +98,21 @@ export default function DashboardPage() {
   const fetchOrders = async () => {
     setIsLoading(true)
     try {
+      // Push the current date window to the server — /api/orders GET
+      // supports ?from=&to= filters. Previously the client pulled the
+      // ENTIRE enriched orders list on every dashboard refresh and then
+      // filtered it in JS. The client-side `filtered` useMemo below is
+      // preserved as belt-and-suspenders in case dates change without a
+      // refetch.
+      const ordersQs = new URLSearchParams()
+      if (dateFrom) ordersQs.set('from', dateFrom)
+      if (dateTo) ordersQs.set('to', dateTo)
+      const ordersUrl = ordersQs.toString()
+        ? `/api/orders?${ordersQs.toString()}`
+        : '/api/orders'
+
       const [ordersRes, complaintsRes, settingsRes] = await Promise.all([
-        fetch('/api/orders'),
+        fetch(ordersUrl),
         fetch('/api/complaints'),
         fetch('/api/order-settings'),
       ])
@@ -148,7 +161,10 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchOrders()
-  }, [])
+    // Refetch when the user changes the date window so the server can
+    // scope the response instead of shipping everything.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateFrom, dateTo])
 
   const filtered = useMemo(() => {
     return orders.filter((o) => {

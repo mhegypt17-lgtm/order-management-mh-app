@@ -6,9 +6,15 @@ import {
   readOrderItems,
   readOrderSettings,
   readProducts,
+  readAddressesByIds,
+  readOrderItemsByOrderIds,
+  readProductsByIds,
   resolveCustomerTier,
   generateId,
   DEFAULT_LOYALTY_CONFIG,
+  ORDER_COLUMNS_LIST,
+  ADDRESS_COLUMNS,
+  PRODUCT_COLUMNS,
 } from '@/lib/omsData'
 import { supabase } from '@/lib/supabase'
 
@@ -47,13 +53,23 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
     }
 
-    const allAddresses = await readAddresses()
-    const addresses = allAddresses.filter((a) => a.customerId === customerId)
+    const allAddresses = await readAddressesByIds([], ADDRESS_COLUMNS)
+    // Scoped address lookup — this customer's addresses only.
+    const { data: addrRows } = await supabase
+      .from('customer_addresses')
+      .select(ADDRESS_COLUMNS)
+      .eq('customerId', customerId)
+    const addresses = ((addrRows as any[]) || []) as any[]
 
-    const allOrders = await readOrders()
-    let customerOrders = allOrders
-      .filter((o) => o.customerId === customerId)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    // Scoped orders — this customer only, sorted desc. Previously read the
+    // ENTIRE orders table (including csAttachments blobs) just to filter.
+    const { data: ordersRows } = await supabase
+      .from('orders')
+      .select(ORDER_COLUMNS_LIST)
+      .eq('customerId', customerId)
+      .order('createdAt', { ascending: false })
+    const allCustOrders = ((ordersRows as any[]) || []) as any[]
+    let customerOrders = allCustOrders
 
     // CS sees only last 6 months
     if (role === 'cs') {
@@ -64,17 +80,39 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       )
     }
 
-    const allOrderItems = await readOrderItems()
-    const products = await readProducts()
+    // Scoped items — only this customer's order ids.
+    const allCustomerOrderIds = allCustOrders.map((o) => o.id)
+    const allCustomerItems =
+      allCustomerOrderIds.length > 0
+        ? await readOrderItemsByOrderIds(allCustomerOrderIds)
+        : []
 
-    // Gather all-time order items for top-5 (use ALL history regardless of role)
-    const allCustomerOrderIds = allOrders
-      .filter((o) => o.customerId === customerId)
-      .map((o) => o.id)
-
-    const allCustomerItems = allOrderItems.filter((i) =>
-      allCustomerOrderIds.includes(i.orderId)
+    // Products referenced by this customer's items (for name + category lookup).
+    const referencedProductIds = Array.from(
+      new Set(
+        allCustomerItems
+          .map((i) => i.productId)
+          .filter((v): v is string => Boolean(v)),
+      ),
     )
+    const referencedProducts =
+      referencedProductIds.length > 0
+        ? await readProductsByIds(referencedProductIds, PRODUCT_COLUMNS)
+        : []
+
+    // Separate cheap category-only fetch for cross-sell recommendations.
+    // This is the only reason we ever touched the full products table.
+    const { data: catRows } = await supabase.from('products').select('productCategory')
+    const allCategoryNames: string[] = Array.from(
+      new Set(
+        ((catRows as any[]) || [])
+          .map((r: any) => r.productCategory)
+          .filter((v): v is string => Boolean(v)),
+      ),
+    )
+
+    // Alias to preserve the rest of the handler's variable names.
+    const products = referencedProducts
 
     // Aggregate top-5 products by total quantity
     const productMap: Record<string, { productId: string; productName: string; category: string; totalQty: number; totalSpend: number; orderCount: number }> = {}
@@ -95,8 +133,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       .sort((a, b) => b.totalQty - a.totalQty)
       .slice(0, 5)
 
-    // All-time stats
-    const allCustOrders = allOrders.filter((o) => o.customerId === customerId)
+    // All-time stats — `allCustOrders` is already scoped to this customer
+    // above (fetched via .eq('customerId', customerId)), so no re-filter here.
     const completedOrders = allCustOrders.filter((o) => o.orderStatus === 'تم')
     const cancelledOrders = allCustOrders.filter((o) => o.orderStatus === 'لاغي')
     const totalRevenue = completedOrders.reduce((sum, o) => sum + (o.orderTotal || 0), 0)
@@ -166,8 +204,10 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     // Cross-sell: product categories this customer hasn't ordered yet
     const orderedCategories = new Set(Object.values(productMap).map((p) => p.category).filter(Boolean))
-    const allCategories = Array.from(new Set(products.map((p) => p.productCategory).filter(Boolean)))
-    const unorderedCategories = allCategories.filter((cat) => !orderedCategories.has(cat))
+    // Use the cheap distinct-category fetch from the products table so the
+    // "unordered categories" list still covers products this customer has
+    // NEVER touched (which by definition aren't in `referencedProducts`).
+    const unorderedCategories = allCategoryNames.filter((cat) => !orderedCategories.has(cat))
 
     // Recent activity alert
     let activityAlert: string | null = null
@@ -236,7 +276,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     // Enriched orders with items
     const enrichedOrders = customerOrders.map((o) => {
-      const items = allOrderItems
+      const items = allCustomerItems
         .filter((i) => i.orderId === o.id)
         .map((i) => {
           const prod = products.find((p) => p.id === i.productId)

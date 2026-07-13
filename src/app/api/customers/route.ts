@@ -5,6 +5,8 @@ import {
   normalizePhone,
   readAddresses,
   readCustomers,
+  CUSTOMER_COLUMNS,
+  ADDRESS_COLUMNS,
 } from '@/lib/omsData'
 
 // Prevent edge-caching of API responses (avoids stale 405s on POST).
@@ -35,19 +37,39 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ customer: null, addresses: [] }, { status: 200 })
     }
 
-    const customers = await readCustomers()
-    const addresses = await readAddresses()
+    // Scoped fetch — previously read the WHOLE customers + addresses tables
+    // just to filter one row in JS. Now we push phone/name filters to the DB
+    // via ILIKE and only apply the strict normalizePhone match on the small
+    // candidate set. Behaviour is preserved because we still run the same
+    // JS matching logic on the returned rows.
+    let candidates: any[] = []
+    if (phone) {
+      const { data } = await supabase
+        .from('customers')
+        .select(CUSTOMER_COLUMNS)
+        .ilike('phone', `%${phone}%`)
+        .limit(50)
+      candidates = (data as any[]) || []
+    }
+    if (candidates.length === 0 && name) {
+      const { data } = await supabase
+        .from('customers')
+        .select(CUSTOMER_COLUMNS)
+        .ilike('customerName', `%${name}%`)
+        .limit(50)
+      candidates = (data as any[]) || []
+    }
 
-    let customer = null
+    let customer: any = null
 
     if (phone) {
       // Keep exact phone lookup priority for existing callers.
-      customer = customers.find((c) => normalizePhone(c.phone) === phone) || null
+      customer = candidates.find((c: any) => normalizePhone(c.phone) === phone) || null
     }
 
     if (!customer) {
       customer =
-        customers.find((c) => {
+        candidates.find((c: any) => {
           const customerPhone = normalizePhone(c.phone)
           const customerName = (c.customerName || '').trim().toLowerCase()
 
@@ -62,7 +84,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ customer: null, addresses: [] }, { status: 200 })
     }
 
-    const customerAddresses = addresses.filter((a) => a.customerId === customer.id)
+    // Scoped address lookup for the single matched customer.
+    const { data: addrRows } = await supabase
+      .from('customer_addresses')
+      .select(ADDRESS_COLUMNS)
+      .eq('customerId', customer.id)
+    const customerAddresses = (addrRows as any[]) || []
 
     return NextResponse.json(
       {
@@ -91,9 +118,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'اسم العميل مطلوب' }, { status: 400 })
     }
 
-    // Reject duplicate phone.
-    const existing = await readCustomers()
-    const duplicate = existing.find((c) => normalizePhone(c.phone) === phone)
+    // Scoped duplicate check — previously read the WHOLE customers table
+    // just to spot a phone collision.
+    const { data: dupCandidates } = await supabase
+      .from('customers')
+      .select('id, phone, customerName')
+      .ilike('phone', `%${phone}%`)
+      .limit(20)
+    const duplicate = ((dupCandidates as any[]) || []).find(
+      (c: any) => normalizePhone(c.phone) === phone,
+    )
     if (duplicate) {
       return NextResponse.json(
         { error: 'عميل آخر بنفس رقم الهاتف موجود بالفعل', customer: duplicate },
