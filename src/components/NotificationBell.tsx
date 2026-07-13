@@ -6,6 +6,7 @@ import toast from 'react-hot-toast'
 import type { User } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
 import { useVisibilityPoll } from '@/hooks/useVisibilityPoll'
+import { isUserIdle } from '@/lib/userActivity'
 
 interface NotificationItem {
   id: string
@@ -33,6 +34,13 @@ const FALLBACK_POLL_MS = 180_000
 // CS rapidly updates multiple orders) into a single refetch. Bumped from
 // 2.5s → 5s (Phase 2B.1) so bigger bursts collapse into one API call.
 const REALTIME_DEBOUNCE_MS = 5_000
+// Phase 2H: after this many ms without any user input, treat the tab as
+// AFK and skip Realtime-triggered refetches. Same threshold used by the
+// useVisibilityPoll idle guard so behaviour is consistent across polls
+// and Realtime. The next mouse move / keystroke will bring the user back
+// under the threshold and a subsequent Realtime event (or focus refetch,
+// or the fallback poll) will refresh the bell within seconds.
+const IDLE_MS = 5 * 60 * 1000
 // Cap the badge count display to keep the DOM cheap when the queue is
 // deep. Was 99+ — dropped to 20+ so re-renders stay lightweight and the
 // user isn't overwhelmed by a huge red pill.
@@ -244,6 +252,7 @@ export default function NotificationBell({ user }: NotificationBellProps) {
     let debounceTimer: ReturnType<typeof setTimeout> | null = null
     const scheduleRefetch = () => {
       if (document.visibilityState !== 'visible') return // skip while hidden
+      if (isUserIdle(IDLE_MS)) return // skip while user is AFK
       if (debounceTimer) clearTimeout(debounceTimer)
       debounceTimer = setTimeout(() => fetchNotifications(), REALTIME_DEBOUNCE_MS)
     }
