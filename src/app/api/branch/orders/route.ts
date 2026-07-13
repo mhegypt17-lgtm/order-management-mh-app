@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import {
   OrderDeliveryRecord,
+  OrderItemRecord,
   OrderRecord,
   generateId,
   readAddresses,
@@ -9,6 +10,14 @@ import {
   readOrderDelivery,
   readOrderItems,
   readOrders,
+  readOrdersWindow,
+  readCustomersByIds,
+  readAddressesByIds,
+  readOrderItemsByOrderIds,
+  readOrderDeliveryByOrderIds,
+  readProductsByIds,
+  ORDER_COLUMNS_LIST,
+  DELIVERY_COLUMNS_LIST,
 } from '@/lib/omsData'
 
 export const dynamic = 'force-dynamic'
@@ -95,27 +104,29 @@ export async function GET(request: NextRequest) {
     const to = searchParams.get('to') || ''
     const deliveryStatus = searchParams.get('deliveryStatus') || 'all'
 
-    // ─── Hoist every read up-front (1 round-trip per table) ───────────────
-    // Previously enrichOrderForBranch re-fetched all customers, addresses,
-    // items, products, AND order_delivery for EACH order — turning the
-    // monthly branch report into hundreds of Supabase round-trips and
-    // making the page take 10-30 s to load. We now read each table once
-    // and build Map<id, row> lookups so enrichment is O(1) per order.
-    const [allOrders, customers, addresses, items, products, deliveryRows] =
-      await Promise.all([
-        readOrders(),
-        readCustomers(),
-        readAddresses(),
-        readOrderItems(),
-        readProducts(),
-        readOrderDelivery(),
-      ])
+    // ─── Push date window to the DB where possible ────────────────────
+    // Previously read the ENTIRE orders table + csAttachments blobs.
+    // ORDER_COLUMNS_LIST drops csAttachments; a fromDate/toDate window
+    // trims 90 %+ of rows for the common "today"/"this month" cases.
+    let fromDate: string | undefined
+    let toDate: string | undefined
+    if (date) {
+      fromDate = date
+      toDate = date
+    } else if (month) {
+      fromDate = `${month}-01`
+      toDate = `${month}-31`
+    } else {
+      if (from) fromDate = from
+      if (to) toDate = to
+    }
+    const allOrders = await readOrdersWindow({
+      fromDate,
+      toDate,
+      columns: ORDER_COLUMNS_LIST,
+    })
 
-    // ─── Filter orders BEFORE enrichment ───────────────────────────────
-    // Enriching every order in the DB just to throw most away wastes
-    // CPU & memory on hot endpoints. Apply date filters first; status
-    // filter is applied after enrichment because it lives on the
-    // delivery row, not the order row.
+    // ─── Belt-and-suspenders JS filter (behaviour preserved exactly) ──
     let filteredOrders = allOrders
     if (date) {
       filteredOrders = filteredOrders.filter((o) => o.orderDate === date)
@@ -131,6 +142,38 @@ export async function GET(request: NextRequest) {
     if (to) {
       filteredOrders = filteredOrders.filter((o) => String(o.orderDate || '') <= to)
     }
+
+    // ─── Scoped Promise.all — no more full-table scans ────────────────
+    // Only fetch customers / addresses / items / deliveries / products
+    // that are actually referenced by the surviving orders. In the
+    // typical "today" case this drops the payload from megabytes to KBs.
+    const orderIds = filteredOrders.map((o) => o.id)
+    const customerIds = Array.from(
+      new Set(filteredOrders.map((o) => o.customerId).filter((v): v is string => Boolean(v))),
+    )
+    const addressIds = Array.from(
+      new Set(
+        filteredOrders.map((o) => o.deliveryAddressId).filter((v): v is string => Boolean(v)),
+      ),
+    )
+    const [customers, addresses, items, deliveryRows] = await Promise.all([
+      customerIds.length > 0 ? readCustomersByIds(customerIds) : Promise.resolve([]),
+      addressIds.length > 0 ? readAddressesByIds(addressIds) : Promise.resolve([]),
+      orderIds.length > 0 ? readOrderItemsByOrderIds(orderIds) : Promise.resolve([]),
+      // DELIVERY_COLUMNS_LIST drops the base64 productPhotos + invoicePhoto
+      // blobs; list view only needs status + timestamps.
+      orderIds.length > 0
+        ? readOrderDeliveryByOrderIds(orderIds, DELIVERY_COLUMNS_LIST)
+        : Promise.resolve([]),
+    ])
+    const productIds = Array.from(
+      new Set(
+        (items as OrderItemRecord[])
+          .map((i) => i.productId)
+          .filter((v): v is string => Boolean(v)),
+      ),
+    )
+    const products = productIds.length > 0 ? await readProductsByIds(productIds) : []
 
     // ─── Build Map lookups so enrichment is O(1) ──────────────────────
     const customerById = new Map<string, any>()

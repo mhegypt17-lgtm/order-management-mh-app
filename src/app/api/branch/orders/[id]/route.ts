@@ -233,12 +233,17 @@ export async function PUT(
     const body = await request.json()
     const now = new Date().toISOString()
 
-    const rows = await readOrderDelivery()
-    const index = rows.findIndex((r) => r.orderId === params.id)
-
+    // Scoped delivery lookup — previously read the WHOLE order_delivery
+    // table (including base64 photos) just to find one row by orderId.
+    const { data: existingRow } = await supabase
+      .from('order_delivery')
+      .select(DELIVERY_COLUMNS_FULL)
+      .eq('orderId', params.id)
+      .maybeSingle()
+    const index = existingRow ? 1 : -1
     const existing: OrderDeliveryRecord =
-      index >= 0
-        ? rows[index]
+      existingRow
+        ? (existingRow as unknown as OrderDeliveryRecord)
         : {
             id: generateId('del'),
             orderId: params.id,
@@ -276,12 +281,17 @@ export async function PUT(
         )
       }
 
-      const allItems = await readOrderItems()
-      const orderItemRows = allItems.filter((i) => i.orderId === params.id)
+      // Scoped items for THIS order (was: read whole order_items table).
+      const orderItemRows = await readOrderItemsByOrderIds([params.id], ORDER_ITEM_COLUMNS)
 
-      // Pull products for pricingMode + pricePerKg.
-      const { data: productRows } = await supabase.from('products').select('*')
-      const products: any[] = Array.isArray(productRows) ? productRows : []
+      // Scoped products — only those referenced by this order's items
+      // (was: SELECT * FROM products). Uses PRODUCT_COLUMNS allowlist so
+      // description/image columns are excluded.
+      const productIdsForOrder = Array.from(
+        new Set(orderItemRows.map((i) => i.productId).filter((v): v is string => Boolean(v))),
+      )
+      const products: any[] =
+        productIdsForOrder.length > 0 ? await readProductsByIds(productIdsForOrder, PRODUCT_COLUMNS) : []
 
       for (const edit of body.items) {
         const existingItem = orderItemRows.find((r) => r.id === edit.id)
@@ -376,10 +386,21 @@ export async function PUT(
           (sum, r) => sum + Number(r.lineTotal || 0),
           0
         )
-        const ordersAll = await readOrders()
-        const orderRow = ordersAll.find((o) => o.id === params.id)
-        const addressesAll = await readAddresses()
-        const addr = addressesAll.find((a) => a.id === orderRow?.deliveryAddressId)
+        // Scoped order + address lookup (was: two full-table scans).
+        const { data: orderRow } = (await supabase
+          .from('orders')
+          .select(ORDER_COLUMNS_LIST)
+          .eq('id', params.id)
+          .maybeSingle()) as { data: any }
+        let addr: any = null
+        if (orderRow?.deliveryAddressId) {
+          const { data: addrData } = await supabase
+            .from('customer_addresses')
+            .select(ADDRESS_COLUMNS)
+            .eq('id', orderRow.deliveryAddressId)
+            .maybeSingle()
+          addr = addrData
+        }
         recomputedDeliveryFee = await computeDeliveryFee(
           recomputedSubtotal,
           addr?.area,
@@ -557,26 +578,43 @@ async function runAutoActivateRule(orderId: string) {
   if (settings.autoActivateEnabled === false) return
   const threshold = Math.max(1, Number(settings.autoActivateThreshold) || 3)
 
-  const orders = await readOrders()
-  const order = orders.find((o) => o.id === orderId)
+  // Scoped order lookup (was: full orders table).
+  const { data: order } = (await supabase
+    .from('orders')
+    .select(ORDER_COLUMNS_LIST)
+    .eq('id', orderId)
+    .maybeSingle()) as { data: any }
   if (!order || !order.customerId) return
 
-  const customers = await readCustomers()
-  const customer = customers.find((c) => c.id === order.customerId)
+  // Scoped customer lookup (was: full customers table).
+  const { data: customer } = (await supabase
+    .from('customers')
+    .select(CUSTOMER_COLUMNS)
+    .eq('id', order.customerId)
+    .maybeSingle()) as { data: any }
   if (!customer || (customer as any).status !== 'warning') return
 
   const since = (customer as any).statusUpdatedAt || (customer as any).createdAt
   const sinceMs = since ? new Date(since).getTime() : 0
 
-  const customerOrders = orders.filter(
-    (o) => o.customerId === customer.id && new Date(o.createdAt).getTime() >= sinceMs,
-  )
-  const orderIds = new Set(customerOrders.map((o) => o.id))
-  const deliveries = await readOrderDelivery()
-  const cleanCount = deliveries.filter((d) => {
-    if (!orderIds.has(d.orderId)) return false
+  // Scoped: only this customer's orders since the warning was set.
+  const { data: custOrderRows } = await supabase
+    .from('orders')
+    .select('id, customerId, createdAt, compensationAmount')
+    .eq('customerId', customer.id)
+    .gte('createdAt', new Date(sinceMs).toISOString())
+  const customerOrders = (custOrderRows || []) as any[]
+  const orderIdsList = customerOrders.map((o) => o.id)
+
+  // Scoped deliveries — only for the customer's orders, and only the
+  // small LIST columns (no photo blobs needed for status counting).
+  const deliveries =
+    orderIdsList.length > 0
+      ? await readOrderDeliveryByOrderIds(orderIdsList, DELIVERY_COLUMNS_LIST)
+      : []
+  const cleanCount = deliveries.filter((d: any) => {
     if (d.deliveryStatus !== 'تم التوصيل') return false
-    const o = customerOrders.find((co) => co.id === d.orderId)
+    const o = customerOrders.find((co: any) => co.id === d.orderId)
     const comp = Number((o as any)?.compensationAmount || 0)
     return comp <= 0
   }).length

@@ -730,25 +730,46 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // Return enriched order — build a one-shot context for this single row.
-    const [allCustomers, allAddresses, allOrderItems, allDelivery, allProducts] = await Promise.all([
-      readCustomers(),
-      readAddresses(),
-      readOrderItems(),
-      readOrderDelivery(),
-      readProducts(),
+    // Return enriched order — scoped to just THIS newly-created order.
+    // Previously read 5 full tables (customers, addresses, order_items,
+    // order_delivery, products) merely to hydrate a single row. Now we
+    // fetch by-id only.
+    const finalOrderRow = (finalOrder || order) as OrderRecord
+    const [oneCustomer, oneAddress, itemsForOrder, deliveryForOrder] = await Promise.all([
+      finalOrderRow.customerId
+        ? readCustomersByIds([finalOrderRow.customerId])
+        : Promise.resolve([] as any[]),
+      finalOrderRow.deliveryAddressId
+        ? readAddressesByIds([finalOrderRow.deliveryAddressId])
+        : Promise.resolve([] as any[]),
+      readOrderItemsByOrderIds([finalOrderRow.id]),
+      readOrderDeliveryByOrderIds([finalOrderRow.id]),
     ])
-    const customersById = new Map<string, any>(allCustomers.map((c) => [c.id, c]))
-    const addressesById = new Map<string, any>(allAddresses.map((a) => [a.id, a]))
+    const productIdsForOrder = Array.from(
+      new Set(
+        (itemsForOrder as OrderItemRecord[])
+          .map((i) => i.productId)
+          .filter((v): v is string => Boolean(v)),
+      ),
+    )
+    const productsForOrder =
+      productIdsForOrder.length > 0 ? await readProductsByIds(productIdsForOrder) : []
+
+    const customersById = new Map<string, any>((oneCustomer as any[]).map((c: any) => [c.id, c]))
+    const addressesById = new Map<string, any>((oneAddress as any[]).map((a: any) => [a.id, a]))
     const itemsByOrderId = new Map<string, OrderItemRecord[]>()
-    for (const it of allOrderItems) {
+    for (const it of itemsForOrder as OrderItemRecord[]) {
       const arr = itemsByOrderId.get(it.orderId)
       if (arr) arr.push(it)
       else itemsByOrderId.set(it.orderId, [it])
     }
-    const deliveryByOrderId = new Map<string, any>(allDelivery.map((d) => [d.orderId, d]))
-    const productsById = new Map<string, any>(allProducts.map((p: any) => [p.id, p]))
-    const enrichedOrder = await enrichOrder(finalOrder || order, {
+    const deliveryByOrderId = new Map<string, any>(
+      (deliveryForOrder as any[]).map((d: any) => [d.orderId, d]),
+    )
+    const productsById = new Map<string, any>(
+      (productsForOrder as any[]).map((p: any) => [p.id, p]),
+    )
+    const enrichedOrder = await enrichOrder(finalOrderRow, {
       customersById,
       addressesById,
       itemsByOrderId,
