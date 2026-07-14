@@ -44,6 +44,48 @@ async function authedFetch(input: string, init?: RequestInit) {
   })
 }
 
+/**
+ * Reads the response body safely. If the server returned no body or non-JSON
+ * (e.g. a runtime crash before a NextResponse.json was returned), we surface
+ * a useful HTTP-status message instead of an opaque
+ * "Unexpected end of JSON input".
+ */
+async function readJsonSafely(res: Response): Promise<{
+  ok: boolean
+  data: Record<string, unknown>
+  errorMessage?: string
+}> {
+  const text = await res.text()
+  if (!text) {
+    return {
+      ok: res.ok,
+      data: {},
+      errorMessage: res.ok ? undefined : `HTTP ${res.status} ${res.statusText}`,
+    }
+  }
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>
+    return {
+      ok: res.ok,
+      data: parsed,
+      errorMessage: res.ok
+        ? undefined
+        : typeof parsed.error === 'string'
+          ? parsed.error
+          : `HTTP ${res.status}`,
+    }
+  } catch {
+    return {
+      ok: res.ok,
+      data: {},
+      errorMessage: res.ok
+        ? undefined
+        : `HTTP ${res.status}: ${text.slice(0, 200)}`,
+    }
+  }
+}
+
+
 export default function AdminUsersPage() {
   const currentUser = useAuthStore((s) => s.user)
   const [users, setUsers] = useState<ProfileRow[]>([])
@@ -62,12 +104,9 @@ export default function AdminUsersPage() {
     setLoading(true)
     try {
       const res = await authedFetch('/api/admin/users')
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.error || `HTTP ${res.status}`)
-      }
-      const data = await res.json()
-      setUsers(data.users ?? [])
+      const { ok, data, errorMessage } = await readJsonSafely(res)
+      if (!ok) throw new Error(errorMessage || 'Request failed')
+      setUsers((data.users as ProfileRow[]) ?? [])
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'تعذر تحميل المستخدمين')
     } finally {
@@ -101,8 +140,8 @@ export default function AdminUsersPage() {
           role: newRole,
         }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      const { ok, errorMessage } = await readJsonSafely(res)
+      if (!ok) throw new Error(errorMessage || 'Request failed')
 
       toast.success('✅ تم إنشاء المستخدم')
       setNewEmail('')
@@ -129,8 +168,8 @@ export default function AdminUsersPage() {
         method: 'PATCH',
         body: JSON.stringify(patch),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      const { ok, errorMessage } = await readJsonSafely(res)
+      if (!ok) throw new Error(errorMessage || 'Request failed')
       toast.success(successMessage)
       await load()
     } catch (error) {
@@ -185,8 +224,8 @@ export default function AdminUsersPage() {
       const res = await authedFetch(`/api/admin/users/${user.id}`, {
         method: 'DELETE',
       })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      const { ok, errorMessage } = await readJsonSafely(res)
+      if (!ok) throw new Error(errorMessage || 'Request failed')
       toast.success('🗑️ تم الحذف')
       await load()
     } catch (error) {
