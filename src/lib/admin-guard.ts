@@ -1,7 +1,7 @@
 import 'server-only'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { supabaseAdmin } from '@/lib/supabase-admin'
+import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
 const ALLOWED_ROLES = ['cs', 'branch', 'admin'] as const
 type Role = (typeof ALLOWED_ROLES)[number]
@@ -42,7 +42,7 @@ export async function requireAdmin(
     )
   }
 
-  const { data: profile, error: profileError } = await supabaseAdmin
+  const { data: profile, error: profileError } = await getSupabaseAdmin()
     .from('profiles')
     .select('role,"isActive"')
     .eq('id', userData.user.id)

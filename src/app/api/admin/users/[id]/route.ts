@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase-admin'
+import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { requireAdmin, isValidRole } from '@/lib/admin-guard'
 
 export const runtime = 'nodejs'
@@ -41,6 +41,8 @@ export async function PATCH(
       { status: 400 },
     )
   }
+
+  const supabaseAdmin = getSupabaseAdmin()
 
   // Password change (via Supabase auth admin API).
   if (body.password !== undefined) {
@@ -107,7 +109,7 @@ export async function DELETE(
     )
   }
 
-  const { error } = await supabaseAdmin.auth.admin.deleteUser(userId)
+  const { error } = await getSupabaseAdmin().auth.admin.deleteUser(userId)
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 })
   }

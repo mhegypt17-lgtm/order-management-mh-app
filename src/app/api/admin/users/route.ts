@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase-admin'
+import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { requireAdmin, isValidRole } from '@/lib/admin-guard'
 
 export const runtime = 'nodejs'
@@ -9,6 +9,8 @@ export const dynamic = 'force-dynamic'
 export async function GET(request: NextRequest) {
   const guard = await requireAdmin(request)
   if (guard instanceof NextResponse) return guard
+
+  const supabaseAdmin = getSupabaseAdmin()
 
   const { data, error } = await supabaseAdmin
     .from('profiles')
@@ -61,6 +63,8 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     )
   }
+
+  const supabaseAdmin = getSupabaseAdmin()
 
   // Create the auth user (auto-confirmed so they can log in immediately).
   const { data: created, error: createError } =
