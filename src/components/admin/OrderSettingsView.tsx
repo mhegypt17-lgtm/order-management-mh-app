@@ -398,6 +398,21 @@ export default function OrderSettingsView() {
         </div>
       </a>
 
+      <a
+        href="/admin/settings/users"
+        className="block bg-gradient-to-l from-purple-50 to-indigo-50 border-2 border-purple-200 rounded-xl p-4 hover:border-purple-400 transition"
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-purple-900">👥 المستخدمون</h2>
+            <p className="text-xs text-purple-700 mt-1">
+              إضافة حسابات جديدة (إدارة، خدمة عملاء، فرع)، تعديل الأدوار، إعادة تعيين كلمات المرور، تعطيل أو حذف.
+            </p>
+          </div>
+          <span className="text-purple-600 font-bold">إدارة ←</span>
+        </div>
+      </a>
+
       {SECTION_META.map((meta) => (
         <section key={meta.key} className="bg-white border border-gray-200 rounded-xl p-4">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
