@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Toaster } from 'react-hot-toast'
 import './globals.css'
 import SingleTabGuard from '@/components/SingleTabGuard'
+import AuthBootstrap from '@/components/AuthBootstrap'
 
 export const metadata: Metadata = {
   title: 'نظام إدارة الطلبات',
@@ -23,6 +24,7 @@ export default function RootLayout({
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </head>
       <body className="bg-gray-50">
+        <AuthBootstrap />
         <SingleTabGuard>
           {children}
         </SingleTabGuard>
