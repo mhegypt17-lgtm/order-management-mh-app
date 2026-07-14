@@ -4,6 +4,10 @@ export interface ComplaintAnalyticsRecord {
   id: string
   channel: string
   reason: string
+  // Optional two-level detail — populated on complaints created after the
+  // sub-reason migration. Legacy tickets leave this undefined and are
+  // bucketed as `غير محدد` in the sub-reason breakdown.
+  subReason?: string | null
   status: ComplaintStatus
   compensationAmount: number
   openedAt: string
@@ -148,8 +152,50 @@ export function calculateComplaintAnalytics(
     monthlyCompensation,
     monthLabel,
     topReasons: rankByCount(filtered.map((complaint) => complaint.reason), totalTickets),
+    // Nested reason → sub-reason breakdown. Same ranking logic as
+    // `topReasons` but each parent carries the sub-reason distribution
+    // observed under it. `share` on a sub-reason is out of the parent's
+    // count (so the sub-reason percentages within one parent sum to 100),
+    // while `shareOfTotal` is out of the grand total so admins can see
+    // absolute weight in the report.
+    reasonBreakdown: buildReasonBreakdown(filtered, totalTickets),
     topChannels: rankByCount(filtered.map((complaint) => complaint.channel), totalTickets),
     topProducts,
     complaintsWithProducts,
   }
+}
+
+// Group complaints by parent reason, then by sub-reason. Reasons and
+// sub-reasons are sorted by count desc; parents with zero complaints are
+// omitted. Used by the admin dashboard and CS reports to drive the
+// two-level "Reason → Sub-reason" report.
+function buildReasonBreakdown(
+  complaints: ComplaintAnalyticsRecord[],
+  totalTickets: number,
+) {
+  const parents = new Map<string, { count: number; subs: Map<string, number> }>()
+  for (const c of complaints) {
+    const parentKey = (c.reason || '').trim() || 'غير محدد'
+    const subKey = (c.subReason || '').trim() || 'غير محدد'
+    const parent = parents.get(parentKey) || { count: 0, subs: new Map<string, number>() }
+    parent.count += 1
+    parent.subs.set(subKey, (parent.subs.get(subKey) || 0) + 1)
+    parents.set(parentKey, parent)
+  }
+
+  return Array.from(parents.entries())
+    .map(([name, p]) => ({
+      name,
+      count: p.count,
+      share: pct(p.count, totalTickets),
+      subReasons: Array.from(p.subs.entries())
+        .map(([subName, subCount]) => ({
+          name: subName,
+          count: subCount,
+          share: pct(subCount, p.count),
+          shareOfTotal: pct(subCount, totalTickets),
+        }))
+        .sort((a, b) => b.count - a.count),
+    }))
+    .sort((a, b) => b.count - a.count)
 }

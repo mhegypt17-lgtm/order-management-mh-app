@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { calculateComplaintAnalytics, type ComplaintAnalyticsRecord } from '@/lib/complaintAnalytics'
 import { cairoDateString, cairoFirstDayOfMonth } from '@/lib/cairoTime'
 type OrderItem = {
@@ -431,6 +431,50 @@ export default function ReportsPage() {
             </table>
           </section>
         </div>
+
+        {/* Two-level Reason → Sub-reason breakdown (nested table). Shared
+            shape with the admin dashboard; see complaintAnalytics.ts for
+            the grouping logic. Parent rows are shaded red, sub-reasons
+            indented underneath. */}
+        <section className="bg-gray-50 rounded-lg border border-gray-200 p-4 overflow-x-auto mt-4">
+          <h3 className="font-bold text-gray-900 mb-3">تفصيل الأسباب الفرعية</h3>
+          <table className="w-full min-w-[560px] text-sm">
+            <thead className="bg-gray-100 border-b border-gray-200">
+              <tr>
+                <th className="px-3 py-2 text-right">السبب / السبب الفرعي</th>
+                <th className="px-3 py-2 text-center">العدد</th>
+                <th className="px-3 py-2 text-center">النسبة داخل السبب</th>
+                <th className="px-3 py-2 text-center">النسبة من الإجمالي</th>
+              </tr>
+            </thead>
+            <tbody>
+              {complaintAnalytics.reasonBreakdown.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-3 py-6 text-center text-gray-500">لا توجد شكاوى في هذا النطاق</td>
+                </tr>
+              ) : (
+                complaintAnalytics.reasonBreakdown.map((parent) => (
+                  <Fragment key={parent.name}>
+                    <tr className="bg-red-50 border-b border-red-100">
+                      <td className="px-3 py-2 font-bold text-red-900">{parent.name}</td>
+                      <td className="px-3 py-2 text-center font-bold text-red-900">{parent.count}</td>
+                      <td className="px-3 py-2 text-center text-red-900">—</td>
+                      <td className="px-3 py-2 text-center font-bold text-red-900">{parent.share}%</td>
+                    </tr>
+                    {parent.subReasons.map((sub) => (
+                      <tr key={`${parent.name}::${sub.name}`} className="border-b border-gray-100">
+                        <td className="px-3 py-2 text-gray-700 pr-8">└ {sub.name}</td>
+                        <td className="px-3 py-2 text-center">{sub.count}</td>
+                        <td className="px-3 py-2 text-center">{sub.share}%</td>
+                        <td className="px-3 py-2 text-center text-gray-500">{sub.shareOfTotal}%</td>
+                      </tr>
+                    ))}
+                  </Fragment>
+                ))
+              )}
+            </tbody>
+          </table>
+        </section>
 
         {/* Top problem products */}
         <section className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-lg border-2 border-amber-200 p-4 mt-4 overflow-x-auto">
