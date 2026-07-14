@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { usePathname } from 'next/navigation'
-import { useAuthStore, User } from '@/lib/auth'
+import { useAuthStore, User, UserRole } from '@/lib/auth'
 import toast from 'react-hot-toast'
 import NotificationBell from './NotificationBell'
 import ChatButton from './ChatButton'
@@ -16,8 +16,32 @@ interface NavbarProps {
 export default function Navbar({ user }: NavbarProps) {
   const router = useRouter()
   const pathname = usePathname()
-  const { logout } = useAuthStore()
+  const { logout, setImpersonateRole } = useAuthStore()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
+  const isImpersonating = !!user.actualRole && user.actualRole !== user.role
+  const isAdminUser = (user.actualRole ?? user.role) === 'admin'
+
+  const homeForRole: Record<UserRole, string> = {
+    admin: '/dashboard',
+    cs: '/orders/new',
+    branch: '/branch',
+  }
+
+  const handleImpersonate = (nextRole: UserRole) => {
+    const realRole = user.actualRole ?? user.role
+    if (nextRole === realRole) {
+      // Revert
+      setImpersonateRole(null)
+      toast.success('عدت لدور الإدارة')
+    } else {
+      setImpersonateRole(nextRole)
+      toast.success(`أنت الآن في وضع عرض: ${nextRole === 'cs' ? 'خدمة العملاء' : 'الفرع'}`)
+    }
+    // Navigate to the target role's home so guards don't kick us back.
+    router.push(homeForRole[nextRole])
+    setMobileMenuOpen(false)
+  }
 
   const handleLogout = () => {
     logout()
@@ -108,7 +132,26 @@ export default function Navbar({ user }: NavbarProps) {
   const items = menuItems[user.role as keyof typeof menuItems] ?? []
 
   return (
-    <nav className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-40">
+    <>
+      {/* Impersonation banner — highly visible so admin never forgets. */}
+      {isImpersonating && (
+        <div className="bg-amber-500 text-amber-950 text-center text-sm font-semibold px-3 py-1.5 sticky top-0 z-50 flex items-center justify-center gap-3 flex-wrap">
+          <span>
+            👁️ وضع عرض:{' '}
+            {user.role === 'cs' ? 'خدمة العملاء' : user.role === 'branch' ? 'الفرع' : user.role}
+            {' '}• أنت مسجّل الدخول كإدارة ({user.name})
+          </span>
+          <button
+            type="button"
+            onClick={() => handleImpersonate(user.actualRole || 'admin')}
+            className="px-2 py-0.5 rounded-md bg-amber-950 text-amber-50 hover:bg-black text-xs"
+          >
+            العودة كإدارة ↩︎
+          </button>
+        </div>
+      )}
+
+      <nav className={`bg-white border-b border-gray-200 shadow-sm sticky ${isImpersonating ? 'top-8' : 'top-0'} z-40`}>
       <div className="px-3 sm:px-4 py-2 sm:py-3 max-w-7xl mx-auto">
         {/* Top row: logo + utilities + hamburger */}
         <div className="flex items-center justify-between gap-2">
@@ -130,6 +173,21 @@ export default function Navbar({ user }: NavbarProps) {
             <NotificationBell user={user} />
             <ChatButton user={user} />
             {(user.role === 'cs' || user.role === 'admin') && <OnDutyBadge />}
+
+            {/* Admin: switch view (desktop) */}
+            {isAdminUser && (
+              <select
+                value={user.role}
+                onChange={(e) => handleImpersonate(e.target.value as UserRole)}
+                className={`hidden md:block text-xs sm:text-sm px-2 py-1 rounded-lg border ${isImpersonating ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-gray-300 bg-white text-gray-700'} focus:outline-none focus:ring-2 focus:ring-red-500`}
+                title="عرض كـ..."
+                dir="rtl"
+              >
+                <option value="admin">👑 عرض كإدارة</option>
+                <option value="cs">👁️ عرض كخدمة عملاء</option>
+                <option value="branch">👁️ عرض كفرع</option>
+              </select>
+            )}
 
             {/* User Info (desktop only) */}
             <div className="hidden lg:flex items-center space-x-3 rtl:space-x-reverse border-r pr-3 mr-1 rtl:border-r-0 rtl:border-l rtl:pl-3 rtl:mr-0 rtl:ml-1">
@@ -213,6 +271,25 @@ export default function Navbar({ user }: NavbarProps) {
               </button>
             </div>
 
+            {/* Admin: switch view (mobile) */}
+            {isAdminUser && (
+              <div className="pb-3 mb-2 border-b border-gray-100">
+                <label className="block text-xs text-gray-500 mb-1 text-right">
+                  عرض كـ (للإختبار والإشراف)
+                </label>
+                <select
+                  value={user.role}
+                  onChange={(e) => handleImpersonate(e.target.value as UserRole)}
+                  className={`w-full text-sm px-3 py-2 rounded-lg border ${isImpersonating ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-gray-300 bg-white text-gray-700'} focus:outline-none focus:ring-2 focus:ring-red-500`}
+                  dir="rtl"
+                >
+                  <option value="admin">👑 إدارة</option>
+                  <option value="cs">👁️ خدمة العملاء</option>
+                  <option value="branch">👁️ الفرع</option>
+                </select>
+              </div>
+            )}
+
             {/* Menu items grid */}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {items.map((item) => (
@@ -234,5 +311,6 @@ export default function Navbar({ user }: NavbarProps) {
         </div>
       )}
     </nav>
+    </>
   )
 }

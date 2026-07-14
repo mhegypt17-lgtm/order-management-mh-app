@@ -10,6 +10,14 @@ export interface User {
   name: string
   role: UserRole
   createdAt: string
+  /**
+   * When set, the user is currently *impersonating* another role for
+   * testing/supervision. `role` is the effective role used by all UI
+   * guards; `actualRole` is the real role from the profile row (always
+   * 'admin' in practice, since only admins can impersonate).
+   * Not persisted — a page reload clears the impersonation.
+   */
+  actualRole?: UserRole
 }
 
 export interface AuthState {
@@ -21,6 +29,12 @@ export interface AuthState {
   logout: () => Promise<void>
   setUser: (user: User | null) => void
   setHasHydrated: (value: boolean) => void
+  /**
+   * Admin-only. Switch the effective role for the current session.
+   * Pass `null` to revert to the real role. Silently no-ops for
+   * non-admins. Not persisted across reloads.
+   */
+  setImpersonateRole: (role: UserRole | null) => void
   /**
    * Hydrates the store from the current Supabase session on app boot.
    * Called by `AuthBootstrap` inside the root layout. If a valid session
@@ -116,6 +130,30 @@ export const useAuthStore = create<AuthState>()(
         set({ hasHydrated: value })
       },
 
+      setImpersonateRole: (role) => {
+        const current = useAuthStore.getState().user
+        if (!current) return
+        const realRole = current.actualRole ?? current.role
+        // Only admins can impersonate.
+        if (realRole !== 'admin') return
+
+        if (role === null || role === realRole) {
+          // Revert to real role — strip actualRole marker.
+          const { actualRole: _drop, ...rest } = current
+          void _drop
+          set({ user: { ...rest, role: realRole } })
+          return
+        }
+
+        set({
+          user: {
+            ...current,
+            role,
+            actualRole: realRole,
+          },
+        })
+      },
+
       refreshFromSession: async () => {
         try {
           const { data: sessionData } = await supabase.auth.getSession()
@@ -160,7 +198,17 @@ export const useAuthStore = create<AuthState>()(
         state?.setHasHydrated(true)
       },
       // Only persist the user record — everything else is transient.
-      partialize: (state) => ({ user: state.user }),
+      // Impersonation is intentionally stripped so a page reload always
+      // starts in the admin's real role.
+      partialize: (state) => ({
+        user: state.user
+          ? {
+              ...state.user,
+              role: state.user.actualRole ?? state.user.role,
+              actualRole: undefined,
+            }
+          : null,
+      }),
     },
   ),
 )
