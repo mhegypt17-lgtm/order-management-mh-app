@@ -413,6 +413,21 @@ export default function OrderSettingsView() {
         </div>
       </a>
 
+      <a
+        href="/admin/settings/products/import"
+        className="block bg-gradient-to-l from-emerald-50 to-teal-50 border-2 border-emerald-200 rounded-xl p-4 hover:border-emerald-400 transition"
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-emerald-900">🔄 مزامنة الأسعار من Google Sheets</h2>
+            <p className="text-xs text-emerald-700 mt-1">
+              استيراد الأسعار الجديدة من شيت منشور — يعرض الفروقات قبل التحديث، ويعدّل السعر الأساسي وسعر العرض فقط.
+            </p>
+          </div>
+          <span className="text-emerald-600 font-bold">فتح ←</span>
+        </div>
+      </a>
+
       {SECTION_META.map((meta) => (
         <section key={meta.key} className="bg-white border border-gray-200 rounded-xl p-4">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
