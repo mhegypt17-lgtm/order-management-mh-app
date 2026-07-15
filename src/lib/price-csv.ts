@@ -21,49 +21,106 @@ export interface PriceCsvParseResult {
   invalid: Array<{ lineNumber: number; raw: string; reason: string }>
 }
 
+/** Strip UTF-8 BOM if present. */
+function stripBom(s: string): string {
+  return s.charCodeAt(0) === 0xfeff ? s.slice(1) : s
+}
+
 /**
- * Minimal RFC 4180 CSV row splitter. Handles:
- *   - "double""quote" escaping inside quoted fields
- *   - commas inside quoted fields
- *   - unquoted fields
- * Does NOT handle newlines inside quoted fields (fine — our data doesn't
- * have any). Google's published CSV always uses \n or \r\n between rows.
+ * Canonicalises a product name for matching:
+ *   - trims leading/trailing whitespace
+ *   - collapses ALL whitespace runs (spaces, tabs, newlines) to a single space
+ * Both the CSV row and the DB row should be run through this before
+ * comparing. Exported so the preview route can normalise DB names too.
  */
-function splitCsvLine(line: string): string[] {
-  const out: string[] = []
+export function normaliseProductName(name: string): string {
+  return name.replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Proper RFC 4180 CSV parser. Walks the whole text character-by-character
+ * and tracks quote state, so newlines INSIDE a quoted field are treated
+ * as part of the field value (not a row terminator). Google Sheets
+ * exports multi-line cells this way.
+ *
+ * Returns an array of { fields, lineNumber } where lineNumber is the
+ * 1-based line the row *starts* on.
+ */
+function parseCsvRecords(
+  text: string,
+): Array<{ fields: string[]; lineNumber: number; raw: string }> {
+  const records: Array<{ fields: string[]; lineNumber: number; raw: string }> = []
   let cur = ''
+  let field = ''
+  let fields: string[] = []
   let inQuotes = false
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]
+  let rowStartLine = 1
+  let currentLine = 1
+  let rowHasContent = false
+
+  const pushField = () => {
+    fields.push(field)
+    field = ''
+  }
+  const pushRecord = () => {
+    // Only emit a record if the row had at least one visible character
+    if (rowHasContent) {
+      pushField()
+      records.push({ fields, lineNumber: rowStartLine, raw: cur })
+    }
+    fields = []
+    field = ''
+    cur = ''
+    rowHasContent = false
+    rowStartLine = currentLine + 1
+  }
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    cur += ch
+
     if (inQuotes) {
       if (ch === '"') {
-        if (line[i + 1] === '"') {
-          cur += '"'
+        if (text[i + 1] === '"') {
+          field += '"'
+          cur += text[i + 1]
           i++
         } else {
           inQuotes = false
         }
       } else {
-        cur += ch
+        field += ch
+        if (ch === '\n') currentLine++
       }
+      rowHasContent = true
     } else {
-      if (ch === ',') {
-        out.push(cur)
-        cur = ''
-      } else if (ch === '"' && cur === '') {
+      if (ch === '"' && field === '') {
         inQuotes = true
+        rowHasContent = true
+      } else if (ch === ',') {
+        pushField()
+        rowHasContent = true
+      } else if (ch === '\r') {
+        // ignore; \n will handle the row break
+      } else if (ch === '\n') {
+        pushRecord()
+        currentLine++
       } else {
-        cur += ch
+        field += ch
+        if (ch.trim() !== '') rowHasContent = true
       }
     }
   }
-  out.push(cur)
-  return out
-}
 
-/** Strip UTF-8 BOM if present. */
-function stripBom(s: string): string {
-  return s.charCodeAt(0) === 0xfeff ? s.slice(1) : s
+  // Final record (no trailing newline)
+  if (field !== '' || fields.length > 0 || rowHasContent) {
+    pushField()
+    if (fields.some((f) => f.trim() !== '')) {
+      records.push({ fields, lineNumber: rowStartLine, raw: cur })
+    }
+  }
+
+  return records
 }
 
 /**
@@ -72,25 +129,21 @@ function stripBom(s: string): string {
  */
 export function parsePriceCsv(csv: string): PriceCsvParseResult {
   const text = stripBom(csv).replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-  const lines = text.split('\n')
+  const records = parseCsvRecords(text)
 
   const rows: PriceCsvRow[] = []
   const invalid: PriceCsvParseResult['invalid'] = []
 
-  // First non-empty line is the header — skip it.
+  // First record is the header — skip it.
   let headerSeen = false
 
-  for (let i = 0; i < lines.length; i++) {
-    const raw = lines[i]
-    if (raw.trim() === '') continue
-
+  for (const rec of records) {
     if (!headerSeen) {
       headerSeen = true
       continue
     }
 
-    const lineNumber = i + 1
-    const fields = splitCsvLine(raw)
+    const { fields, lineNumber, raw } = rec
 
     if (fields.length < 2) {
       invalid.push({
@@ -101,7 +154,7 @@ export function parsePriceCsv(csv: string): PriceCsvParseResult {
       continue
     }
 
-    const productName = fields[0]?.trim() ?? ''
+    const productName = normaliseProductName(fields[0] ?? '')
     const basePriceRaw = fields[1]?.trim() ?? ''
     const offerPriceRaw = (fields[2] ?? '').trim()
 

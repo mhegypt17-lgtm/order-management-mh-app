@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/admin-guard'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
-import { parsePriceCsv, normaliseSheetUrl } from '@/lib/price-csv'
+import { parsePriceCsv, normaliseSheetUrl, normaliseProductName } from '@/lib/price-csv'
 
 export const dynamic = 'force-dynamic'
 
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
       }>
     >()
     for (const p of products ?? []) {
-      const key = (p.productName ?? '').trim()
+      const key = normaliseProductName(p.productName ?? '')
       if (!key) continue
       const arr = nameIndex.get(key) ?? []
       arr.push({
@@ -196,7 +196,7 @@ export async function POST(request: NextRequest) {
       isActive: boolean
     }> = []
     for (const p of products ?? []) {
-      const key = (p.productName ?? '').trim()
+      const key = normaliseProductName(p.productName ?? '')
       if (!key) continue
       if (!csvNames.has(key)) {
         unmatchedDbProducts.push({
