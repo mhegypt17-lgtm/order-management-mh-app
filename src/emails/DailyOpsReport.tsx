@@ -58,6 +58,7 @@ export default function DailyOpsReport({ data, browserUrl }: Props) {
     orders,
     customers,
     topProducts,
+    revenueByOrderType,
     redFlags,
   } = data
 
@@ -124,8 +125,41 @@ export default function DailyOpsReport({ data, browserUrl }: Props) {
               </Column>
             </Row>
             <Text style={{ ...subtleNote, marginTop: 12 }}>
-              Coming soon: revenue by source (B2B, InstaShop, Online, …)
+              Comparison uses same weekday last week (accounts for weekly seasonality).
             </Text>
+          </Section>
+
+          <Hr style={hrStyle} />
+
+          {/* Revenue by Order Type */}
+          <Section style={sectionStyle}>
+            <SectionHeading emoji="🏷️" label="Revenue by Order Type" />
+            {revenueByOrderType.length === 0 ? (
+              <Text style={subtleNote}>No orders yesterday.</Text>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 4 }}>
+                <thead>
+                  <tr>
+                    <th style={{ ...thStyle, textAlign: 'left' }}>Type</th>
+                    <th style={thStyle}>Orders</th>
+                    <th style={thStyle}>Delivered</th>
+                    <th style={thStyle}>Revenue</th>
+                    <th style={thStyle}>Share</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {revenueByOrderType.map((r, i) => (
+                    <tr key={r.orderType} style={i % 2 === 1 ? { backgroundColor: colors.bg } : undefined}>
+                      <td style={{ ...tdStyle, fontWeight: 600 }}>{r.orderType}</td>
+                      <td style={tdStyle}>{formatNumber(r.count)}</td>
+                      <td style={{ ...tdStyle, color: colors.positive }}>{formatNumber(r.delivered)}</td>
+                      <td style={{ ...tdStyle, fontWeight: 600 }}>{formatCurrency(r.revenue)}</td>
+                      <td style={tdStyle}>{r.sharePct}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </Section>
 
           <Hr style={hrStyle} />

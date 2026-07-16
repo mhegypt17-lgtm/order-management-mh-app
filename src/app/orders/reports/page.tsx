@@ -16,6 +16,7 @@ type OrderRecord = {
   createdAt: string
   orderStatus: 'تم' | 'مؤجل' | 'لاغي' | 'حجز'
   orderMethod: 'FB' | 'Call' | 'App' | 'WhatsApp' | 'B2B' | 'W.S'
+  orderType?: string
   customerType: 'جديد' | 'قديم' | 'عائد' | 'استكمال' | 'استرجاع' | 'استبدال' | 'تسويق' | 'تعويض' | 'فحص' | 'تحصيل'
   orderTotal: number
   items: OrderItem[]
@@ -171,6 +172,27 @@ export default function ReportsPage() {
   const sourceStats = useMemo(() => countBy(rangeOrders.map((o) => o.orderMethod)), [rangeOrders])
   const customerTypeStats = useMemo(() => countBy(rangeOrders.map((o) => o.customerType)), [rangeOrders])
   const deliveryStats = useMemo(() => countBy(rangeOrders.map((o) => o.delivery?.deliveryStatus || 'لم يخرج بعد')), [rangeOrders])
+
+  // Revenue by نوع الطلب (order type): B2B, Online, Instashop, App, …
+  // Only delivered ("تم") orders count toward revenue; other statuses are shown as count-only.
+  const orderTypeRevenue = useMemo(() => {
+    const map = new Map<string, { count: number; revenue: number; delivered: number }>()
+    for (const o of rangeOrders) {
+      const key = o.orderType || 'غير محدد'
+      const entry = map.get(key) || { count: 0, revenue: 0, delivered: 0 }
+      entry.count += 1
+      if (o.orderStatus === 'تم') {
+        entry.delivered += 1
+        entry.revenue += Number(o.orderTotal || 0)
+      }
+      map.set(key, entry)
+    }
+    const rows = Array.from(map.entries())
+      .map(([name, v]) => ({ name, ...v }))
+      .sort((a, b) => b.revenue - a.revenue)
+    const totalRevenue = rows.reduce((s, r) => s + r.revenue, 0)
+    return { rows, totalRevenue }
+  }, [rangeOrders])
 
   const deliveryDurationStats = useMemo(() => {
     // Primary signal is acceptedAt → deliveredAt. For orders that pre-date
@@ -566,6 +588,48 @@ export default function ReportsPage() {
             <ReportTable title="مصدر الطلبات (Call / App / FB ...)" rows={sourceStats.map((s) => ({ name: s.name, value: s.count }))} emptyLabel="لا توجد بيانات" />
             <ReportTable title="نوع العميل (جديد / قديم / عائد ...)" rows={customerTypeStats.map((s) => ({ name: s.name, value: s.count }))} emptyLabel="لا توجد بيانات" />
           </div>
+
+          <section className="bg-white rounded-lg border border-gray-200 p-4 overflow-x-auto">
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <h2 className="font-bold text-gray-900">💰 الإيراد حسب نوع الطلب (B2B / Online / Instashop / App)</h2>
+              <span className="text-xs text-gray-500">
+                إجمالي الإيراد المسلَّم: {orderTypeRevenue.totalRevenue.toLocaleString()} ج.م
+              </span>
+            </div>
+            {orderTypeRevenue.rows.length === 0 ? (
+              <div className="p-6 text-center text-gray-500">لا توجد بيانات في هذا النطاق</div>
+            ) : (
+              <table className="w-full min-w-[560px] text-sm">
+                <thead className="bg-gray-100 border-b border-gray-200">
+                  <tr>
+                    <th className="px-3 py-2 text-right">نوع الطلب</th>
+                    <th className="px-3 py-2 text-center">إجمالي الطلبات</th>
+                    <th className="px-3 py-2 text-center">المسلَّم</th>
+                    <th className="px-3 py-2 text-right">الإيراد المسلَّم</th>
+                    <th className="px-3 py-2 text-center">النسبة من الإيراد</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orderTypeRevenue.rows.map((row) => {
+                    const share = orderTypeRevenue.totalRevenue > 0
+                      ? Math.round((row.revenue / orderTypeRevenue.totalRevenue) * 100)
+                      : 0
+                    return (
+                      <tr key={row.name} className="border-b border-gray-100">
+                        <td className="px-3 py-2 font-semibold text-gray-900">{row.name}</td>
+                        <td className="px-3 py-2 text-center text-gray-900">{row.count}</td>
+                        <td className="px-3 py-2 text-center text-emerald-700 font-semibold">{row.delivered}</td>
+                        <td className="px-3 py-2 text-right font-bold text-emerald-800">
+                          {row.revenue.toLocaleString()} ج.م
+                        </td>
+                        <td className="px-3 py-2 text-center text-gray-700">{share}%</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )}
+          </section>
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <ReportTable title="حالة التوصيل" rows={deliveryStats.map((s) => ({ name: s.name, value: s.count }))} emptyLabel="لا توجد بيانات" />

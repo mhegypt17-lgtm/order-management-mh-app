@@ -52,6 +52,18 @@ export interface DailyReportData {
     revenue: number
   }>
 
+  /**
+   * Revenue split by نوع الطلب (order type: B2B / Online / Instashop / App / …).
+   * Only delivered orders contribute to `revenue`; `count` includes all statuses.
+   */
+  revenueByOrderType: Array<{
+    orderType: string
+    count: number
+    delivered: number
+    revenue: number
+    sharePct: number
+  }>
+
   redFlags: {
     openComplaintsOver24h: number
     ordersPastScheduledDate: number
@@ -86,7 +98,7 @@ export async function getDailyReportData(
   ] = await Promise.all([
     supabase
       .from('orders')
-      .select('id,"orderStatus","orderTotal","orderDate"')
+      .select('id,"orderStatus","orderTotal","orderDate","orderType"')
       .eq('orderDate', reportDate),
 
     supabase
@@ -225,6 +237,30 @@ export async function getDailyReportData(
       revenue: stats.revenue,
     }))
 
+  // ─── Revenue by order type (نوع الطلب) ──────────────────────
+  // Delivered orders contribute to revenue; all statuses contribute to count.
+  const typeAgg = new Map<string, { count: number; delivered: number; revenue: number }>()
+  for (const o of reportOrders ?? []) {
+    const key = ((o as { orderType?: string }).orderType || '').trim() || 'غير محدد'
+    const entry = typeAgg.get(key) ?? { count: 0, delivered: 0, revenue: 0 }
+    entry.count += 1
+    if (o.orderStatus === ORDER_STATUS.DELIVERED) {
+      entry.delivered += 1
+      entry.revenue += Number(o.orderTotal ?? 0)
+    }
+    typeAgg.set(key, entry)
+  }
+  const totalTypeRevenue = [...typeAgg.values()].reduce((s, v) => s + v.revenue, 0)
+  const revenueByOrderType = [...typeAgg.entries()]
+    .map(([orderType, v]) => ({
+      orderType,
+      count: v.count,
+      delivered: v.delivered,
+      revenue: v.revenue,
+      sharePct: totalTypeRevenue > 0 ? Math.round((v.revenue / totalTypeRevenue) * 100) : 0,
+    }))
+    .sort((a, b) => b.revenue - a.revenue)
+
   return {
     reportDate,
     comparisonDate,
@@ -239,6 +275,7 @@ export async function getDailyReportData(
       newCustomers: newCustomersCount ?? 0,
     },
     topProducts,
+    revenueByOrderType,
     redFlags: {
       openComplaintsOver24h: openComplaintsCount ?? 0,
       ordersPastScheduledDate: (overdueOrders ?? []).length,

@@ -210,6 +210,7 @@ export default function DashboardPage() {
 
     const sourceMap = new Map<string, { count: number; revenue: number }>()
     const methodMap = new Map<string, { count: number; revenue: number }>()
+    const orderTypeMap = new Map<string, { count: number; revenue: number }>()
     const productMap = new Map<string, { qty: number; revenue: number; orders: number }>()
     const receiverMap = new Map<string, { orders: number; completed: number; cancelled: number; revenue: number }>()
     const cancelReasonMap = new Map<string, { count: number; lostValue: number }>()
@@ -224,6 +225,12 @@ export default function DashboardPage() {
       method.count += 1
       method.revenue += Number(o.orderTotal || 0)
       methodMap.set(o.orderMethod, method)
+
+      const otype = o.orderType || 'Unknown'
+      const otypeEntry = orderTypeMap.get(otype) || { count: 0, revenue: 0 }
+      otypeEntry.count += 1
+      otypeEntry.revenue += Number(o.orderTotal || 0)
+      orderTypeMap.set(otype, otypeEntry)
 
       const receiver = receiverMap.get(o.orderReceiver) || { orders: 0, completed: 0, cancelled: 0, revenue: 0 }
       receiver.orders += 1
@@ -256,6 +263,10 @@ export default function DashboardPage() {
     const methods = Array.from(methodMap.entries())
       .map(([name, v]) => ({ name, ...v }))
       .sort((a, b) => b.count - a.count)
+
+    const orderTypes = Array.from(orderTypeMap.entries())
+      .map(([name, v]) => ({ name, ...v }))
+      .sort((a, b) => b.revenue - a.revenue)
 
     const topProducts = Array.from(productMap.entries())
       .map(([productName, v]) => ({ productName, ...v }))
@@ -300,6 +311,7 @@ export default function DashboardPage() {
       deliveryCounts,
       sources,
       methods,
+      orderTypes,
       topProducts,
       receiverPerformance,
       cancellationDetails,
@@ -711,6 +723,37 @@ export default function DashboardPage() {
           </div>
         </section>
       </div>
+
+      <section className="bg-white rounded-lg border border-gray-200 p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-bold text-gray-900">💰 الإيراد حسب نوع الطلب</h2>
+          <span className="text-xs text-gray-500">
+            إجمالي: {analytics.totalRevenue.toLocaleString()} ج.م
+          </span>
+        </div>
+        {analytics.orderTypes.length === 0 ? (
+          <p className="text-sm text-gray-500 text-center py-4">لا توجد بيانات</p>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {analytics.orderTypes.map((t) => {
+              const share = analytics.totalRevenue > 0
+                ? Math.round((t.revenue / analytics.totalRevenue) * 100)
+                : 0
+              return (
+                <div key={t.name} className="border border-gray-200 rounded-lg p-3 bg-gradient-to-br from-emerald-50 to-white">
+                  <div className="text-xs text-gray-500 uppercase tracking-wide">{t.name}</div>
+                  <div className="text-2xl font-bold text-emerald-700 mt-1">
+                    {t.revenue.toLocaleString()} <span className="text-sm text-gray-500">ج.م</span>
+                  </div>
+                  <div className="text-xs text-gray-600 mt-1">
+                    {t.count} طلب · {share}% من الإيراد
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </section>
 
       <section className="bg-white rounded-lg border border-gray-200 p-4 overflow-x-auto">
         <h2 className="font-bold text-gray-900 mb-3">أفضل المنتجات (حسب الإيراد)</h2>
