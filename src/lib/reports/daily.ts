@@ -86,9 +86,7 @@ export async function getDailyReportData(
   ] = await Promise.all([
     supabase
       .from('orders')
-      .select(
-        'id,"orderStatus","orderTotal","orderDate", order_items:order_items(id,"productId",quantity,"lineTotal")',
-      )
+      .select('id,"orderStatus","orderTotal","orderDate"')
       .eq('orderDate', reportDate),
 
     supabase
@@ -176,16 +174,27 @@ export async function getDailyReportData(
   }
 
   // ─── Top 5 products by revenue ──────────────────────────────
+  // No FK is declared on order_items.orderId, so PostgREST cannot embed
+  // the child rows via a nested select. Fetch them in a second query.
+  const deliveredOrderIds = (reportOrders ?? [])
+    .filter((o) => o.orderStatus === ORDER_STATUS.DELIVERED)
+    .map((o) => String(o.id))
+
   const productAgg = new Map<string, { quantity: number; revenue: number }>()
-  for (const o of reportOrders ?? []) {
-    if (o.orderStatus !== ORDER_STATUS.DELIVERED) continue
-    const items = (o as { order_items?: Array<{ productId?: string; quantity?: number; lineTotal?: number }> }).order_items ?? []
-    for (const item of items) {
-      const pid = item.productId
+  if (deliveredOrderIds.length > 0) {
+    const { data: itemRows, error: itemsErr } = await supabase
+      .from('order_items')
+      .select('"orderId","productId",quantity,"lineTotal"')
+      .in('orderId', deliveredOrderIds)
+    if (itemsErr) {
+      throw new Error(`Supabase query failed: ${itemsErr.message}`)
+    }
+    for (const item of itemRows ?? []) {
+      const pid = (item as { productId?: string }).productId
       if (!pid) continue
       const existing = productAgg.get(pid) ?? { quantity: 0, revenue: 0 }
-      existing.quantity += Number(item.quantity ?? 0)
-      existing.revenue += Number(item.lineTotal ?? 0)
+      existing.quantity += Number((item as { quantity?: number }).quantity ?? 0)
+      existing.revenue += Number((item as { lineTotal?: number }).lineTotal ?? 0)
       productAgg.set(pid, existing)
     }
   }
