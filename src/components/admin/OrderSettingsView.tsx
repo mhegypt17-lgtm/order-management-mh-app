@@ -434,9 +434,9 @@ export default function OrderSettingsView() {
       >
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-bold text-red-900">📊 تقرير العمليات اليومي</h2>
+            <h2 className="text-lg font-bold text-red-900">📊 تقارير العمليات (يومي + أسبوعي)</h2>
             <p className="text-xs text-red-700 mt-1">
-              معاينة التقرير اللي بيتبعت كل صباح على البريد — مبيعات، طلبات، عملاء جدد، أفضل 5 منتجات، وتنبيهات المشاكل.
+              اليومي بيتبعت ٦ ص القاهرة، والأسبوعي كل يوم أحد ٨ ص — مبيعات، طلبات، عملاء، منتجات، شكاوى، مخزون، وتنبيهات.
             </p>
           </div>
           <span className="text-red-600 font-bold">فتح ←</span>

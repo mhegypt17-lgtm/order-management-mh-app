@@ -5,59 +5,74 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
 
+type ReportMode = 'daily' | 'weekly'
+
+const CONFIG = {
+  daily: {
+    title: '📊 معاينة تقرير العمليات اليومي',
+    hint: 'نفس المحتوى اللي بيتبعت كل صباح ٦ ص القاهرة (٠٤:٠٠ UTC).',
+    previewUrl: '/api/admin/reports/daily/preview',
+    sendUrl: '/api/admin/reports/daily/send-test',
+    confirmMsg: 'إرسال تقرير أمس على البريد فورًا لكل من في REPORT_RECIPIENTS؟',
+  },
+  weekly: {
+    title: '📈 معاينة التقرير الأسبوعي',
+    hint: 'التقرير الأسبوعي بيتبعت كل يوم أحد ٨ ص القاهرة (٠٦:٠٠ UTC) — بيغطي آخر ٧ أيام.',
+    previewUrl: '/api/admin/reports/weekly/preview',
+    sendUrl: '/api/admin/reports/weekly/send-test',
+    confirmMsg: 'إرسال التقرير الأسبوعي على البريد فورًا لكل من في REPORT_RECIPIENTS؟',
+  },
+} as const
+
 /**
- * Admin preview of the daily ops email report.
- *
- * Loads the same HTML the cron will send, into an <iframe>, so the design
- * can be iterated on without triggering real emails. A "Send test email"
- * button also lets admins fire the cron endpoint on demand.
+ * Admin preview for the daily + weekly ops emails.
+ * Both are the exact HTML the cron will send.
  */
-export default function DailyReportPreviewPage() {
+export default function ReportPreviewPage() {
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
+  const [mode, setMode] = useState<ReportMode>('daily')
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const { data: session } = await supabase.auth.getSession()
-      const token = session.session?.access_token
-      if (!token) throw new Error('انتهت الجلسة، سجّل الدخول من جديد')
+  const load = useCallback(
+    async (m: ReportMode) => {
+      setLoading(true)
+      try {
+        const { data: session } = await supabase.auth.getSession()
+        const token = session.session?.access_token
+        if (!token) throw new Error('انتهت الجلسة، سجّل الدخول من جديد')
 
-      const res = await fetch('/api/admin/reports/daily/preview', {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!res.ok) {
-        const body = await res.text()
-        throw new Error(body || `HTTP ${res.status}`)
+        const res = await fetch(CONFIG[m].previewUrl, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!res.ok) {
+          const body = await res.text()
+          throw new Error(body || `HTTP ${res.status}`)
+        }
+        const html = await res.text()
+        if (iframeRef.current?.contentDocument) {
+          iframeRef.current.contentDocument.open()
+          iframeRef.current.contentDocument.write(html)
+          iframeRef.current.contentDocument.close()
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'فشل التحميل')
+      } finally {
+        setLoading(false)
       }
-      const html = await res.text()
-      if (iframeRef.current?.contentDocument) {
-        iframeRef.current.contentDocument.open()
-        iframeRef.current.contentDocument.write(html)
-        iframeRef.current.contentDocument.close()
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'فشل التحميل')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+    },
+    [],
+  )
 
   useEffect(() => {
-    load()
-  }, [load])
+    load(mode)
+  }, [load, mode])
 
   const sendTest = async () => {
-    if (
-      !confirm(
-        'إرسال تقرير أمس على البريد فورًا لكل من في REPORT_RECIPIENTS؟',
-      )
-    )
-      return
+    if (!confirm(CONFIG[mode].confirmMsg)) return
     setSending(true)
     try {
-      const res = await fetch('/api/admin/reports/daily/send-test', {
+      const res = await fetch(CONFIG[mode].sendUrl, {
         method: 'POST',
         headers: await authHeaders(),
       })
@@ -89,16 +104,35 @@ export default function DailyReportPreviewPage() {
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">
-              📊 معاينة تقرير العمليات اليومي
+              {CONFIG[mode].title}
             </h1>
-            <p className="text-sm text-gray-600 mt-1">
-              نفس المحتوى اللي هيتبعت كل صباح على البريد. أضغط "إرسال اختباري"
-              لإرسال التقرير فورًا لقائمة المستلمين.
-            </p>
+            <p className="text-sm text-gray-600 mt-1">{CONFIG[mode].hint}</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center flex-wrap">
+            <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden">
+              <button
+                onClick={() => setMode('daily')}
+                className={`px-3 py-2 text-sm font-medium ${
+                  mode === 'daily'
+                    ? 'bg-red-700 text-white'
+                    : 'bg-white text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                📊 يومي
+              </button>
+              <button
+                onClick={() => setMode('weekly')}
+                className={`px-3 py-2 text-sm font-medium ${
+                  mode === 'weekly'
+                    ? 'bg-red-700 text-white'
+                    : 'bg-white text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                📈 أسبوعي
+              </button>
+            </div>
             <button
-              onClick={load}
+              onClick={() => load(mode)}
               disabled={loading}
               className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
             >
@@ -124,7 +158,7 @@ export default function DailyReportPreviewPage() {
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <iframe
           ref={iframeRef}
-          title="Daily report preview"
+          title={`${mode} report preview`}
           className="w-full"
           style={{ height: '80vh', border: 'none' }}
         />
