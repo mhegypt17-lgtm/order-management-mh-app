@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { Resend } from 'resend'
 import { render } from '@react-email/render'
 import DailyOpsReport from '@/emails/DailyOpsReport'
 import { getDailyReportData, formatDailyReportSummary } from '@/lib/reports/daily'
+import { sendReportEmail } from '@/lib/reports/mailer'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -10,13 +10,12 @@ export const runtime = 'nodejs'
 /**
  * GET /api/cron/reports/daily
  *
- * Called by Vercel Cron every morning. Verifies the shared secret,
- * generates yesterday's report, renders it via @react-email/render,
- * and sends via Resend to every address in REPORT_RECIPIENTS.
+ * Called by Vercel Cron every morning at 03:00 UTC. Verifies the shared
+ * secret, generates yesterday's report, renders it via @react-email/render,
+ * and sends via Gmail SMTP to every address in REPORT_RECIPIENTS.
  *
  * Also callable manually with:
  *   curl -H "Authorization: Bearer $CRON_SECRET" https://.../api/cron/reports/daily
- * for testing without waiting for the scheduled fire.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -36,17 +35,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // ─── Config ─────────────────────────────────────────────
-    const resendKey = process.env.RESEND_API_KEY
-    if (!resendKey) {
-      return NextResponse.json(
-        { error: 'RESEND_API_KEY is not configured' },
-        { status: 500 },
-      )
-    }
-
-    const recipientsRaw = process.env.REPORT_RECIPIENTS || ''
-    const recipients = recipientsRaw
+    // ─── Recipients ─────────────────────────────────────────
+    const recipients = (process.env.REPORT_RECIPIENTS || '')
       .split(',')
       .map((s) => s.trim())
       .filter((s) => s.length > 0)
@@ -57,9 +47,6 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const fromAddress =
-      process.env.REPORT_FROM_ADDRESS ||
-      'MH Reports <onboarding@resend.dev>'
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || ''
     const browserUrl = appUrl
       ? `${appUrl.replace(/\/$/, '')}/admin/reports/preview`
@@ -67,32 +54,19 @@ export async function GET(request: NextRequest) {
 
     // ─── Build report ───────────────────────────────────────
     const data = await getDailyReportData()
-    const html = await render(
-      DailyOpsReport({ data, browserUrl }),
-    )
+    const html = await render(DailyOpsReport({ data, browserUrl }))
     const subject = `📊 Daily Ops · ${data.reportDate} · ${formatDailyReportSummary(data)}`
 
-    // ─── Send ───────────────────────────────────────────────
-    const resend = new Resend(resendKey)
-    const { data: sent, error } = await resend.emails.send({
-      from: fromAddress,
-      to: recipients,
-      subject,
-      html,
-    })
-
-    if (error) {
-      return NextResponse.json(
-        { error: `Resend failed: ${error.message}` },
-        { status: 502 },
-      )
-    }
+    // ─── Send via Gmail SMTP ────────────────────────────────
+    const result = await sendReportEmail({ to: recipients, subject, html })
 
     return NextResponse.json({
       ok: true,
       reportDate: data.reportDate,
       recipients: recipients.length,
-      emailId: sent?.id ?? null,
+      accepted: result.accepted.length,
+      rejected: result.rejected.length,
+      messageId: result.messageId,
       summary: formatDailyReportSummary(data),
     })
   } catch (error) {
