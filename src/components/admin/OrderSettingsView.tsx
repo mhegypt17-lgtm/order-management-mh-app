@@ -428,6 +428,21 @@ export default function OrderSettingsView() {
         </div>
       </a>
 
+      <a
+        href="/admin/reports/preview"
+        className="block bg-gradient-to-l from-red-50 to-orange-50 border-2 border-red-200 rounded-xl p-4 hover:border-red-400 transition"
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-red-900">📊 تقرير العمليات اليومي</h2>
+            <p className="text-xs text-red-700 mt-1">
+              معاينة التقرير اللي بيتبعت كل صباح على البريد — مبيعات، طلبات، عملاء جدد، أفضل 5 منتجات، وتنبيهات المشاكل.
+            </p>
+          </div>
+          <span className="text-red-600 font-bold">فتح ←</span>
+        </div>
+      </a>
+
       {SECTION_META.map((meta) => (
         <section key={meta.key} className="bg-white border border-gray-200 rounded-xl p-4">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
