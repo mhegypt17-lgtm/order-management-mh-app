@@ -125,6 +125,8 @@ async function enrich(orderId: string, opts: { includePhotos: boolean }) {
       productName: product?.productName || 'منتج محذوف',
       pricingMode,
       pricePerKg,
+      basePrice: product?.basePrice != null ? Number(product.basePrice) : null,
+      offerPrice: product?.offerPrice != null ? Number(product.offerPrice) : null,
     }
   })
 

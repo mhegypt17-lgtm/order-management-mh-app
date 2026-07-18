@@ -17,6 +17,8 @@ type OrderItemDetail = {
   specialInstructions: string
   pricingMode: 'unit' | 'weight'
   pricePerKg: number
+  basePrice?: number | null
+  offerPrice?: number | null
   originalQuantity?: number | null
   originalWeightGrams?: number | null
 }
@@ -414,6 +416,8 @@ export default function BranchOrderDetailPage() {
                   <th className="py-2 pr-2">المنتج</th>
                   <th className="py-2 px-2">الكمية</th>
                   <th className="py-2 px-2">الوزن</th>
+                  <th className="py-2 px-2">السعر</th>
+                  <th className="py-2 px-2">العرض</th>
                   <th className="py-2 px-2">سعر الوحدة</th>
                   <th className="py-2 pl-2">الإجمالي</th>
                 </tr>
@@ -541,6 +545,28 @@ export default function BranchOrderDetailPage() {
                           <span className="text-xs text-gray-500" dir="ltr">
                             {item.weightGrams ? `${item.weightGrams} جم` : '—'}
                           </span>
+                        )}
+                      </td>
+                      <td className="py-2 px-2 text-gray-700 whitespace-nowrap">
+                        {item.basePrice != null
+                          ? `${Number(item.basePrice).toLocaleString()} ج.م${isWeight ? ' / كج' : ''}`
+                          : '--'}
+                      </td>
+                      <td className="py-2 px-2 whitespace-nowrap">
+                        {item.offerPrice != null &&
+                        Number(item.offerPrice) > 0 &&
+                        item.basePrice != null &&
+                        Number(item.offerPrice) < Number(item.basePrice) ? (
+                          <span className="inline-flex items-center gap-1">
+                            <span className="text-red-600 font-bold">
+                              {Number(item.offerPrice).toLocaleString()} ج.م
+                            </span>
+                            <span className="text-xs text-red-600 font-semibold">
+                              -{(((Number(item.basePrice) - Number(item.offerPrice)) / Number(item.basePrice)) * 100).toFixed(0)}%
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">--</span>
                         )}
                       </td>
                       <td className="py-2 px-2 text-gray-700">{liveUnitPrice} ج.م</td>
