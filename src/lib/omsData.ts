@@ -115,6 +115,19 @@ export interface OrderItemRecord {
    * weight has never been changed by the branch.
    */
   originalWeightGrams?: number | null
+  /**
+   * Frozen product.basePrice at the moment the line was created. Prevents
+   * later product-price edits from silently rewriting historical orders.
+   * For weight-mode items this is the per-kg base price. May be null on
+   * rows created before the price-snapshot migration.
+   */
+  basePriceSnapshot?: number | null
+  /**
+   * Frozen product.offerPrice at line creation. `null` means the product
+   * had no promo when the line was written (or the row predates the
+   * snapshot migration).
+   */
+  offerPriceSnapshot?: number | null
 }
 
 export interface OrderDeliveryRecord {
@@ -731,6 +744,7 @@ export const ADDRESS_COLUMNS = [
 export const ORDER_ITEM_COLUMNS = [
   'id', 'orderId', 'productId', 'quantity', 'weightGrams', 'unitPrice', 'lineTotal',
   'specialInstructions', 'createdAt', 'originalQuantity', 'originalWeightGrams',
+  'basePriceSnapshot', 'offerPriceSnapshot',
 ].join(',')
 
 // Delivery columns — the "list" variant excludes the heavy productPhotos +

@@ -237,6 +237,8 @@ create table if not exists public.order_items (
   "specialInstructions"  text,
   "originalQuantity"     numeric,
   "originalWeightGrams"  numeric,
+  "basePriceSnapshot"    numeric,   -- frozen product.basePrice at time of order (per-kg for weight items)
+  "offerPriceSnapshot"   numeric,   -- frozen product.offerPrice at time of order (null = no promo)
   "createdAt"            timestamptz not null default now()
 );
 

@@ -54,6 +54,15 @@ type OrderItemForm = {
   originalQuantity?: number | null
   /** CS-entered weight (grams) snapshot, set by branch on first amend. */
   originalWeightGrams?: number | null
+  /**
+   * Frozen product.basePrice at the moment this line was added to the
+   * order. Displayed in the "السعر" column so that later product-price
+   * edits don't retroactively rewrite what the customer committed to.
+   * For weight-mode items, this is per-kg.
+   */
+  basePriceSnapshot?: number | null
+  /** Frozen product.offerPrice at line creation. null = no promo. */
+  offerPriceSnapshot?: number | null
 }
 
 const normalizeProductName = (value: string) =>
@@ -171,6 +180,8 @@ const emptyItem = (): OrderItemForm => ({
   specialInstructions: '',
   originalQuantity: null,
   originalWeightGrams: null,
+  basePriceSnapshot: null,
+  offerPriceSnapshot: null,
 })
 
 /**
@@ -479,6 +490,11 @@ export default function OrderForm({ mode, orderId }: Props) {
             specialInstructions: item.specialInstructions || '',
             originalQuantity: item.originalQuantity ?? null,
             originalWeightGrams: item.originalWeightGrams ?? null,
+            // Load the price snapshots stored with the item so the price
+            // columns display what the customer committed to — not the
+            // product's current price.
+            basePriceSnapshot: item.basePriceSnapshot ?? null,
+            offerPriceSnapshot: item.offerPriceSnapshot ?? null,
           }))
 
           setItems(mappedItems.length > 0 ? mappedItems : [emptyItem()])
@@ -890,6 +906,15 @@ export default function OrderForm({ mode, orderId }: Props) {
       productId: selected.id,
       weightGrams: isWeight ? estimatedGrams : Number(selected.weightGrams) || 0,
       unitPrice,
+      // Snapshot the product's prices at the moment CS picked it. These
+      // will be sent with the save so the DB freezes them alongside the
+      // line — protecting the order from later product-price edits.
+      basePriceSnapshot:
+        selected.basePrice != null ? Number(selected.basePrice) : null,
+      offerPriceSnapshot:
+        selected.offerPrice != null && Number(selected.offerPrice) > 0
+          ? Number(selected.offerPrice)
+          : null,
     })
   }
 
@@ -1429,23 +1454,62 @@ export default function OrderForm({ mode, orderId }: Props) {
                       </datalist>
                     </td>
                     <td className="p-2 text-sm text-gray-700 whitespace-nowrap">
-                      {selectedProduct
-                        ? `${Number(selectedProduct.basePrice || 0).toLocaleString()} ج.م${isWeightMode ? ' / كج' : ''}`
-                        : '--'}
+                      {(() => {
+                        // Prefer the FROZEN snapshot on the line so historical
+                        // orders keep showing the price the customer committed
+                        // to. For rows without a snapshot (pre-migration or a
+                        // brand-new line the CS hasn't picked a product for
+                        // yet), fall back to the line's own unitPrice — which
+                        // is ALSO frozen — rather than the current product
+                        // price, so we never surface a value that could have
+                        // drifted since order-time.
+                        const displayBase =
+                          item.basePriceSnapshot != null
+                            ? Number(item.basePriceSnapshot)
+                            : item.productId && Number(item.unitPrice) > 0
+                            ? Number(item.unitPrice)
+                            : selectedProduct
+                            ? Number(selectedProduct.basePrice || 0)
+                            : null
+                        return displayBase != null
+                          ? `${displayBase.toLocaleString()} ج.م${isWeightMode ? ' / كج' : ''}`
+                          : '--'
+                      })()}
                     </td>
                     <td className="p-2 text-sm whitespace-nowrap">
-                      {selectedProduct?.offerPrice != null && Number(selectedProduct.offerPrice) > 0 && Number(selectedProduct.offerPrice) < Number(selectedProduct.basePrice || 0) ? (
-                        <span className="inline-flex items-center gap-1">
-                          <span className="text-red-600 font-bold">
-                            {Number(selectedProduct.offerPrice).toLocaleString()} ج.م
-                          </span>
-                          <span className="text-xs text-red-600 font-semibold">
-                            -{(((Number(selectedProduct.basePrice) - Number(selectedProduct.offerPrice)) / Number(selectedProduct.basePrice)) * 100).toFixed(0)}%
-                          </span>
-                        </span>
-                      ) : (
-                        <span className="text-gray-400">--</span>
-                      )}
+                      {(() => {
+                        const displayBase =
+                          item.basePriceSnapshot != null
+                            ? Number(item.basePriceSnapshot)
+                            : selectedProduct
+                            ? Number(selectedProduct.basePrice || 0)
+                            : 0
+                        // Only show a promo when the line HAS a snapshot for
+                        // it. For pre-migration rows we can't recover the
+                        // original base/offer split, so we surface "no promo"
+                        // rather than invent one from the current product.
+                        const displayOffer =
+                          item.offerPriceSnapshot != null
+                            ? Number(item.offerPriceSnapshot)
+                            : item.basePriceSnapshot != null || item.productId
+                            ? null
+                            : selectedProduct?.offerPrice != null && Number(selectedProduct.offerPrice) > 0
+                            ? Number(selectedProduct.offerPrice)
+                            : null
+                        if (displayOffer != null && displayOffer > 0 && displayOffer < displayBase) {
+                          return (
+                            <span className="inline-flex items-center gap-1">
+                              <span className="text-red-600 font-bold">
+                                {displayOffer.toLocaleString()} ج.م
+                              </span>
+                              <span className="text-xs text-red-600 font-semibold">
+                                -{(((displayBase - displayOffer) / displayBase) * 100).toFixed(0)}%
+                              </span>
+                            </span>
+                          )
+                        }
+                        return <span className="text-gray-400">--</span>
+                      })()}
                     </td>
                     <td className="p-2">
                       <input

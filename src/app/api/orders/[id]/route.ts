@@ -71,7 +71,7 @@ async function readProducts() {
       .from('products')
       .select('id, productName, productCategory, pricingMode, basePrice, offerPrice')
     if (error) return []
-    return Array.isArray(products) ? products : []
+    return Array.isArray(data) ? data : []
   } catch {
     return []
   }
@@ -536,8 +536,29 @@ export async function PUT(
     // (originalQuantity / originalWeightGrams) across a CS save. We match
     // surviving lines by productId since CS regenerates item ids on save.
     const existingForOrder = orderItems.filter((i) => i.orderId === params.id)
+    const productByIdLocal = new Map<string, any>(
+      (products as any[]).map((p) => [p.id, p]),
+    )
     const rewrittenItems: OrderItemRecord[] = normalizedItems.map((i) => {
       const prior = existingForOrder.find((p) => p.productId === i.productId)
+      const productNow = productByIdLocal.get(i.productId)
+      // Snapshot rules:
+      //   • If a prior line for this product existed, PRESERVE its snapshot
+      //     exactly — including null. The customer committed to that price
+      //     (or that pre-migration state); do NOT retroactively backfill.
+      //   • Otherwise (net-new line CS just added, or CS switched the line
+      //     to a different product), snapshot the current product prices so
+      //     this new line is frozen going forward.
+      const basePriceSnapshot = prior
+        ? prior.basePriceSnapshot ?? null
+        : productNow?.basePrice != null
+        ? Number(productNow.basePrice)
+        : null
+      const offerPriceSnapshot = prior
+        ? prior.offerPriceSnapshot ?? null
+        : productNow?.offerPrice != null && Number(productNow.offerPrice) > 0
+        ? Number(productNow.offerPrice)
+        : null
       return {
         id: generateId('item'),
         orderId: params.id,
@@ -552,6 +573,8 @@ export async function PUT(
         // amended this line before — otherwise stay null.
         originalQuantity: prior?.originalQuantity ?? null,
         originalWeightGrams: prior?.originalWeightGrams ?? null,
+        basePriceSnapshot,
+        offerPriceSnapshot,
       }
     })
 
@@ -656,7 +679,20 @@ export async function PUT(
     // Replace order items: delete old, insert new
     await supabase.from('order_items').delete().eq('orderId', params.id)
     if (rewrittenItems.length > 0) {
-      await supabase.from('order_items').insert(rewrittenItems)
+      const { error: insErr } = await supabase.from('order_items').insert(rewrittenItems)
+      if (insErr) {
+        const msg = String(insErr.message || '')
+        if (/basePriceSnapshot|offerPriceSnapshot|column .* does not exist/i.test(msg)) {
+          // Deployment hasn't run price-snapshot-migration.sql yet — retry
+          // without the snapshot columns so the save still succeeds.
+          const strippedItems = rewrittenItems.map(
+            ({ basePriceSnapshot: _b, offerPriceSnapshot: _o, ...rest }) => rest,
+          )
+          await supabase.from('order_items').insert(strippedItems)
+        } else {
+          console.error('order_items insert failed', insErr)
+        }
+      }
     }
 
     // Reconcile the customer's wallet by the delta (new - previous). If
