@@ -834,44 +834,53 @@ export async function readOrderItemsByOrderIds(
   orderIds: string[],
   columns: string = ORDER_ITEM_COLUMNS,
 ): Promise<OrderItemRecord[]> {
-  // When caller uses the default column set, attempt to also include the
-  // price-snapshot columns so downstream code (branch weight recompute, CS
-  // preserve-on-edit) sees the frozen prices. If those columns don't exist
-  // yet (pre-migration DB), fall back transparently to the base set — the
-  // shared line-item read must NEVER return empty just because snapshot
-  // columns are missing.
-  if (columns !== ORDER_ITEM_COLUMNS) {
-    return fetchRowsIn<OrderItemRecord>('order_items', 'orderId', orderIds, columns)
-  }
-  const uniq = Array.from(new Set(orderIds.filter((v) => v != null && v !== '')))
-  if (uniq.length === 0) return []
-  const chunkSize = 200
-  const all: OrderItemRecord[] = []
-  const extendedCols = `${ORDER_ITEM_COLUMNS},${ORDER_ITEM_SNAPSHOT_COLUMNS}`
-  let snapshotAvailable = true
-  for (let i = 0; i < uniq.length; i += chunkSize) {
-    const chunk = uniq.slice(i, i + chunkSize)
-    let selectCols = snapshotAvailable ? extendedCols : ORDER_ITEM_COLUMNS
-    let { data, error } = await supabase
-      .from('order_items')
-      .select(selectCols)
-      .in('orderId', chunk)
-    if (error && snapshotAvailable && /column .* does not exist/i.test(error.message || '')) {
-      snapshotAvailable = false
-      const retry = await supabase
+  // SAFETY: the primary line-item read must NEVER be enriched with the
+  // price-snapshot columns — those may not exist yet on this Supabase
+  // instance and any error (Postgres 42703 OR PostgREST PGRST204 "Could
+  // not find the '…' column of '…' in the schema cache") would cause the
+  // whole chunk to be dropped and line items to vanish from the UI.
+  //
+  // We ALWAYS fetch the base ORDER_ITEM_COLUMNS set (or whatever the caller
+  // explicitly passed) via fetchRowsIn, then do a separate best-effort read
+  // for the snapshot columns and merge them in by row id. If the snapshot
+  // read fails for ANY reason we silently return the base rows unchanged.
+  const baseRows = await fetchRowsIn<OrderItemRecord>('order_items', 'orderId', orderIds, columns)
+  if (baseRows.length === 0) return baseRows
+  // If caller asked for a custom column set we assume they know what they
+  // want and don't add snapshots on top.
+  if (columns !== ORDER_ITEM_COLUMNS) return baseRows
+  try {
+    const ids = baseRows.map((r) => r.id).filter(Boolean)
+    if (ids.length === 0) return baseRows
+    const snapshotMap = new Map<string, { basePriceSnapshot: number | null; offerPriceSnapshot: number | null }>()
+    const chunkSize = 200
+    for (let i = 0; i < ids.length; i += chunkSize) {
+      const chunk = ids.slice(i, i + chunkSize)
+      const { data, error } = await supabase
         .from('order_items')
-        .select(ORDER_ITEM_COLUMNS)
-        .in('orderId', chunk)
-      data = retry.data
-      error = retry.error
+        .select(`id,${ORDER_ITEM_SNAPSHOT_COLUMNS}`)
+        .in('id', chunk)
+      if (error) {
+        // Column not yet migrated (or any other error) — silently give up
+        // on snapshots for the WHOLE call. Never let this affect base rows.
+        return baseRows
+      }
+      for (const row of (data || []) as any[]) {
+        if (row?.id) {
+          snapshotMap.set(row.id, {
+            basePriceSnapshot: row.basePriceSnapshot != null ? Number(row.basePriceSnapshot) : null,
+            offerPriceSnapshot: row.offerPriceSnapshot != null ? Number(row.offerPriceSnapshot) : null,
+          })
+        }
+      }
     }
-    if (error) {
-      console.error('Error reading order_items by orderId:', error)
-      continue
-    }
-    if (data && data.length) all.push(...(data as unknown as OrderItemRecord[]))
+    return baseRows.map((r) => {
+      const snap = snapshotMap.get(r.id)
+      return snap ? { ...r, ...snap } : r
+    })
+  } catch {
+    return baseRows
   }
-  return all
 }
 
 export async function readOrderDeliveryByOrderIds(

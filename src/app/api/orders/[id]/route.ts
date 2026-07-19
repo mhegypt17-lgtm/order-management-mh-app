@@ -676,8 +676,15 @@ export async function PUT(
     await supabase.from('order_items').delete().eq('orderId', params.id)
     if (rewrittenItems.length > 0) {
       let { error: insErr } = await supabase.from('order_items').insert(rewrittenItems)
-      // Graceful fallback if snapshot columns don't exist yet.
-      if (insErr && /column .* does not exist/i.test(insErr.message || '')) {
+      // Bulletproof fallback: after DELETE we MUST get the rewritten items
+      // back into the DB. If the snapshot-enriched insert fails for ANY
+      // reason (Postgres 42703 OR PostgREST PGRST204 schema-cache miss OR
+      // anything else) we strip the snapshot columns and retry. Losing the
+      // snapshot enrichment is acceptable; leaving the order with zero
+      // line items after we already deleted them is catastrophic — that is
+      // exactly what caused historical orders to appear empty after a
+      // product re-price.
+      if (insErr) {
         const stripped = rewrittenItems.map((r) => {
           const { basePriceSnapshot: _b, offerPriceSnapshot: _o, ...rest } = r
           return rest

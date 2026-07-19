@@ -168,7 +168,10 @@ export async function POST(
 
     if (newItems.length > 0) {
       let { error: itemsErr } = await supabase.from('order_items').insert(newItems)
-      if (itemsErr && /column .* does not exist/i.test(itemsErr.message || '')) {
+      // Bulletproof: strip snapshots and retry on ANY error, so we never
+      // fail to persist the duplicated line items because of a missing
+      // snapshot column (Postgres 42703 or PostgREST PGRST204).
+      if (itemsErr) {
         const stripped = newItems.map((n) => {
           const { basePriceSnapshot: _b, offerPriceSnapshot: _o, ...rest } = n
           return rest

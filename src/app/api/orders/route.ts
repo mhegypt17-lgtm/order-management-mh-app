@@ -685,10 +685,15 @@ export async function POST(request: NextRequest) {
         .from('order_items')
         .insert(newItems)
 
-      // Graceful fallback: if snapshot columns don't exist yet (pre-migration
-      // deployment), retry without them. Order still gets created; branch
-      // weight-adjust will fall back to unitPrice-derived pricing.
-      if (itemsError && /column .* does not exist/i.test(itemsError.message || '')) {
+      // Bulletproof fallback: if the FIRST insert (which includes snapshot
+      // columns) fails for ANY reason, retry once with the snapshot columns
+      // stripped. Supabase returns two DIFFERENT error shapes for a missing
+      // column — Postgres `42703 column X does not exist` AND PostgREST
+      // `PGRST204 Could not find the '…' column of '…' in the schema cache`
+      // — and matching only one causes silent data loss. Losing the
+      // snapshot enrichment is acceptable; losing the whole line item is
+      // not. If the retry ALSO fails we surface that as the real error.
+      if (itemsError) {
         const stripped = newItems.map((n) => {
           const { basePriceSnapshot: _b, offerPriceSnapshot: _o, ...rest } = n
           return rest
