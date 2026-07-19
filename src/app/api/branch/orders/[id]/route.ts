@@ -114,38 +114,19 @@ async function enrich(orderId: string, opts: { includePhotos: boolean }) {
     const product = productsById.get(item.productId)
     const pricingMode: 'unit' | 'weight' =
       product?.pricingMode === 'weight' ? 'weight' : 'unit'
-    // Prefer the FROZEN snapshot captured at order-creation time. For rows
-    // written before price-snapshot-migration.sql (snapshot is null), fall
-    // back to the FROZEN unitPrice — NEVER to the current product price.
-    // This is what keeps historical orders immune to product-price edits.
-    const snapshotBase =
-      item.basePriceSnapshot != null ? Number(item.basePriceSnapshot) : null
-    const snapshotOffer =
-      item.offerPriceSnapshot != null ? Number(item.offerPriceSnapshot) : null
-    const originalKg =
-      Number(item.originalWeightGrams ?? item.weightGrams ?? 0) / 1000
-    const derivedBase =
-      pricingMode === 'weight'
-        ? originalKg > 0
-          ? Math.round((Number(item.unitPrice) / originalKg) * 100) / 100
-          : null
-        : Number(item.unitPrice)
-    const effectiveBase = snapshotBase ?? derivedBase
-    // If we only have a derived base (no snapshot), we don't know the
-    // original base/offer split — surface it as "no promo" rather than
-    // inventing one from the current product row.
-    const effectiveOffer = snapshotBase != null ? snapshotOffer : null
     const pricePerKg =
       pricingMode === 'weight'
-        ? Number(effectiveOffer && effectiveOffer > 0 ? effectiveOffer : effectiveBase || 0)
+        ? Number(product?.offerPrice && Number(product.offerPrice) > 0
+            ? product.offerPrice
+            : product?.basePrice || 0)
         : 0
     return {
       ...item,
       productName: product?.productName || 'منتج محذوف',
       pricingMode,
       pricePerKg,
-      basePrice: effectiveBase,
-      offerPrice: effectiveOffer,
+      basePrice: product?.basePrice != null ? Number(product.basePrice) : null,
+      offerPrice: product?.offerPrice != null ? Number(product.offerPrice) : null,
     }
   })
 
@@ -322,44 +303,13 @@ export async function PUT(
         const product = products.find((p) => p.id === existingItem.productId)
         const pricingMode: 'unit' | 'weight' =
           product?.pricingMode === 'weight' ? 'weight' : 'unit'
-        // Weight-line unitPrice must be recomputed from the FROZEN
-        // per-kg price captured at order creation — NEVER from the current
-        // product row. Fallback order:
-        //   1) offerPriceSnapshot (frozen at order time)
-        //   2) basePriceSnapshot  (frozen at order time)
-        //   3) unitPrice / originalKg (frozen, derived for pre-migration rows)
-        // Only when none of those are available do we fall back to the
-        // current product — a genuinely last-resort case for orphan rows.
-        const snapshotBase =
-          existingItem.basePriceSnapshot != null
-            ? Number(existingItem.basePriceSnapshot)
-            : null
-        const snapshotOffer =
-          existingItem.offerPriceSnapshot != null
-            ? Number(existingItem.offerPriceSnapshot)
-            : null
-        const originalKgForDerive =
-          Number(existingItem.originalWeightGrams ?? existingItem.weightGrams ?? 0) /
-          1000
-        const derivedFromUnitPrice =
-          pricingMode === 'weight' && originalKgForDerive > 0
-            ? Math.round((Number(existingItem.unitPrice) / originalKgForDerive) * 100) / 100
-            : null
-        const frozenPricePerKg =
-          snapshotOffer && snapshotOffer > 0
-            ? snapshotOffer
-            : snapshotBase != null
-            ? snapshotBase
-            : derivedFromUnitPrice
         const pricePerKg =
           pricingMode === 'weight'
-            ? frozenPricePerKg != null
-              ? frozenPricePerKg
-              : Number(
-                  product?.offerPrice && Number(product.offerPrice) > 0
-                    ? product.offerPrice
-                    : product?.basePrice || 0,
-                )
+            ? Number(
+                product?.offerPrice && Number(product.offerPrice) > 0
+                  ? product.offerPrice
+                  : product?.basePrice || 0
+              )
             : 0
 
         const nextQty = Number(edit.quantity)

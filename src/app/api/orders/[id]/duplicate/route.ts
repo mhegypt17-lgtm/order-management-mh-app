@@ -69,11 +69,6 @@ export async function POST(
       lineTotal: (Number(it.quantity) || 1) * (Number(it.unitPrice) || 0),
       specialInstructions: it.specialInstructions || '',
       createdAt: nowISO,
-      // Carry forward the frozen prices from the source order. Reorders
-      // keep the customer's original committed price unless CS re-picks
-      // the product on the new order.
-      basePriceSnapshot: it.basePriceSnapshot ?? null,
-      offerPriceSnapshot: it.offerPriceSnapshot ?? null,
     }))
 
     const dateKey = (() => {
@@ -168,16 +163,7 @@ export async function POST(
     if (newItems.length > 0) {
       const { error: itemsErr } = await supabase.from('order_items').insert(newItems)
       if (itemsErr) {
-        const msg = String(itemsErr.message || '')
-        if (/basePriceSnapshot|offerPriceSnapshot|column .* does not exist/i.test(msg)) {
-          const strippedItems = newItems.map(
-            ({ basePriceSnapshot: _b, offerPriceSnapshot: _o, ...rest }) => rest,
-          )
-          const { error: retryErr } = await supabase.from('order_items').insert(strippedItems)
-          if (retryErr) console.error('Error inserting duplicate order items (retry):', retryErr)
-        } else {
-          console.error('Error inserting duplicate order items:', itemsErr)
-        }
+        console.error('Error inserting duplicate order items:', itemsErr)
       }
     }
 
