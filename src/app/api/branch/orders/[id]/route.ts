@@ -114,19 +114,44 @@ async function enrich(orderId: string, opts: { includePhotos: boolean }) {
     const product = productsById.get(item.productId)
     const pricingMode: 'unit' | 'weight' =
       product?.pricingMode === 'weight' ? 'weight' : 'unit'
-    const pricePerKg =
-      pricingMode === 'weight'
-        ? Number(product?.offerPrice && Number(product.offerPrice) > 0
-            ? product.offerPrice
-            : product?.basePrice || 0)
-        : 0
+
+    // Frozen-price resolution. Snapshot (captured at order placement) always
+    // wins. If snapshot is missing (pre-migration row) we derive from the
+    // already-frozen unitPrice so the displayed price reflects what the
+    // customer actually committed to — NEVER today's product price.
+    const snapshotBase = (item as any).basePriceSnapshot != null
+      ? Number((item as any).basePriceSnapshot)
+      : null
+    const snapshotOffer = (item as any).offerPriceSnapshot != null
+      ? Number((item as any).offerPriceSnapshot)
+      : null
+
+    // Derived-from-unitPrice fallback for pre-migration rows.
+    const weightBaseKg = Number(item.originalWeightGrams ?? item.weightGrams) || 0
+    const derivedBase = pricingMode === 'weight'
+      ? (weightBaseKg > 0 ? (Number(item.unitPrice) || 0) / (weightBaseKg / 1000) : null)
+      : (Number(item.unitPrice) || 0)
+
+    const effectiveBase = snapshotBase != null ? snapshotBase : derivedBase
+    // Offer is only surfaced when we truly have a snapshot for it. We never
+    // invent an offer from the current product row for a historical order.
+    const effectiveOffer = snapshotBase != null ? snapshotOffer : null
+
+    const pricePerKg = pricingMode === 'weight'
+      ? Number(
+          (effectiveOffer != null && effectiveOffer > 0 && effectiveBase != null && effectiveOffer < effectiveBase)
+            ? effectiveOffer
+            : (effectiveBase ?? 0)
+        )
+      : 0
+
     return {
       ...item,
       productName: product?.productName || 'منتج محذوف',
       pricingMode,
       pricePerKg,
-      basePrice: product?.basePrice != null ? Number(product.basePrice) : null,
-      offerPrice: product?.offerPrice != null ? Number(product.offerPrice) : null,
+      basePrice: effectiveBase,
+      offerPrice: effectiveOffer,
     }
   })
 
@@ -303,14 +328,49 @@ export async function PUT(
         const product = products.find((p) => p.id === existingItem.productId)
         const pricingMode: 'unit' | 'weight' =
           product?.pricingMode === 'weight' ? 'weight' : 'unit'
-        const pricePerKg =
-          pricingMode === 'weight'
-            ? Number(
-                product?.offerPrice && Number(product.offerPrice) > 0
-                  ? product.offerPrice
-                  : product?.basePrice || 0
-              )
+
+        // Weight recompute pricePerKg resolution — ANTI-DRIFT rules.
+        // A branch weight-adjust MUST use the price the customer committed
+        // to, never today's product price. Fallback chain:
+        //   1. snapshot offer (if a valid offer was locked at placement)
+        //   2. snapshot base
+        //   3. derive from the already-frozen unitPrice + original weight
+        //   4. LAST RESORT: current product's offer/base (only if nothing
+        //      else is available — happens only on ancient rows where
+        //      unitPrice or originalWeightGrams is also missing).
+        let pricePerKg = 0
+        if (pricingMode === 'weight') {
+          const snapshotBase = (existingItem as any).basePriceSnapshot != null
+            ? Number((existingItem as any).basePriceSnapshot)
+            : null
+          const snapshotOffer = (existingItem as any).offerPriceSnapshot != null
+            ? Number((existingItem as any).offerPriceSnapshot)
+            : null
+          const validSnapshotOffer =
+            snapshotOffer != null && snapshotOffer > 0 &&
+            (snapshotBase == null || snapshotOffer < snapshotBase)
+              ? snapshotOffer
+              : null
+
+          const originalKg = Number(existingItem.originalWeightGrams ?? existingItem.weightGrams) || 0
+          const derivedFromUnit = originalKg > 0
+            ? (Number(existingItem.unitPrice) || 0) / (originalKg / 1000)
             : 0
+
+          if (validSnapshotOffer != null) {
+            pricePerKg = validSnapshotOffer
+          } else if (snapshotBase != null) {
+            pricePerKg = snapshotBase
+          } else if (derivedFromUnit > 0) {
+            pricePerKg = derivedFromUnit
+          } else {
+            pricePerKg = Number(
+              product?.offerPrice && Number(product.offerPrice) > 0
+                ? product.offerPrice
+                : product?.basePrice || 0
+            )
+          }
+        }
 
         const nextQty = Number(edit.quantity)
         const nextWeightGrams = Number(edit.weightGrams)

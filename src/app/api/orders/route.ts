@@ -656,22 +656,46 @@ export async function POST(request: NextRequest) {
     }
 
     // 4. Insert order items
-    const newItems: OrderItemRecord[] = normalizedItems.map((i) => ({
-      id: generateTextId('item'),
-      orderId: orderId,
-      productId: i.productId,
-      quantity: i.quantity,
-      weightGrams: i.weightGrams,
-      unitPrice: i.unitPrice,
-      lineTotal: i.lineTotal,
-      specialInstructions: i.specialInstructions || '',
-      createdAt: now,
-    }))
+    // Snapshot the product's basePrice / offerPrice into each row so that the
+    // price the customer committed to is frozen even if the product is later
+    // re-priced. Falls back gracefully if the DB hasn't been migrated yet.
+    const productById = new Map<string, any>((products as any[]).map((p) => [p.id, p]))
+    const newItems: any[] = normalizedItems.map((i) => {
+      const p = productById.get(i.productId)
+      const base = p && p.basePrice != null ? Number(p.basePrice) : null
+      const offerRaw = p && p.offerPrice != null ? Number(p.offerPrice) : null
+      const offer = offerRaw != null && offerRaw > 0 ? offerRaw : null
+      return {
+        id: generateTextId('item'),
+        orderId: orderId,
+        productId: i.productId,
+        quantity: i.quantity,
+        weightGrams: i.weightGrams,
+        unitPrice: i.unitPrice,
+        lineTotal: i.lineTotal,
+        specialInstructions: i.specialInstructions || '',
+        createdAt: now,
+        basePriceSnapshot: base,
+        offerPriceSnapshot: offer,
+      }
+    })
 
     if (newItems.length > 0) {
-      const { error: itemsError } = await supabase
+      let { error: itemsError } = await supabase
         .from('order_items')
         .insert(newItems)
+
+      // Graceful fallback: if snapshot columns don't exist yet (pre-migration
+      // deployment), retry without them. Order still gets created; branch
+      // weight-adjust will fall back to unitPrice-derived pricing.
+      if (itemsError && /column .* does not exist/i.test(itemsError.message || '')) {
+        const stripped = newItems.map((n) => {
+          const { basePriceSnapshot: _b, offerPriceSnapshot: _o, ...rest } = n
+          return rest
+        })
+        const retry = await supabase.from('order_items').insert(stripped)
+        itemsError = retry.error
+      }
 
       if (itemsError) {
         console.error('Error inserting order items:', itemsError)

@@ -59,7 +59,7 @@ export async function POST(
 
     const newOrderId = generateId('ord')
 
-    const newItems: OrderItemRecord[] = sourceItems.map((it) => ({
+    const newItems: any[] = sourceItems.map((it) => ({
       id: generateId('item'),
       orderId: newOrderId,
       productId: it.productId,
@@ -69,6 +69,12 @@ export async function POST(
       lineTotal: (Number(it.quantity) || 1) * (Number(it.unitPrice) || 0),
       specialInstructions: it.specialInstructions || '',
       createdAt: nowISO,
+      // Carry the source order's frozen prices forward. A duplicated order
+      // represents the same customer commitment; if source pre-dates the
+      // snapshot migration these will be null and the branch fallback will
+      // derive from unitPrice.
+      basePriceSnapshot: (it as any).basePriceSnapshot ?? null,
+      offerPriceSnapshot: (it as any).offerPriceSnapshot ?? null,
     }))
 
     const dateKey = (() => {
@@ -161,7 +167,15 @@ export async function POST(
     }
 
     if (newItems.length > 0) {
-      const { error: itemsErr } = await supabase.from('order_items').insert(newItems)
+      let { error: itemsErr } = await supabase.from('order_items').insert(newItems)
+      if (itemsErr && /column .* does not exist/i.test(itemsErr.message || '')) {
+        const stripped = newItems.map((n) => {
+          const { basePriceSnapshot: _b, offerPriceSnapshot: _o, ...rest } = n
+          return rest
+        })
+        const retry = await supabase.from('order_items').insert(stripped)
+        itemsErr = retry.error
+      }
       if (itemsErr) {
         console.error('Error inserting duplicate order items:', itemsErr)
       }

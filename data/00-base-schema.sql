@@ -237,6 +237,8 @@ create table if not exists public.order_items (
   "specialInstructions"  text,
   "originalQuantity"     numeric,
   "originalWeightGrams"  numeric,
+  "basePriceSnapshot"    numeric,
+  "offerPriceSnapshot"   numeric,
   "createdAt"            timestamptz not null default now()
 );
 

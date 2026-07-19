@@ -115,6 +115,18 @@ export interface OrderItemRecord {
    * weight has never been changed by the branch.
    */
   originalWeightGrams?: number | null
+  /**
+   * Snapshot of the product's base price (per-piece for unit mode, per-kg for
+   * weight mode) captured when the order was placed. Locks the price the
+   * customer committed to so subsequent product re-pricing does not mutate
+   * historical orders. `null` on pre-migration rows.
+   */
+  basePriceSnapshot?: number | null
+  /**
+   * Snapshot of the product's offer price (per-piece or per-kg) at order
+   * placement. `null` when the product had no offer, or on pre-migration rows.
+   */
+  offerPriceSnapshot?: number | null
 }
 
 export interface OrderDeliveryRecord {
@@ -733,6 +745,11 @@ export const ORDER_ITEM_COLUMNS = [
   'specialInstructions', 'createdAt', 'originalQuantity', 'originalWeightGrams',
 ].join(',')
 
+// Extended column set including price snapshots. Callers must use
+// readOrderItemsByOrderIds() (which retries on missing-column errors) rather
+// than passing this directly to fetchRowsIn — pre-migration DBs will error.
+export const ORDER_ITEM_SNAPSHOT_COLUMNS = 'basePriceSnapshot,offerPriceSnapshot'
+
 // Delivery columns — the "list" variant excludes the heavy productPhotos +
 // invoicePhoto base64 fields. Only single-order detail views should ask for
 // DELIVERY_COLUMNS_FULL. The stripped variant is used by dashboard list APIs.
@@ -817,7 +834,44 @@ export async function readOrderItemsByOrderIds(
   orderIds: string[],
   columns: string = ORDER_ITEM_COLUMNS,
 ): Promise<OrderItemRecord[]> {
-  return fetchRowsIn<OrderItemRecord>('order_items', 'orderId', orderIds, columns)
+  // When caller uses the default column set, attempt to also include the
+  // price-snapshot columns so downstream code (branch weight recompute, CS
+  // preserve-on-edit) sees the frozen prices. If those columns don't exist
+  // yet (pre-migration DB), fall back transparently to the base set — the
+  // shared line-item read must NEVER return empty just because snapshot
+  // columns are missing.
+  if (columns !== ORDER_ITEM_COLUMNS) {
+    return fetchRowsIn<OrderItemRecord>('order_items', 'orderId', orderIds, columns)
+  }
+  const uniq = Array.from(new Set(orderIds.filter((v) => v != null && v !== '')))
+  if (uniq.length === 0) return []
+  const chunkSize = 200
+  const all: OrderItemRecord[] = []
+  const extendedCols = `${ORDER_ITEM_COLUMNS},${ORDER_ITEM_SNAPSHOT_COLUMNS}`
+  let snapshotAvailable = true
+  for (let i = 0; i < uniq.length; i += chunkSize) {
+    const chunk = uniq.slice(i, i + chunkSize)
+    let selectCols = snapshotAvailable ? extendedCols : ORDER_ITEM_COLUMNS
+    let { data, error } = await supabase
+      .from('order_items')
+      .select(selectCols)
+      .in('orderId', chunk)
+    if (error && snapshotAvailable && /column .* does not exist/i.test(error.message || '')) {
+      snapshotAvailable = false
+      const retry = await supabase
+        .from('order_items')
+        .select(ORDER_ITEM_COLUMNS)
+        .in('orderId', chunk)
+      data = retry.data
+      error = retry.error
+    }
+    if (error) {
+      console.error('Error reading order_items by orderId:', error)
+      continue
+    }
+    if (data && data.length) all.push(...(data as unknown as OrderItemRecord[]))
+  }
+  return all
 }
 
 export async function readOrderDeliveryByOrderIds(
