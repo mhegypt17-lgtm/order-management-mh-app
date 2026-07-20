@@ -54,6 +54,13 @@ type OrderItemForm = {
   originalQuantity?: number | null
   /** CS-entered weight (grams) snapshot, set by branch on first amend. */
   originalWeightGrams?: number | null
+  /**
+   * Frozen product base price at order placement (per-piece for unit mode,
+   * per-kg for weight mode). null on pre-migration rows.
+   */
+  basePriceSnapshot?: number | null
+  /** Frozen offer price at order placement. null when no offer was active. */
+  offerPriceSnapshot?: number | null
 }
 
 const normalizeProductName = (value: string) =>
@@ -171,6 +178,8 @@ const emptyItem = (): OrderItemForm => ({
   specialInstructions: '',
   originalQuantity: null,
   originalWeightGrams: null,
+  basePriceSnapshot: null,
+  offerPriceSnapshot: null,
 })
 
 /**
@@ -479,6 +488,8 @@ export default function OrderForm({ mode, orderId }: Props) {
             specialInstructions: item.specialInstructions || '',
             originalQuantity: item.originalQuantity ?? null,
             originalWeightGrams: item.originalWeightGrams ?? null,
+            basePriceSnapshot: item.basePriceSnapshot ?? null,
+            offerPriceSnapshot: item.offerPriceSnapshot ?? null,
           }))
 
           setItems(mappedItems.length > 0 ? mappedItems : [emptyItem()])
@@ -1357,6 +1368,23 @@ export default function OrderForm({ mode, orderId }: Props) {
                 const selectedProduct = findProductByName(products, item.productNameInput)
                 const lineTotal = (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0)
                 const isWeightMode = selectedProduct?.pricingMode === 'weight'
+                // Frozen-price display resolution — everything else on this
+                // row (unitPrice, lineTotal, subtotal) is already the price
+                // the customer committed to, so this cell must be too.
+                // Prefer the item's snapshot; only fall back to the current
+                // product's price for brand-new rows that have no productId
+                // yet (i.e. haven't been saved). NEVER invent a promo price
+                // from the current product for an existing (saved) line.
+                const displayBase = item.basePriceSnapshot != null
+                  ? Number(item.basePriceSnapshot)
+                  : Number(selectedProduct?.basePrice || 0)
+                const displayOffer = item.offerPriceSnapshot != null
+                  ? Number(item.offerPriceSnapshot)
+                  : (item.productId
+                      ? null
+                      : (selectedProduct?.offerPrice != null ? Number(selectedProduct.offerPrice) : null))
+                const hasValidOffer =
+                  displayOffer != null && displayOffer > 0 && displayBase > 0 && displayOffer < displayBase
                 const pricePerKg = isWeightMode ? Number(selectedProduct?.offerPrice ?? selectedProduct?.basePrice ?? 0) : 0
                 const stockRaw = String((selectedProduct?.stockStatus as any) || 'available').toLowerCase().trim()
                 const stockQty = selectedProduct?.stockQuantity
@@ -1430,17 +1458,17 @@ export default function OrderForm({ mode, orderId }: Props) {
                     </td>
                     <td className="p-2 text-sm text-gray-700 whitespace-nowrap">
                       {selectedProduct
-                        ? `${Number(selectedProduct.basePrice || 0).toLocaleString()} ج.م${isWeightMode ? ' / كج' : ''}`
+                        ? `${displayBase.toLocaleString()} ج.م${isWeightMode ? ' / كج' : ''}`
                         : '--'}
                     </td>
                     <td className="p-2 text-sm whitespace-nowrap">
-                      {selectedProduct?.offerPrice != null && Number(selectedProduct.offerPrice) > 0 && Number(selectedProduct.offerPrice) < Number(selectedProduct.basePrice || 0) ? (
+                      {hasValidOffer ? (
                         <span className="inline-flex items-center gap-1">
                           <span className="text-red-600 font-bold">
-                            {Number(selectedProduct.offerPrice).toLocaleString()} ج.م
+                            {(displayOffer as number).toLocaleString()} ج.م
                           </span>
                           <span className="text-xs text-red-600 font-semibold">
-                            -{(((Number(selectedProduct.basePrice) - Number(selectedProduct.offerPrice)) / Number(selectedProduct.basePrice)) * 100).toFixed(0)}%
+                            -{(((displayBase - (displayOffer as number)) / displayBase) * 100).toFixed(0)}%
                           </span>
                         </span>
                       ) : (
