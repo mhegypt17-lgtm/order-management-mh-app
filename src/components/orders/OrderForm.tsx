@@ -982,7 +982,13 @@ export default function OrderForm({ mode, orderId }: Props) {
       } else {
         toast.success('✅ تم حفظ المرفقات')
       }
-      router.refresh()
+      // Phase 2H — do NOT router.refresh here. That would re-run the light
+      // GET which returns `csAttachments: []` + a count and re-shows the
+      // "N مرفقات محفوظة — اضغط للعرض" banner, hiding the thumbnails the
+      // CS agent just uploaded. Update the saved-count instead so the
+      // banner reflects reality on the next full visit.
+      setSavedCsCount(Array.isArray(form.csAttachments) ? form.csAttachments.length : 0)
+      setPhotosLoaded(true)
     } catch {
       toast.error('حدث خطأ أثناء الحفظ')
     } finally {
@@ -1126,7 +1132,19 @@ export default function OrderForm({ mode, orderId }: Props) {
       } else {
         toast.success(mode === 'create' ? '✅ تم إنشاء الطلب بنجاح' : '✅ تم تحديث الطلب بنجاح')
       }
-      router.push(`/orders/${data.order.id}`)
+      if (mode === 'create') {
+        router.push(`/orders/${data.order.id}`)
+      } else {
+        // Phase 2H — stay on the page after edit (mirrors branch productPhotos
+        // flow). router.push to the same URL would trigger an RSC refetch that
+        // re-runs the light GET, which returns `csAttachments: []` + a count
+        // and re-shows the lazy-load banner — hiding the thumbnails the user
+        // just uploaded. Update the saved-count metadata so the banner reflects
+        // reality on the NEXT visit, keep photosLoaded=true so the current
+        // state stays authoritative, and let the user keep working.
+        setSavedCsCount(Array.isArray(form.csAttachments) ? form.csAttachments.length : 0)
+        setPhotosLoaded(true)
+      }
     } catch {
       toast.error('حدث خطأ أثناء الحفظ')
     } finally {
