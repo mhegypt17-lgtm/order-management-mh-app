@@ -6,6 +6,7 @@ import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
 import { formatCairoFriendly } from '@/lib/cairoTime'
 import { compressImage } from '@/lib/imageCompression'
+import { useDiscountCodeInfo, describeDiscountBrief } from '@/lib/discountCodeInfo'
 import DeliveryDispatchShare from '@/components/orders/DeliveryDispatchShare'
 
 type OrderItemDetail = {
@@ -60,6 +61,8 @@ export default function BranchOrderDetailPage() {
   const params = useParams<{ id: string }>()
   const router = useRouter()
   const { user } = useAuthStore()
+  // code -> percent/value rule, so we can show the brief (e.g. "خصم 10%").
+  const discountCodeInfo = useDiscountCodeInfo()
 
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
@@ -613,6 +616,10 @@ export default function BranchOrderDetailPage() {
                       <div className="font-mono text-lg font-bold text-amber-900 tracking-wider" dir="ltr">
                         {order.discountCode}
                       </div>
+                      {(() => {
+                        const brief = describeDiscountBrief(discountCodeInfo[String(order.discountCode).toUpperCase()])
+                        return brief ? <div className="text-xs text-amber-800 mt-0.5">{brief}</div> : null
+                      })()}
                     </div>
                     <div className="text-left">
                       <div className="text-xs text-amber-800">قيمة الخصم</div>

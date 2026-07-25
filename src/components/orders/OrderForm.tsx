@@ -6,6 +6,7 @@ import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
 import { cairoDateString, cairoTimeString, formatCairoFriendly } from '@/lib/cairoTime'
 import { compressImage } from '@/lib/imageCompression'
+import { useDiscountCodeInfo } from '@/lib/discountCodeInfo'
 import WhatsAppShare from './WhatsAppShare'
 
 type Product = {
@@ -300,6 +301,10 @@ export default function OrderForm({ mode, orderId }: Props) {
   const [discountCodeInput, setDiscountCodeInput] = useState('')
   const [appliedDiscount, setAppliedDiscount] = useState<{ code: string; amount: number; type: 'percent' | 'value'; value: number } | null>(null)
   const [isCheckingDiscount, setIsCheckingDiscount] = useState(false)
+  // Definitions of all discount codes (code -> percent/value rule), used to show
+  // the *brief* of an applied code (e.g. "خصم 10%") even after a saved order is
+  // reopened — the order row itself only stores the flat EGP amount.
+  const discountCodeInfo = useDiscountCodeInfo()
 
   const [products, setProducts] = useState<Product[]>([])
   const [addresses, setAddresses] = useState<CustomerAddress[]>([])
@@ -1614,9 +1619,16 @@ export default function OrderForm({ mode, orderId }: Props) {
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div className="text-sm text-amber-900">
                   <span className="font-bold">{appliedDiscount.code}</span> —{' '}
-                  {appliedDiscount.type === 'percent'
-                    ? `خصم ${appliedDiscount.value}% (${appliedDiscount.amount.toLocaleString()} ج.م)`
-                    : `خصم ${appliedDiscount.amount.toLocaleString()} ج.م`}
+                  {(() => {
+                    // Prefer the code's real rule (survives reopen); fall back
+                    // to whatever was captured when the code was applied.
+                    const info = discountCodeInfo[appliedDiscount.code.toUpperCase()]
+                    const isPercent = info ? info.type === 'percent' : appliedDiscount.type === 'percent'
+                    const pct = info ? info.amount : appliedDiscount.value
+                    return isPercent
+                      ? `خصم ${pct}% (${appliedDiscount.amount.toLocaleString()} ج.م)`
+                      : `خصم ${appliedDiscount.amount.toLocaleString()} ج.م`
+                  })()}
                 </div>
                 <button
                   type="button"
