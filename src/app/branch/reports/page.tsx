@@ -71,7 +71,13 @@ export default function BranchReportsPage() {
     const deliveredOrders = orders.filter((o) => o.delivery?.deliveryStatus === 'تم التوصيل').length
     const cancelledOrders = orders.filter((o) => o.orderStatus === 'لاغي').length
     const totalOrders = orders.length
-    const totalRevenue = orders.reduce((sum, o) => sum + Number(o.orderTotal || 0), 0)
+    // Revenue = only orders the branch actually delivered ('تم التوصيل').
+    // Previously summed every order regardless of delivery status, so a
+    // month with cancelled / not-yet-delivered orders showed inflated
+    // revenue that didn't match the daily/weekly ops emails.
+    const totalRevenue = orders
+      .filter((o) => o.delivery?.deliveryStatus === 'تم التوصيل')
+      .reduce((sum, o) => sum + Number(o.orderTotal || 0), 0)
 
     const deliveryRate = totalOrders > 0 ? (deliveredOrders / totalOrders) * 100 : 0
     const cancelRate = totalOrders > 0 ? (cancelledOrders / totalOrders) * 100 : 0

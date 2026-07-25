@@ -176,12 +176,21 @@ export default function DashboardPage() {
 
   const analytics = useMemo(() => {
     const totalOrders = filtered.length
-    const totalRevenue = filtered.reduce((sum, o) => sum + Number(o.orderTotal || 0), 0)
-    const avgOrderValue = totalOrders ? totalRevenue / totalOrders : 0
-
+    // Revenue = only delivered orders (status 'تم'). This matches the daily
+    // & weekly ops reports (see src/lib/reports/daily.ts + weekly.ts) so the
+    // dashboard KPI and the emailed report agree — historically the dashboard
+    // summed ALL orders regardless of status, which inflated revenue by
+    // including scheduled / postponed / cancelled orders that never billed.
+    // AOV is Revenue ÷ Delivered (again matching the weekly report), so a day
+    // with 1 delivered + 1 scheduled shows AOV = delivered order value, not
+    // an average that mixes the two.
     const completedOrders = filtered.filter((o) => o.orderStatus === 'تم').length
     const cancelledOrders = filtered.filter((o) => o.orderStatus === 'لاغي').length
     const pendingOrders = filtered.filter((o) => o.orderStatus === 'مؤجل' || o.orderStatus === 'حجز').length
+    const totalRevenue = filtered
+      .filter((o) => o.orderStatus === 'تم')
+      .reduce((sum, o) => sum + Number(o.orderTotal || 0), 0)
+    const avgOrderValue = completedOrders ? totalRevenue / completedOrders : 0
 
     const uniqueCustomers = new Set(filtered.map((o) => o.customerId).filter(Boolean)).size
 
@@ -215,27 +224,33 @@ export default function DashboardPage() {
     const receiverMap = new Map<string, { orders: number; completed: number; cancelled: number; revenue: number }>()
     const cancelReasonMap = new Map<string, { count: number; lostValue: number }>()
 
+    // Revenue-per-slice buckets: only delivered orders contribute to `revenue`;
+    // `count` / `orders` still include every status so operators can see the
+    // full pipeline. Mirrors src/lib/reports/weekly.ts revenueByOrderType.
     filtered.forEach((o) => {
+      const isDelivered = o.orderStatus === 'تم'
+      const revenueContribution = isDelivered ? Number(o.orderTotal || 0) : 0
+
       const source = sourceMap.get(o.customerSource) || { count: 0, revenue: 0 }
       source.count += 1
-      source.revenue += Number(o.orderTotal || 0)
+      source.revenue += revenueContribution
       sourceMap.set(o.customerSource, source)
 
       const method = methodMap.get(o.orderMethod) || { count: 0, revenue: 0 }
       method.count += 1
-      method.revenue += Number(o.orderTotal || 0)
+      method.revenue += revenueContribution
       methodMap.set(o.orderMethod, method)
 
       const otype = o.orderType || 'Unknown'
       const otypeEntry = orderTypeMap.get(otype) || { count: 0, revenue: 0 }
       otypeEntry.count += 1
-      otypeEntry.revenue += Number(o.orderTotal || 0)
+      otypeEntry.revenue += revenueContribution
       orderTypeMap.set(otype, otypeEntry)
 
       const receiver = receiverMap.get(o.orderReceiver) || { orders: 0, completed: 0, cancelled: 0, revenue: 0 }
       receiver.orders += 1
-      receiver.revenue += Number(o.orderTotal || 0)
-      if (o.orderStatus === 'تم') receiver.completed += 1
+      receiver.revenue += revenueContribution
+      if (isDelivered) receiver.completed += 1
       if (o.orderStatus === 'لاغي') receiver.cancelled += 1
       receiverMap.set(o.orderReceiver, receiver)
 
@@ -247,13 +262,18 @@ export default function DashboardPage() {
         cancelReasonMap.set(reason, cancellation)
       }
 
-      o.items.forEach((item) => {
-        const product = productMap.get(item.productName) || { qty: 0, revenue: 0, orders: 0 }
-        product.qty += Number(item.quantity || 0)
-        product.revenue += Number(item.lineTotal || 0)
-        product.orders += 1
-        productMap.set(item.productName, product)
-      })
+      // Product revenue = delivered orders only. Quantity is also delivered-only
+      // so "top products" reflects what actually shipped — not what was booked
+      // then cancelled. Consistent with the weekly report's topProducts.
+      if (isDelivered) {
+        o.items.forEach((item) => {
+          const product = productMap.get(item.productName) || { qty: 0, revenue: 0, orders: 0 }
+          product.qty += Number(item.quantity || 0)
+          product.revenue += Number(item.lineTotal || 0)
+          product.orders += 1
+          productMap.set(item.productName, product)
+        })
+      }
     })
 
     const sources = Array.from(sourceMap.entries())
@@ -292,7 +312,12 @@ export default function DashboardPage() {
       return {
         day,
         orders: dayOrders.length,
-        revenue: dayOrders.reduce((sum, o) => sum + Number(o.orderTotal || 0), 0),
+        // Daily revenue trend uses delivered-only, matching the KPI card above
+        // and the daily ops email. Booked-but-not-yet-delivered value is not
+        // revenue and would double-count once the order actually ships.
+        revenue: dayOrders
+          .filter((o) => o.orderStatus === 'تم')
+          .reduce((sum, o) => sum + Number(o.orderTotal || 0), 0),
       }
     })
     const maxDailyOrders = Math.max(...daily.map((d) => d.orders), 1)
@@ -421,8 +446,8 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         <KpiCard title="إجمالي الطلبات" value={analytics.totalOrders.toLocaleString()} tone="red" subtitle="خلال الفترة المحددة" />
-        <KpiCard title="إجمالي المبيعات" value={`${analytics.totalRevenue.toLocaleString()} ج.م`} tone="green" subtitle="قيمة كل الطلبات" />
-        <KpiCard title="متوسط قيمة الطلب" value={`${analytics.avgOrderValue.toFixed(0)} ج.م`} tone="blue" subtitle="Revenue / Orders" />
+        <KpiCard title="إجمالي المبيعات" value={`${analytics.totalRevenue.toLocaleString()} ج.م`} tone="green" subtitle="قيمة الطلبات المسلّمة فقط" />
+        <KpiCard title="متوسط قيمة الطلب" value={`${analytics.avgOrderValue.toFixed(0)} ج.م`} tone="blue" subtitle="Revenue / Delivered" />
         <KpiCard title="نسبة الإتمام" value={`${analytics.completionRate}%`} tone="emerald" subtitle={`${analytics.completedOrders} طلب تم`} />
         <KpiCard title="نسبة الإلغاء" value={`${analytics.cancellationRate}%`} tone="orange" subtitle={`${analytics.cancelledOrders} طلب لاغي`} />
         <KpiCard title="عملاء نشطين" value={analytics.uniqueCustomers.toLocaleString()} tone="purple" subtitle="عدد العملاء الفريدين" />
