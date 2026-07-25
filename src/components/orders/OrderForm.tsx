@@ -966,13 +966,17 @@ export default function OrderForm({ mode, orderId }: Props) {
         body: JSON.stringify({
           attachmentsOnly: true,
           csAttachments: form.csAttachments || [],
+          // General comments (ملاحظات) stay editable on a locked/delivered
+          // order so CS can always record follow-ups, complaints context,
+          // payment notes, etc. Everything else on the order stays frozen.
+          notes: form.notes || '',
           createdBy: user?.name || user?.id || 'unknown',
           role: user?.role || '',
         }),
       })
       if (!response.ok) {
         const err = await response.json().catch(() => ({}))
-        toast.error(err?.error || 'حدث خطأ أثناء حفظ المرفقات')
+        toast.error(err?.error || 'حدث خطأ أثناء الحفظ')
         return
       }
       const data = await response.json()
@@ -980,7 +984,7 @@ export default function OrderForm({ mode, orderId }: Props) {
       if (data?.warning) {
         toast.error(data.warning, { duration: 8000 })
       } else {
-        toast.success('✅ تم حفظ المرفقات')
+        toast.success('✅ تم الحفظ')
       }
       // Phase 2H — do NOT router.refresh here. That would re-run the light
       // GET which returns `csAttachments: []` + a count and re-shows the
@@ -1169,7 +1173,7 @@ export default function OrderForm({ mode, orderId }: Props) {
         <div className="bg-amber-50 border border-amber-300 rounded-lg p-4 text-amber-900">
           <p className="font-bold">🔒 هذا الطلب مقفل للتعديل</p>
           <p className="text-sm mt-1">لأن الفرع بدأ التوصيل (الحالة: <span className="font-semibold">{deliveryData?.deliveryStatus}</span>). يمكن للأدمن فقط إجراء تعديلات على بقية الحقول.</p>
-          <p className="text-sm mt-1">📎 <span className="font-semibold">يمكنك إضافة أو تعديل المرفقات (الصور والإيصالات) فقط</span> — ثم اضغط "حفظ المرفقات".</p>
+          <p className="text-sm mt-1">📎 <span className="font-semibold">يمكنك إضافة أو تعديل المرفقات (الصور والإيصالات) والملاحظات العامة فقط</span> — ثم اضغط "حفظ".</p>
         </div>
       )}
       <details open className="bg-white rounded-lg border border-gray-200 p-4">
@@ -2011,7 +2015,7 @@ export default function OrderForm({ mode, orderId }: Props) {
         <button
           type="submit"
           disabled={isSaving}
-          title={isLocked ? 'الطلب مقفل — سيتم حفظ المرفقات فقط' : undefined}
+          title={isLocked ? 'الطلب مقفل — سيتم حفظ المرفقات والملاحظات العامة فقط' : undefined}
           className={`px-5 py-2 rounded-lg disabled:cursor-not-allowed text-white font-semibold ${
             isLocked
               ? 'bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300'
@@ -2021,7 +2025,7 @@ export default function OrderForm({ mode, orderId }: Props) {
           {isSaving
             ? '... جاري الحفظ'
             : isLocked
-              ? '📎 حفظ المرفقات'
+              ? '💾 حفظ المرفقات والملاحظات'
               : mode === 'create'
                 ? 'حفظ الطلب'
                 : 'تحديث الطلب'}

@@ -305,13 +305,29 @@ export async function PUT(
         // else on the order is touched.
         if (body.attachmentsOnly === true) {
           const incomingAttachments = Array.isArray(body.csAttachments) ? body.csAttachments : []
+          // General comments (ملاحظات) remain editable on a locked/delivered
+          // order — CS must always be able to record notes. We only include
+          // `notes` in the patch when the client actually sent the key so we
+          // never blank out existing notes by accident.
+          const notesProvided = typeof body.notes === 'string'
+          const patch: Record<string, unknown> = { csAttachments: incomingAttachments, updatedAt: now }
+          if (notesProvided) patch.notes = body.notes
           const attUpd = await supabase
             .from('orders')
-            .update({ csAttachments: incomingAttachments, updatedAt: now })
+            .update(patch)
             .eq('id', params.id)
           if (attUpd.error) {
             const msg = (attUpd.error.message || '').toLowerCase()
             if (attUpd.error.code === '42703' || msg.includes('csattachments')) {
+              // csAttachments column missing — still try to persist the notes
+              // so the general comment is not silently lost, then report the
+              // attachment-column problem to the operator.
+              if (notesProvided) {
+                await supabase
+                  .from('orders')
+                  .update({ notes: body.notes, updatedAt: now })
+                  .eq('id', params.id)
+              }
               return NextResponse.json(
                 {
                   error:
@@ -332,10 +348,15 @@ export async function PUT(
             orderId: params.id,
             action: 'updated',
             changedBy: body.createdBy || 'unknown',
-            summary: 'تم تحديث مرفقات خدمة العملاء (الطلب مقفل بعد التوصيل)',
-            details: { attachmentCount: incomingAttachments.length, lockedStatus: (currentDelivery as any).deliveryStatus },
+            summary: 'تم تحديث مرفقات/ملاحظات خدمة العملاء (الطلب مقفل بعد التوصيل)',
+            details: { attachmentCount: incomingAttachments.length, notesUpdated: notesProvided, lockedStatus: (currentDelivery as any).deliveryStatus },
           })
-          const refreshed = { ...existing, csAttachments: incomingAttachments, updatedAt: now } as OrderRecord
+          const refreshed = {
+            ...existing,
+            csAttachments: incomingAttachments,
+            ...(notesProvided ? { notes: body.notes } : {}),
+            updatedAt: now,
+          } as OrderRecord
           return NextResponse.json(
             { order: await enrichOrder(refreshed), warning: null },
             { status: 200 },

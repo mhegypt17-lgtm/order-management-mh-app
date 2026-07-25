@@ -103,6 +103,7 @@ export default function Navbar({ user }: NavbarProps) {
       { label: '✅ المهام', href: '/orders/tasks' },
       { label: '🕐 الورديات', href: '/orders/shifts' },
       { label: '🚚 التوصيل', href: '/orders/delivery' },
+      { label: '🏷️ أكواد الخصم', href: '/orders/discount-codes' },
       { label: '📦 المنتجات', href: '/orders/products' },
       { label: '📈 التقارير', href: '/orders/reports' },
       { label: '🐑 اضاحي', href: '/orders/adahi' },
@@ -113,6 +114,7 @@ export default function Navbar({ user }: NavbarProps) {
       { label: '📊 التقارير', href: '/branch/reports' },
       { label: '🐑 اضاحي', href: '/branch/adahi' },
       { label: '🚚 التوصيل', href: '/branch/delivery' },
+      { label: '🏷️ أكواد الخصم', href: '/branch/discount-codes' },
       { label: '📦 المنتجات', href: '/branch/products' },
     ],
   }

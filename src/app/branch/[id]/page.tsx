@@ -6,6 +6,7 @@ import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
 import { formatCairoFriendly } from '@/lib/cairoTime'
 import { compressImage } from '@/lib/imageCompression'
+import DeliveryDispatchShare from '@/components/orders/DeliveryDispatchShare'
 
 type OrderItemDetail = {
   id: string
@@ -371,6 +372,13 @@ export default function BranchOrderDetailPage() {
     return <div className="p-8 text-center text-gray-500">⏳ جاري تحميل التفاصيل...</div>
   }
 
+  // Total number of items to deliver = sum of the (live) quantities across all
+  // lines. Reflects any unsaved qty edits so the count matches the inputs above.
+  const totalItemCount = order.items.reduce((sum, it) => {
+    const draft = itemEdits[it.id]
+    return sum + (draft ? draft.quantity : it.quantity)
+  }, 0)
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -577,6 +585,11 @@ export default function BranchOrderDetailPage() {
               </tbody>
             </table>
           </div>
+          <div className="flex items-center justify-end pt-2">
+            <span className="inline-flex items-center gap-1 bg-blue-50 border border-blue-200 text-blue-800 rounded-lg px-3 py-1.5 text-sm font-bold">
+              📦 عدد الأصناف: {totalItemCount}
+            </span>
+          </div>
           <div className="flex items-center justify-between pt-2 border-t mt-2">
             <div className="text-xs text-gray-500">
               {!isLocked && 'تعديل الكمية أو وزن المنتجات بالكيلو واضغط حفظ'}
@@ -673,6 +686,15 @@ export default function BranchOrderDetailPage() {
           )}
         </section>
       </div>
+
+      <DeliveryDispatchShare
+        appOrderNo={order.appOrderNo}
+        customerName={order.customer?.customerName || ''}
+        customerPhone={order.customer?.phone || ''}
+        streetAddress={order.address?.streetAddress || ''}
+        googleMapsLink={order.address?.googleMapsLink || ''}
+        itemCount={totalItemCount}
+      />
 
       <section className="bg-white rounded-lg border border-gray-200 p-4 space-y-4">
         <h2 className="font-bold text-gray-900">تحديثات الفرع</h2>
