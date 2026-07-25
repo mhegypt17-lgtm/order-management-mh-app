@@ -8,6 +8,7 @@ import { cairoDateString, cairoTimeString, formatCairoFriendly } from '@/lib/cai
 import { compressImage } from '@/lib/imageCompression'
 import { useDiscountCodeInfo } from '@/lib/discountCodeInfo'
 import WhatsAppShare from './WhatsAppShare'
+import ImageLightbox from './ImageLightbox'
 
 type Product = {
   id: string
@@ -301,6 +302,8 @@ export default function OrderForm({ mode, orderId }: Props) {
   const [discountCodeInput, setDiscountCodeInput] = useState('')
   const [appliedDiscount, setAppliedDiscount] = useState<{ code: string; amount: number; type: 'percent' | 'value'; value: number } | null>(null)
   const [isCheckingDiscount, setIsCheckingDiscount] = useState(false)
+  // Full-screen image preview (reuses already-loaded src — no extra egress).
+  const [lightbox, setLightbox] = useState<{ src: string; alt?: string } | null>(null)
   // Definitions of all discount codes (code -> percent/value rule), used to show
   // the *brief* of an applied code (e.g. "خصم 10%") even after a saved order is
   // reopened — the order row itself only stores the flat EGP amount.
@@ -1884,13 +1887,18 @@ export default function OrderForm({ mode, orderId }: Props) {
                   key={att.id}
                   className="relative border border-gray-200 rounded-lg p-2 bg-gray-50 space-y-2"
                 >
-                  <a href={att.url} target="_blank" rel="noreferrer" className="block">
+                  <button
+                    type="button"
+                    onClick={() => setLightbox({ src: att.url, alt: att.caption || 'مرفق' })}
+                    className="block w-full"
+                    title="عرض الصورة"
+                  >
                     <img
                       src={att.url}
                       alt={att.caption || 'مرفق'}
-                      className="w-full h-28 object-cover rounded border border-gray-300"
+                      className="w-full h-28 object-cover rounded border border-gray-300 cursor-zoom-in"
                     />
-                  </a>
+                  </button>
                   <input
                     type="text"
                     value={att.caption}
@@ -1901,15 +1909,24 @@ export default function OrderForm({ mode, orderId }: Props) {
                   />
                   <div className="flex items-center justify-between text-[10px] text-gray-500">
                     <span>👤 {att.uploadedBy || '—'}</span>
-                    <a
-                      href={att.url}
-                      download={att.caption ? `${att.caption}.png` : `attachment-${att.id}.png`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-blue-700 underline"
-                    >
-                      📥 تحميل
-                    </a>
+                    <span className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setLightbox({ src: att.url, alt: att.caption || 'مرفق' })}
+                        className="text-emerald-700 underline"
+                      >
+                        🔍 عرض
+                      </button>
+                      <a
+                        href={att.url}
+                        download={att.caption ? `${att.caption}.png` : `attachment-${att.id}.png`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-700 underline"
+                      >
+                        📥 تحميل
+                      </a>
+                    </span>
                   </div>
                   <button
                     type="button"
@@ -1977,16 +1994,32 @@ export default function OrderForm({ mode, orderId }: Props) {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                   {deliveryData.productPhotos.map((photo, idx) => (
                     <div key={idx} className="space-y-1">
-                      <img src={photo} alt={`product-${idx}`} className="w-full h-24 object-cover rounded border border-gray-300" />
-                      <a
-                        href={photo}
-                        download={`product-photo-${idx + 1}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-block w-full text-center px-2 py-1 text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 rounded"
+                      <button
+                        type="button"
+                        onClick={() => setLightbox({ src: photo, alt: `صورة منتج ${idx + 1}` })}
+                        className="block w-full"
+                        title="عرض الصورة"
                       >
-                        📥 تحميل
-                      </a>
+                        <img src={photo} alt={`product-${idx}`} className="w-full h-24 object-cover rounded border border-gray-300 cursor-zoom-in" />
+                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setLightbox({ src: photo, alt: `صورة منتج ${idx + 1}` })}
+                          className="flex-1 text-center px-2 py-1 text-xs bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded"
+                        >
+                          🔍 عرض
+                        </button>
+                        <a
+                          href={photo}
+                          download={`product-photo-${idx + 1}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex-1 text-center px-2 py-1 text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 rounded"
+                        >
+                          📥 تحميل
+                        </a>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1997,16 +2030,32 @@ export default function OrderForm({ mode, orderId }: Props) {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2 text-right">صورة الفاتورة</label>
                 <div className="space-y-2">
-                  <img src={deliveryData.invoicePhoto} alt="invoice" className="w-full max-w-md h-32 object-cover rounded border border-gray-300" />
-                  <a
-                    href={deliveryData.invoicePhoto}
-                    download="invoice-photo"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-block px-3 py-1 text-sm bg-blue-100 text-blue-700 hover:bg-blue-200 rounded"
+                  <button
+                    type="button"
+                    onClick={() => setLightbox({ src: deliveryData.invoicePhoto, alt: 'صورة الفاتورة' })}
+                    className="block w-full max-w-md"
+                    title="عرض صورة الفاتورة"
                   >
-                    📥 تحميل صورة الفاتورة
-                  </a>
+                    <img src={deliveryData.invoicePhoto} alt="invoice" className="w-full h-32 object-cover rounded border border-gray-300 cursor-zoom-in" />
+                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setLightbox({ src: deliveryData.invoicePhoto, alt: 'صورة الفاتورة' })}
+                      className="px-3 py-1 text-sm bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded"
+                    >
+                      🔍 عرض
+                    </button>
+                    <a
+                      href={deliveryData.invoicePhoto}
+                      download="invoice-photo"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3 py-1 text-sm bg-blue-100 text-blue-700 hover:bg-blue-200 rounded"
+                    >
+                      📥 تحميل صورة الفاتورة
+                    </a>
+                  </div>
                 </div>
               </div>
             )}
@@ -2117,6 +2166,8 @@ export default function OrderForm({ mode, orderId }: Props) {
         />
       </div>
     )}
+
+    <ImageLightbox src={lightbox?.src ?? null} alt={lightbox?.alt} onClose={() => setLightbox(null)} />
     </>
   )
 }

@@ -8,6 +8,7 @@ import { formatCairoFriendly } from '@/lib/cairoTime'
 import { compressImage } from '@/lib/imageCompression'
 import { useDiscountCodeInfo, describeDiscountBrief } from '@/lib/discountCodeInfo'
 import DeliveryDispatchShare from '@/components/orders/DeliveryDispatchShare'
+import ImageLightbox from '@/components/orders/ImageLightbox'
 
 type OrderItemDetail = {
   id: string
@@ -67,6 +68,8 @@ export default function BranchOrderDetailPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [order, setOrder] = useState<OrderDetail | null>(null)
+  // Full-screen image preview (reuses already-loaded src — no extra egress).
+  const [lightbox, setLightbox] = useState<{ src: string; alt?: string } | null>(null)
 
   const [deliveryStatus, setDeliveryStatus] = useState<OrderDetail['delivery']['deliveryStatus']>('لم يخرج بعد')
   const [branchComments, setBranchComments] = useState('')
@@ -786,7 +789,13 @@ export default function BranchOrderDetailPage() {
             <div className="mt-2 grid grid-cols-3 gap-2">
               {productPhotos.map((photo, idx) => (
                 <div key={idx} className="relative group">
-                  <img src={photo} alt={`product-${idx}`} className="w-full h-20 object-cover rounded border border-gray-200" />
+                  <img
+                    src={photo}
+                    alt={`product-${idx}`}
+                    onClick={() => setLightbox({ src: photo, alt: `صورة منتج ${idx + 1}` })}
+                    className="w-full h-20 object-cover rounded border border-gray-200 cursor-zoom-in"
+                    title="عرض الصورة"
+                  />
                   <button
                     type="button"
                     onClick={() => handleRemoveProductPhoto(idx)}
@@ -829,7 +838,13 @@ export default function BranchOrderDetailPage() {
             <div className="mt-2">
               {invoicePhoto ? (
                 <div className="relative group">
-                  <img src={invoicePhoto} alt="invoice" className="w-full h-28 object-cover rounded border border-gray-200" />
+                  <img
+                    src={invoicePhoto}
+                    alt="invoice"
+                    onClick={() => setLightbox({ src: invoicePhoto, alt: 'صورة الفاتورة' })}
+                    className="w-full h-28 object-cover rounded border border-gray-200 cursor-zoom-in"
+                    title="عرض صورة الفاتورة"
+                  />
                   <button
                     type="button"
                     onClick={handleRemoveInvoicePhoto}
@@ -867,6 +882,8 @@ export default function BranchOrderDetailPage() {
           رجوع
         </button>
       </div>
+
+      <ImageLightbox src={lightbox?.src ?? null} alt={lightbox?.alt} onClose={() => setLightbox(null)} />
     </div>
   )
 }
