@@ -68,11 +68,17 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
 
+    // Strip any incoming id: the create form sends `id: editingId` which is
+    // null on a new product. If we let `...body` spread that in, it would
+    // override the generated id with null and the insert would fail the NOT
+    // NULL primary-key constraint (surfacing as "خطأ في حفظ المنتج").
+    const { id: _incomingId, ...fields } = body
+
     const newProduct = {
+      ...fields,
       id: generateId(),
-      ...body,
-      productCategory: body.productCategory || 'غير محدد',
-      packagingType: body.packagingType || 'غير محدد',
+      productCategory: fields.productCategory || 'غير محدد',
+      packagingType: fields.packagingType || 'غير محدد',
     }
 
     const { data: inserted, error } = await supabase
@@ -84,7 +90,7 @@ export async function POST(request: NextRequest) {
     if (error) {
       console.error('Error creating product:', error)
       return NextResponse.json(
-        { error: 'Failed to create product' },
+        { error: error.message || 'Failed to create product' },
         { status: 500 }
       )
     }

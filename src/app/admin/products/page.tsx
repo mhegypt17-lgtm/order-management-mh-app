@@ -191,13 +191,16 @@ export default function ProductCatalogPage() {
         }),
       })
 
-      if (!res.ok) throw new Error('Failed to save')
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(data?.error || 'Failed to save')
+      }
 
       toast.success(editingId ? '✅ تم تحديث المنتج' : '✅ تم إضافة المنتج')
       handleCloseModal()
       fetchProducts()
     } catch (error) {
-      toast.error('خطأ في حفظ المنتج')
+      toast.error(`خطأ في حفظ المنتج: ${error instanceof Error ? error.message : ''}`.trim())
       console.error(error)
     }
   }
