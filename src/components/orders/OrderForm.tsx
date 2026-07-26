@@ -710,16 +710,16 @@ export default function OrderForm({ mode, orderId }: Props) {
   // returns empty arrays + counts; this fetch hydrates them so the UI can
   // render thumbnails and so any subsequent add/remove operates on the full
   // saved set (rather than overwriting saved photos with a new-only array).
-  const ensurePhotosLoaded = async (): Promise<boolean> => {
-    if (photosLoaded) return true
+  const ensurePhotosLoaded = async (): Promise<CSAttachmentForm[] | null> => {
+    if (photosLoaded) return form.csAttachments || []
     if (!orderId) {
       // create mode — no server photos to fetch.
       setPhotosLoaded(true)
-      return true
+      return form.csAttachments || []
     }
     if (savedCsCount === 0 && savedProductPhotosCount === 0 && !savedHasInvoicePhoto) {
       setPhotosLoaded(true)
-      return true
+      return form.csAttachments || []
     }
     setIsLoadingPhotos(true)
     try {
@@ -738,10 +738,13 @@ export default function OrderForm({ mode, orderId }: Props) {
           : prev,
       )
       setPhotosLoaded(true)
-      return true
+      // Return the freshly-loaded list so callers (e.g. saveAttachmentsOnly)
+      // don't rely on the still-stale `form.csAttachments` from this render
+      // closure — sending that empty array would wipe the saved attachments.
+      return csList
     } catch {
       toast.error('تعذر تحميل الصور')
-      return false
+      return null
     } finally {
       setIsLoadingPhotos(false)
     }
@@ -756,7 +759,7 @@ export default function OrderForm({ mode, orderId }: Props) {
     // Phase 2H — ensure any existing attachments are loaded first so we
     // append rather than overwrite.
     const ok = await ensurePhotosLoaded()
-    if (!ok) return
+    if (ok === null) return
     const newOnes: CSAttachmentForm[] = []
     for (const file of files) {
       if (file.size > MAX_CS_ATTACHMENT_BYTES) {
@@ -960,11 +963,15 @@ export default function OrderForm({ mode, orderId }: Props) {
   // `form.csAttachments` here IS authoritative and safe to send.
   const saveAttachmentsOnly = async () => {
     if (!orderId) return
+    // The attachments we will persist. When the existing set hasn't been
+    // hydrated yet, we MUST use the list returned by ensurePhotosLoaded —
+    // reading `form.csAttachments` here would be the stale (empty) array from
+    // this render closure and would wipe the saved attachments.
+    let csToSave = form.csAttachments || []
     if (!photosLoaded) {
-      // Defensive: if somehow we get here without having loaded the
-      // existing attachments, refuse rather than wipe the DB.
-      const ok = await ensurePhotosLoaded()
-      if (!ok) return
+      const loaded = await ensurePhotosLoaded()
+      if (loaded === null) return
+      csToSave = loaded
     }
     setIsSaving(true)
     try {
@@ -973,7 +980,7 @@ export default function OrderForm({ mode, orderId }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           attachmentsOnly: true,
-          csAttachments: form.csAttachments || [],
+          csAttachments: csToSave,
           // General comments (ملاحظات) stay editable on a locked/delivered
           // order so CS can always record follow-ups, complaints context,
           // payment notes, etc. Everything else on the order stays frozen.
@@ -999,7 +1006,7 @@ export default function OrderForm({ mode, orderId }: Props) {
       // "N مرفقات محفوظة — اضغط للعرض" banner, hiding the thumbnails the
       // CS agent just uploaded. Update the saved-count instead so the
       // banner reflects reality on the next full visit.
-      setSavedCsCount(Array.isArray(form.csAttachments) ? form.csAttachments.length : 0)
+      setSavedCsCount(Array.isArray(csToSave) ? csToSave.length : 0)
       setPhotosLoaded(true)
     } catch {
       toast.error('حدث خطأ أثناء الحفظ')
