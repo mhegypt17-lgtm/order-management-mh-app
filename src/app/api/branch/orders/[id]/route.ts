@@ -618,6 +618,20 @@ export async function PUT(
       body.deliveryStatus === 'تم التوصيل' &&
       existing.deliveryStatus !== 'تم التوصيل'
     ) {
+      // Auto-complete the CS order status: once the branch marks the order as
+      // delivered it is closed for changes, so the CS "orderStatus" should flip
+      // to "تم" automatically instead of requiring an admin edit. Cancelled
+      // orders (لاغي) are explicitly left untouched via the .neq guard.
+      try {
+        await supabase
+          .from('orders')
+          .update({ orderStatus: 'تم', updatedAt: now })
+          .eq('id', params.id)
+          .neq('orderStatus', 'لاغي')
+      } catch (err) {
+        console.error('auto-complete order status failed:', err)
+      }
+
       try {
         await runAutoActivateRule(params.id)
       } catch (err) {
