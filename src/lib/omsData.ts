@@ -402,6 +402,18 @@ export interface LoyaltyConfig {
   tiers: LoyaltyTierConfig[]
 }
 
+// A named price/stock list mapped to one or more order types. 'online' is
+// the built-in default (Online + App) and is backed by products.basePrice/
+// offerPrice/stockStatus/stockQuantity directly. Any other catalogue's
+// prices+stock live in the product_prices table, keyed by (productId, key).
+export interface CatalogueRecord {
+  key: string
+  label: string
+  orderTypes: string[]
+  isActive: boolean
+  sortOrder: number
+}
+
 export interface OrderSettingsRecord {
   orderReceivers: LookupValueRecord[]
   orderMethods: LookupValueRecord[]
@@ -419,6 +431,7 @@ export interface OrderSettingsRecord {
   loyalty?: LoyaltyConfig
   autoActivateThreshold?: number
   autoActivateEnabled?: boolean
+  catalogues?: CatalogueRecord[]
 }
 
 const DEFAULT_ORDER_RECEIVERS = ['رنا', 'مى', 'ميرنا', 'أمل']
@@ -427,6 +440,15 @@ const DEFAULT_ORDER_TYPES = ['B2B', 'Online', 'Instashop', 'App']
 const DEFAULT_PAYMENT_METHODS = ['Instapay', 'Cash', 'Visa', 'Credit']
 const DEFAULT_ORDER_STATUSES = ['تم', 'مؤجل', 'لاغي', 'حجز']
 const DEFAULT_COMPLAINT_CHANNELS = ['Instashop', 'App', 'Branch', 'Breadfast']
+
+// Default catalogues: Online+App share one price/stock list; Instashop and
+// B2B each get their own. Admin can rename, remap order types, or add more
+// via /admin/settings/catalogues — no code change needed for a new one.
+const DEFAULT_CATALOGUES: CatalogueRecord[] = [
+  { key: 'online', label: 'أونلاين / تطبيق', orderTypes: ['Online', 'App'], isActive: true, sortOrder: 1 },
+  { key: 'instashop', label: 'إنستاشوب', orderTypes: ['Instashop'], isActive: true, sortOrder: 2 },
+  { key: 'b2b', label: 'B2B', orderTypes: ['B2B'], isActive: true, sortOrder: 3 },
+]
 
 // Two-level default for complaint reasons. Each parent maps to a list of
 // specific sub-reasons the CS agent picks from once the parent is chosen.
@@ -567,6 +589,7 @@ function defaultOrderSettings(): OrderSettingsRecord {
     retention: DEFAULT_RETENTION_CONFIG,
     autoActivateThreshold: 3,
     autoActivateEnabled: true,
+    catalogues: DEFAULT_CATALOGUES,
   }
 }
 
@@ -1263,6 +1286,10 @@ export async function readOrderSettings(): Promise<OrderSettingsRecord> {
       retention: (parsed as any).retention || DEFAULT_RETENTION_CONFIG,
       autoActivateThreshold: Math.max(1, Number((parsed as any).autoActivateThreshold) || 3),
       autoActivateEnabled: (parsed as any).autoActivateEnabled !== false,
+      catalogues:
+        Array.isArray((parsed as any).catalogues) && (parsed as any).catalogues.length > 0
+          ? (parsed as any).catalogues
+          : DEFAULT_CATALOGUES,
     }
 
     if (normalized.orderReceivers.length === 0) normalized.orderReceivers = defaults.orderReceivers

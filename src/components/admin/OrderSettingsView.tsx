@@ -429,6 +429,21 @@ export default function OrderSettingsView() {
       </a>
 
       <a
+        href="/admin/settings/catalogues"
+        className="block bg-gradient-to-l from-sky-50 to-blue-50 border-2 border-sky-200 rounded-xl p-4 hover:border-sky-400 transition"
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-sky-900">🗂️ الكتالوجات</h2>
+            <p className="text-xs text-sky-700 mt-1">
+              إنشاء كتالوجات أسعار/مخزون إضافية (مثل إنستاشوب أو B2B) وربطها بأنواع الطلبات.
+            </p>
+          </div>
+          <span className="text-sky-600 font-bold">إدارة ←</span>
+        </div>
+      </a>
+
+      <a
         href="/admin/reports/preview"
         className="block bg-gradient-to-l from-red-50 to-orange-50 border-2 border-red-200 rounded-xl p-4 hover:border-red-400 transition"
       >

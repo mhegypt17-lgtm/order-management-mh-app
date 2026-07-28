@@ -7,6 +7,17 @@ import { useAuthStore } from '@/lib/auth'
 import { cairoDateString, cairoTimeString, formatCairoFriendly } from '@/lib/cairoTime'
 import { compressImage } from '@/lib/imageCompression'
 import { useDiscountCodeInfo } from '@/lib/discountCodeInfo'
+import {
+  CatalogueEntry,
+  CataloguePrice,
+  DEFAULT_CATALOGUES,
+  resolveCatalogueKey,
+  catalogueBasePrice,
+  catalogueOfferPrice,
+  catalogueStockStatus,
+  catalogueStockQuantity,
+  isAvailableInCatalogue,
+} from '@/lib/catalogue'
 import WhatsAppShare from './WhatsAppShare'
 import ImageLightbox from './ImageLightbox'
 
@@ -26,6 +37,8 @@ type Product = {
   stockQuantity?: number | null
   /** 'weight' = sold per kg; basePrice/offerPrice are interpreted as price-per-kg. */
   pricingMode?: 'unit' | 'weight'
+  /** Non-'online' catalogue prices, embedded by GET /api/products. */
+  prices?: Record<string, CataloguePrice>
 }
 
 type CustomerAddress = {
@@ -310,6 +323,7 @@ export default function OrderForm({ mode, orderId }: Props) {
   const discountCodeInfo = useDiscountCodeInfo()
 
   const [products, setProducts] = useState<Product[]>([])
+  const [catalogues, setCatalogues] = useState<CatalogueEntry[]>(DEFAULT_CATALOGUES)
   const [addresses, setAddresses] = useState<CustomerAddress[]>([])
   const [deliveryZones, setDeliveryZones] = useState<DeliveryZone[]>([])
   const [orderReceivers, setOrderReceivers] = useState<string[]>(ORDER_RECEIVERS_FALLBACK)
@@ -344,15 +358,22 @@ export default function OrderForm({ mode, orderId }: Props) {
   useEffect(() => {
     const loadBase = async () => {
       try {
-        const [productsRes, zonesRes, settingsRes] = await Promise.all([
+        const [productsRes, zonesRes, settingsRes, cataloguesRes] = await Promise.all([
           fetch('/api/products?columns=lite'),
           fetch('/api/delivery-zones'),
           fetch('/api/order-settings'),
+          fetch('/api/catalogues'),
         ])
 
         const productsData = await productsRes.json()
         const activeProducts = (productsData.products || []).filter((p: Product) => p.isActive)
         setProducts(activeProducts)
+
+        if (cataloguesRes.ok) {
+          const cataloguesData = await cataloguesRes.json().catch(() => null)
+          const list = Array.isArray(cataloguesData?.catalogues) ? cataloguesData.catalogues : []
+          setCatalogues(list.length > 0 ? list : DEFAULT_CATALOGUES)
+        }
 
         // Diagnostic: count stock states so we can confirm low/out actually arrive in the client.
         if (typeof window !== 'undefined') {
@@ -618,6 +639,31 @@ export default function OrderForm({ mode, orderId }: Props) {
   const subtotal = useMemo(
     () => items.reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0), 0),
     [items]
+  )
+
+  // Which price list applies to this order, resolved from its order type
+  // (Online/App -> 'online', Instashop -> 'instashop', B2B -> 'b2b', or any
+  // admin-configured mapping). Every price/stock-affecting lookup below
+  // reads from `catalogueProducts` (basePrice/offerPrice/stockStatus/
+  // stockQuantity already resolved for this catalogue) instead of the raw
+  // `products` list, so switching order type re-prices the whole form with
+  // zero extra network requests.
+  const catalogueKey = useMemo(
+    () => resolveCatalogueKey(form.orderType, catalogues),
+    [form.orderType, catalogues]
+  )
+  const catalogueProducts = useMemo(
+    () =>
+      products
+        .filter((p) => isAvailableInCatalogue(p, catalogueKey))
+        .map((p) => ({
+          ...p,
+          basePrice: catalogueBasePrice(p, catalogueKey) ?? 0,
+          offerPrice: catalogueOfferPrice(p, catalogueKey),
+          stockStatus: catalogueStockStatus(p, catalogueKey),
+          stockQuantity: catalogueStockQuantity(p, catalogueKey),
+        })),
+    [products, catalogueKey]
   )
   const selectedZone = useMemo(() => {
     const area = String(form.deliveryArea || '').trim()
@@ -890,7 +936,7 @@ export default function OrderForm({ mode, orderId }: Props) {
 
   const onProductNameChange = (index: number, productName: string) => {
     setDirtyFlag(true)
-    const selected = findProductByName(products, productName)
+    const selected = findProductByName(catalogueProducts, productName)
 
     if (!selected) {
       updateItem(index, { productNameInput: productName, productId: '' })
@@ -1034,7 +1080,7 @@ export default function OrderForm({ mode, orderId }: Props) {
 
     const normalizedItems = items
       .map((i) => {
-        const productByName = findProductByName(products, i.productNameInput)
+        const productByName = findProductByName(catalogueProducts, i.productNameInput)
 
         return {
           ...i,
@@ -1402,7 +1448,7 @@ export default function OrderForm({ mode, orderId }: Props) {
             </thead>
             <tbody>
               {items.map((item, index) => {
-                const selectedProduct = findProductByName(products, item.productNameInput)
+                const selectedProduct = findProductByName(catalogueProducts, item.productNameInput)
                 const lineTotal = (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0)
                 const isWeightMode = selectedProduct?.pricingMode === 'weight'
                 // Frozen-price display resolution — everything else on this
@@ -1488,7 +1534,7 @@ export default function OrderForm({ mode, orderId }: Props) {
                         </div>
                       )}
                       <datalist id={`products-${index}`}>
-                        {products.map((p) => (
+                        {catalogueProducts.map((p) => (
                           <option key={p.id} value={p.productName} />
                         ))}
                       </datalist>
@@ -2156,7 +2202,7 @@ export default function OrderForm({ mode, orderId }: Props) {
           items={items
             .filter((i) => i.productNameInput && Number(i.quantity) > 0)
             .map((i) => {
-              const prod = findProductByName(products, i.productNameInput)
+              const prod = findProductByName(catalogueProducts, i.productNameInput)
               const isWeight = prod?.pricingMode === 'weight'
               return {
                 productName: i.productNameInput,

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { ONLINE_CATALOGUE_KEY, withPricesEmbed, foldPricesEmbed } from '@/lib/catalogue'
 
 // Product catalog changes rarely (admins add/edit products occasionally). It
 // is read on nearly every order-creation and every dashboard render, so a
@@ -18,23 +19,63 @@ function generateId() {
   return `prod_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 }
 
+/** Upsert the 'online' catalogue's product_prices row so it mirrors the
+ * legacy columns. Best-effort: failures are logged, never block the caller
+ * (the legacy columns on `products` remain the source of truth for online). */
+async function mirrorOnlineCataloguePrice(product: {
+  id: string
+  basePrice?: number | null
+  offerPrice?: number | null
+  stockStatus?: string | null
+  stockQuantity?: number | null
+}) {
+  try {
+    const { error } = await supabase.from('product_prices').upsert(
+      {
+        productId: product.id,
+        catalogueKey: ONLINE_CATALOGUE_KEY,
+        basePrice: product.basePrice ?? null,
+        offerPrice: product.offerPrice ?? null,
+        stockStatus: product.stockStatus || 'available',
+        stockQuantity: product.stockQuantity ?? null,
+        updatedAt: new Date().toISOString(),
+      },
+      { onConflict: 'productId,catalogueKey' },
+    )
+    if (error) console.warn('[products] mirror to product_prices(online) failed:', error.message)
+  } catch (err) {
+    console.warn('[products] mirror to product_prices(online) threw:', err)
+  }
+}
+
 export async function GET(request: NextRequest) {
   try {
-    const cols =
-      request.nextUrl.searchParams.get('columns') === 'lite'
-        ? PRODUCT_LITE_COLUMNS
-        : '*'
-    const { data: products, error } = await supabase
-      .from('products')
-      .select(cols)
-    
+    const isLite = request.nextUrl.searchParams.get('columns') === 'lite'
+    const baseCols: string = isLite ? PRODUCT_LITE_COLUMNS : '*'
+    let products: any[] | null = null
+    let error: any = null
+    {
+      const res = await supabase.from('products').select(withPricesEmbed(baseCols))
+      products = res.data as any[] | null
+      error = res.error
+    }
+
+    // Graceful fallback: product_prices table / FK not created yet (migration
+    // not applied). Retry without the embed so the catalog keeps loading —
+    // every product just behaves as 'online'-only until the migration runs.
+    if (error && /relationship|schema cache|does not exist|42703/i.test(error.message || '')) {
+      const retry = await supabase.from('products').select(baseCols)
+      products = retry.data as any[] | null
+      error = retry.error
+    }
+
     if (error) {
       console.error('Error fetching products:', error)
       return NextResponse.json({ products: [] }, { status: 200 })
     }
 
     const normalized = (products || []).map((product: any) => ({
-      ...product,
+      ...foldPricesEmbed(product),
       productCategory: product.productCategory || 'غير محدد',
       packagingType: product.packagingType || 'غير محدد',
       isTargeted: Boolean(product.isTargeted),
@@ -95,7 +136,12 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    return NextResponse.json(inserted || newProduct, { status: 201 })
+    const created = inserted || newProduct
+    // Seed the 'online' catalogue row so this product behaves consistently
+    // with every other catalogue-aware view (admin/branch tabs, order form).
+    await mirrorOnlineCataloguePrice(created)
+
+    return NextResponse.json(created, { status: 201 })
   } catch (error) {
     console.error('Error creating product:', error)
     return NextResponse.json(
@@ -145,7 +191,13 @@ export async function PUT(request: NextRequest) {
       )
     }
 
-    return NextResponse.json(result || updated, { status: 200 })
+    const saved = result || updated
+    // Keep the 'online' catalogue row in sync with the legacy columns
+    // whenever they change here (admin edit form, inline price save, CSV
+    // import-apply for the default catalogue, stock toggles, etc.).
+    await mirrorOnlineCataloguePrice(saved)
+
+    return NextResponse.json(saved, { status: 200 })
   } catch (error) {
     console.error('Error updating product:', error)
     return NextResponse.json(
@@ -154,6 +206,7 @@ export async function PUT(request: NextRequest) {
     )
   }
 }
+
 
 export async function DELETE(request: NextRequest) {
   try {

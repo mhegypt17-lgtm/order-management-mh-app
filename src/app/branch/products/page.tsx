@@ -4,7 +4,16 @@ import { useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
 import { useProductCategories } from '@/lib/useProductCategories'
+import { useCatalogues } from '@/lib/useCatalogues'
 import { formatCairoDateTime } from '@/lib/cairoTime'
+import {
+  ONLINE_CATALOGUE_KEY,
+  CataloguePrice,
+  catalogueBasePrice,
+  catalogueOfferPrice,
+  catalogueStockStatus,
+  catalogueStockQuantity,
+} from '@/lib/catalogue'
 
 type StockStatus = 'available' | 'low' | 'out'
 
@@ -30,6 +39,8 @@ type Product = {
   stockUpdatedAt?: string | null
   stockUpdatedBy?: string | null
   pricingMode?: 'unit' | 'weight'
+  /** Non-'online' catalogue prices/stock, embedded by GET /api/products. */
+  prices?: Record<string, CataloguePrice>
 }
 
 function stockBadge(p: Product) {
@@ -42,6 +53,8 @@ function stockBadge(p: Product) {
 export default function BranchProductsPage() {
   const { user } = useAuthStore()
   const { compareCategories } = useProductCategories()
+  const { activeCatalogues } = useCatalogues()
+  const [activeCatalogue, setActiveCatalogue] = useState<string>(ONLINE_CATALOGUE_KEY)
   const [isLoading, setIsLoading] = useState(true)
   const [products, setProducts] = useState<Product[]>([])
   const [searchTerm, setSearchTerm] = useState('')
@@ -77,9 +90,24 @@ export default function BranchProductsPage() {
     fetchProducts()
   }, [])
 
+  // Products re-priced/re-stocked for the currently active catalogue tab —
+  // every filter/sort/count below reads from this so switching tabs needs
+  // zero extra network requests.
+  const displayProducts = useMemo<Product[]>(
+    () =>
+      products.map((p) => ({
+        ...p,
+        basePrice: catalogueBasePrice(p, activeCatalogue) ?? 0,
+        offerPrice: catalogueOfferPrice(p, activeCatalogue),
+        stockStatus: catalogueStockStatus(p, activeCatalogue),
+        stockQuantity: catalogueStockQuantity(p, activeCatalogue),
+      })),
+    [products, activeCatalogue],
+  )
+
   const filteredProducts = useMemo(() => {
     const term = searchTerm.trim().toLowerCase()
-    const list = products.filter((p) => {
+    const list = displayProducts.filter((p) => {
       const matchesSearch = !term || (
         String(p.productName || '').toLowerCase().includes(term) ||
         String(p.productCategory || '').toLowerCase().includes(term) ||
@@ -98,7 +126,7 @@ export default function BranchProductsPage() {
     if (sortBy === 'priceAsc') return [...list].sort((a, b) => priceOf(a) - priceOf(b))
     if (sortBy === 'priceDesc') return [...list].sort((a, b) => priceOf(b) - priceOf(a))
     return list
-  }, [products, searchTerm, stockFilter, selectedCategory, showTargetedOnly, showWeightOnly, sortBy])
+  }, [displayProducts, searchTerm, stockFilter, selectedCategory, showTargetedOnly, showWeightOnly, sortBy])
 
   // Sync modal edit fields when a product is opened
   useEffect(() => {
@@ -109,11 +137,11 @@ export default function BranchProductsPage() {
   }, [selectedProduct])
 
   const stockCounts = useMemo(() => ({
-    all: products.length,
-    available: products.filter((p) => (p.stockStatus || 'available') === 'available').length,
-    low: products.filter((p) => p.stockStatus === 'low').length,
-    out: products.filter((p) => p.stockStatus === 'out').length,
-  }), [products])
+    all: displayProducts.length,
+    available: displayProducts.filter((p) => (p.stockStatus || 'available') === 'available').length,
+    low: displayProducts.filter((p) => p.stockStatus === 'low').length,
+    out: displayProducts.filter((p) => p.stockStatus === 'out').length,
+  }), [displayProducts])
 
   const categories = useMemo(() => {
     const cats = new Set<string>()
@@ -146,6 +174,7 @@ export default function BranchProductsPage() {
           stockQuantity: stockEditQty === '' ? null : Number(stockEditQty),
           role,
           actor: user?.name || role,
+          catalogueKey: activeCatalogue,
         }),
       })
       if (!res.ok) {
@@ -153,9 +182,43 @@ export default function BranchProductsPage() {
         throw new Error(j?.error || 'failed')
       }
       const data = await res.json()
-      const updated = data.product as Product
-      setProducts((prev) => prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)))
-      setSelectedProduct(updated)
+      // 'online' responses come back as { product }; other catalogues as
+      // { price } (a product_prices row) — normalize both into the local
+      // product's resolved view for this tab.
+      if (data.product) {
+        const updated = data.product as Product
+        setProducts((prev) => prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)))
+        setSelectedProduct((prev) => (prev ? { ...prev, ...updated } : prev))
+      } else if (data.price) {
+        const priceRow = data.price
+        setProducts((prev) =>
+          prev.map((p) =>
+            p.id === selectedProduct.id
+              ? {
+                  ...p,
+                  prices: {
+                    ...p.prices,
+                    [activeCatalogue]: {
+                      basePrice: priceRow.basePrice ?? null,
+                      offerPrice: priceRow.offerPrice ?? null,
+                      stockStatus: priceRow.stockStatus || 'available',
+                      stockQuantity: priceRow.stockQuantity ?? null,
+                    },
+                  },
+                }
+              : p,
+          ),
+        )
+        setSelectedProduct((prev) =>
+          prev
+            ? {
+                ...prev,
+                stockStatus: priceRow.stockStatus || 'available',
+                stockQuantity: priceRow.stockQuantity ?? null,
+              }
+            : prev,
+        )
+      }
       toast.success('تم تحديث حالة المخزون')
     } catch (e: any) {
       toast.error(e?.message || 'تعذر حفظ حالة المخزون')
@@ -178,6 +241,25 @@ export default function BranchProductsPage() {
           تحديث المنتجات
         </button>
       </div>
+
+      {activeCatalogues.length > 1 && (
+        <div className="flex flex-wrap gap-2 bg-white rounded-lg border border-gray-200 p-3">
+          {activeCatalogues.map((c) => (
+            <button
+              key={c.key}
+              type="button"
+              onClick={() => setActiveCatalogue(c.key)}
+              className={`px-4 py-2 rounded-lg text-sm font-bold transition border ${
+                activeCatalogue === c.key
+                  ? 'bg-red-600 text-white border-red-600'
+                  : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+              }`}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <div className="bg-white rounded-lg shadow p-4 text-center">

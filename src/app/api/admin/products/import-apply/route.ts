@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/admin-guard'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { ONLINE_CATALOGUE_KEY } from '@/lib/catalogue'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,9 +14,12 @@ interface ApplyChange {
 /**
  * POST /api/admin/products/import-apply
  *
- * Body: { changes: Array<{ productId, newBasePrice, newOfferPrice }> }
+ * Body: { changes: Array<{ productId, newBasePrice, newOfferPrice }>, catalogueKey? }
  *
- * Only touches "basePrice" and "offerPrice" — never any other column.
+ * `catalogueKey` defaults to 'online' (unchanged behaviour: only touches
+ * products.basePrice/offerPrice). Any other catalogueKey instead upserts
+ * the matching product_prices row — the legacy columns and every other
+ * catalogue stay untouched.
  * Loops the changes and issues a targeted UPDATE per row (small volumes,
  * clear per-row error reporting). Returns { updated, errors[] }.
  */
@@ -26,7 +30,12 @@ export async function POST(request: NextRequest) {
 
     const body = (await request.json().catch(() => ({}))) as {
       changes?: unknown
+      catalogueKey?: unknown
     }
+    const catalogueKey =
+      typeof body.catalogueKey === 'string' && body.catalogueKey.trim()
+        ? body.catalogueKey.trim()
+        : ONLINE_CATALOGUE_KEY
     if (!Array.isArray(body.changes) || body.changes.length === 0) {
       return NextResponse.json(
         { error: 'لا توجد تعديلات لتطبيقها' },
@@ -72,20 +81,52 @@ export async function POST(request: NextRequest) {
     let updated = 0
     const errors: Array<{ productId: string; message: string }> = []
 
-    for (const c of changes) {
-      const { error } = await supabase
-        .from('products')
-        .update({
-          basePrice: c.newBasePrice,
-          offerPrice: c.newOfferPrice,
-          updatedAt,
-        })
-        .eq('id', c.productId)
+    if (catalogueKey === ONLINE_CATALOGUE_KEY) {
+      for (const c of changes) {
+        const { error } = await supabase
+          .from('products')
+          .update({
+            basePrice: c.newBasePrice,
+            offerPrice: c.newOfferPrice,
+            updatedAt,
+          })
+          .eq('id', c.productId)
 
-      if (error) {
-        errors.push({ productId: c.productId, message: error.message })
-      } else {
-        updated++
+        if (error) {
+          errors.push({ productId: c.productId, message: error.message })
+        } else {
+          updated++
+          // Best-effort mirror so embedded catalogue reads stay consistent.
+          await supabase.from('product_prices').upsert(
+            {
+              productId: c.productId,
+              catalogueKey: ONLINE_CATALOGUE_KEY,
+              basePrice: c.newBasePrice,
+              offerPrice: c.newOfferPrice,
+              updatedAt,
+            },
+            { onConflict: 'productId,catalogueKey' },
+          )
+        }
+      }
+    } else {
+      for (const c of changes) {
+        const { error } = await supabase.from('product_prices').upsert(
+          {
+            productId: c.productId,
+            catalogueKey,
+            basePrice: c.newBasePrice,
+            offerPrice: c.newOfferPrice,
+            updatedAt,
+          },
+          { onConflict: 'productId,catalogueKey' },
+        )
+
+        if (error) {
+          errors.push({ productId: c.productId, message: error.message })
+        } else {
+          updated++
+        }
       }
     }
 
@@ -95,3 +136,4 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
+

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { supabase } from '@/lib/supabase'
+import { ONLINE_CATALOGUE_KEY } from '@/lib/catalogue'
 
 type StockStatus = 'available' | 'low' | 'out'
 const ALLOWED: StockStatus[] = ['available', 'low', 'out']
@@ -13,6 +14,7 @@ export async function PATCH(request: NextRequest) {
     const qtyRaw = body?.stockQuantity
     const role: string = body?.role || ''
     const actor: string = body?.actor || 'unknown'
+    const catalogueKey: string = String(body?.catalogueKey || ONLINE_CATALOGUE_KEY).trim() || ONLINE_CATALOGUE_KEY
 
     if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 })
     if (!ALLOWED.includes(status)) return NextResponse.json({ error: 'invalid stockStatus' }, { status: 400 })
@@ -24,6 +26,45 @@ export async function PATCH(request: NextRequest) {
     }
 
     const now = new Date().toISOString()
+
+    // Non-'online' catalogues only ever touch product_prices — the legacy
+    // products columns (and everything that reads them) stay untouched.
+    if (catalogueKey !== ONLINE_CATALOGUE_KEY) {
+      const { data: existingRow } = await supabase
+        .from('product_prices')
+        .select('*')
+        .eq('productId', id)
+        .eq('catalogueKey', catalogueKey)
+        .maybeSingle()
+
+      const row = {
+        productId: id,
+        catalogueKey,
+        basePrice: existingRow?.basePrice ?? null,
+        offerPrice: existingRow?.offerPrice ?? null,
+        stockStatus: status,
+        stockQuantity,
+        updatedAt: now,
+        updatedBy: actor,
+      }
+      const { data: saved, error } = await supabase
+        .from('product_prices')
+        .upsert(row, { onConflict: 'productId,catalogueKey' })
+        .select()
+        .single()
+
+      if (error || !saved) {
+        console.error('[products/stock] catalogue update failed', error)
+        return NextResponse.json(
+          { error: 'Failed to update stock', details: error?.message || null },
+          { status: 500 },
+        )
+      }
+
+      try { revalidatePath('/api/products') } catch {}
+      return NextResponse.json({ price: saved }, { headers: { 'Cache-Control': 'no-store' } })
+    }
+
     const patch: Record<string, any> = {
       stockStatus: status,
       stockQuantity,
@@ -63,6 +104,22 @@ export async function PATCH(request: NextRequest) {
         { status: 500 }
       )
     }
+
+    // Best-effort mirror into product_prices('online') so embedded reads
+    // (admin/branch catalogue tabs) agree with the legacy columns.
+    await supabase.from('product_prices').upsert(
+      {
+        productId: id,
+        catalogueKey: ONLINE_CATALOGUE_KEY,
+        basePrice: updated.basePrice ?? null,
+        offerPrice: updated.offerPrice ?? null,
+        stockStatus: updated.stockStatus || 'available',
+        stockQuantity: updated.stockQuantity ?? null,
+        updatedAt: now,
+        updatedBy: actor,
+      },
+      { onConflict: 'productId,catalogueKey' },
+    )
 
     // Bust the /api/products cache so branch / CS reads see the new stock
     // status immediately instead of waiting up to 5 minutes for the CDN

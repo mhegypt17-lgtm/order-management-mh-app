@@ -20,9 +20,17 @@ import {
   readOrderDeliveryByOrderIds,
   readProductsByIds,
   readOrdersWindow,
+  readOrderSettings,
   DELIVERY_COLUMNS_LIST,
   ORDER_COLUMNS_LIST,
 } from '@/lib/omsData'
+import {
+  resolveCatalogueKey,
+  catalogueBasePrice,
+  catalogueOfferPrice,
+  withPricesEmbed,
+  foldPricesEmbed,
+} from '@/lib/catalogue'
 
 // Short server-side cache — a burst of dashboard loaders in the same minute
 // share one DB read. Individual mutations (POST/PUT) don't need this route
@@ -66,12 +74,25 @@ function findMatchedProduct(products: any[], productNameInput?: string) {
 
 async function readProducts() {
   try {
-    // Name-matching + pricing only — skip image/description blobs.
-    const { data, error } = await supabase
-      .from('products')
-      .select('id, productName, productCategory, pricingMode, basePrice, offerPrice')
+    // Name-matching + pricing only — skip image/description blobs. The
+    // product_prices embed adds each non-'online' catalogue's price so order
+    // creation can snapshot the correct one; falls back gracefully if the
+    // catalogue migration hasn't run yet.
+    const cols = 'id, productName, productCategory, pricingMode, basePrice, offerPrice'
+    let data: any[] | null = null
+    let error: any = null
+    {
+      const res = await supabase.from('products').select(withPricesEmbed(cols))
+      data = res.data as any[] | null
+      error = res.error
+    }
+    if (error && /relationship|schema cache|does not exist|42703/i.test(error.message || '')) {
+      const retry = await supabase.from('products').select(cols)
+      data = retry.data as any[] | null
+      error = retry.error
+    }
     if (error) return []
-    return Array.isArray(data) ? data : []
+    return Array.isArray(data) ? data.map(foldPricesEmbed) : []
   } catch {
     return []
   }
@@ -656,14 +677,19 @@ export async function POST(request: NextRequest) {
     }
 
     // 4. Insert order items
-    // Snapshot the product's basePrice / offerPrice into each row so that the
-    // price the customer committed to is frozen even if the product is later
-    // re-priced. Falls back gracefully if the DB hasn't been migrated yet.
+    // Snapshot the product's catalogue-specific base/offer price into each
+    // row so that the price the customer committed to is frozen even if the
+    // product is later re-priced. The catalogue is resolved from the
+    // order's orderType (Online/App -> 'online', Instashop -> 'instashop',
+    // B2B -> 'b2b', configurable via /admin/settings/catalogues). Falls back
+    // gracefully if the DB hasn't been migrated yet.
+    const orderSettings = await readOrderSettings()
+    const catalogueKey = resolveCatalogueKey(body.orderType, orderSettings.catalogues)
     const productById = new Map<string, any>((products as any[]).map((p) => [p.id, p]))
     const newItems: any[] = normalizedItems.map((i) => {
       const p = productById.get(i.productId)
-      const base = p && p.basePrice != null ? Number(p.basePrice) : null
-      const offerRaw = p && p.offerPrice != null ? Number(p.offerPrice) : null
+      const base = p ? catalogueBasePrice(p, catalogueKey) : null
+      const offerRaw = p ? catalogueOfferPrice(p, catalogueKey) : null
       const offer = offerRaw != null && offerRaw > 0 ? offerRaw : null
       return {
         id: generateTextId('item'),

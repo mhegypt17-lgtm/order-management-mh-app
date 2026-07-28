@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/admin-guard'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { parsePriceCsv, normaliseSheetUrl, normaliseProductName } from '@/lib/price-csv'
+import { ONLINE_CATALOGUE_KEY } from '@/lib/catalogue'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,8 +40,12 @@ export async function POST(request: NextRequest) {
     const guard = await requireAdmin(request)
     if (guard instanceof NextResponse) return guard
 
-    const body = (await request.json().catch(() => ({}))) as { url?: string }
+    const body = (await request.json().catch(() => ({}))) as { url?: string; catalogueKey?: string }
     const inputUrl = typeof body.url === 'string' ? body.url : ''
+    const catalogueKey =
+      typeof body.catalogueKey === 'string' && body.catalogueKey.trim()
+        ? body.catalogueKey.trim()
+        : ONLINE_CATALOGUE_KEY
 
     const { csvUrl, reason } = normaliseSheetUrl(inputUrl)
     if (!csvUrl) {
@@ -101,6 +106,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: `تعذر قراءة المنتجات: ${productsError.message}` },
         { status: 500 },
+      )
+    }
+
+    // Non-'online' catalogues: current price/offer comes from product_prices,
+    // not the legacy columns. Fetch once and index by productId.
+    let cataloguePriceById: Map<string, { basePrice: number | null; offerPrice: number | null }> | null = null
+    if (catalogueKey !== ONLINE_CATALOGUE_KEY) {
+      const { data: priceRows } = await supabase
+        .from('product_prices')
+        .select('productId,basePrice,offerPrice')
+        .eq('catalogueKey', catalogueKey)
+      cataloguePriceById = new Map(
+        (priceRows || []).map((r: any) => [
+          String(r.productId),
+          {
+            basePrice: r.basePrice === null || r.basePrice === undefined ? null : Number(r.basePrice),
+            offerPrice: r.offerPrice === null || r.offerPrice === undefined ? null : Number(r.offerPrice),
+          },
+        ]),
       )
     }
 
@@ -172,14 +196,17 @@ export async function POST(request: NextRequest) {
         continue
       }
       const dbRow = matches[0]
-      const baseSame = dbRow.basePrice === row.basePrice
-      const offerSame = dbRow.offerPrice === row.offerPrice
+      const catPrice = cataloguePriceById?.get(dbRow.id)
+      const currentBasePrice = cataloguePriceById ? catPrice?.basePrice ?? null : dbRow.basePrice
+      const currentOfferPrice = cataloguePriceById ? catPrice?.offerPrice ?? null : dbRow.offerPrice
+      const baseSame = currentBasePrice === row.basePrice
+      const offerSame = currentOfferPrice === row.offerPrice
       const preview: PreviewRow = {
         productId: dbRow.id,
         productName: dbRow.productName,
         productCategory: dbRow.productCategory,
-        currentBasePrice: dbRow.basePrice,
-        currentOfferPrice: dbRow.offerPrice,
+        currentBasePrice,
+        currentOfferPrice,
         newBasePrice: row.basePrice,
         newOfferPrice: row.offerPrice,
         lineNumber: row.lineNumber,

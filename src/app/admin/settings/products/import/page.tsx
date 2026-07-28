@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
+import { useCatalogues } from '@/lib/useCatalogues'
+import { ONLINE_CATALOGUE_KEY } from '@/lib/catalogue'
 
 interface PreviewRow {
   productId: string
@@ -93,6 +95,8 @@ function formatPrice(v: number | null): string {
 const DEFAULT_URL = process.env.NEXT_PUBLIC_PRICE_SHEET_CSV_URL || ''
 
 export default function PriceImportPage() {
+  const { activeCatalogues } = useCatalogues()
+  const [catalogueKey, setCatalogueKey] = useState<string>(ONLINE_CATALOGUE_KEY)
   const [url, setUrl] = useState(DEFAULT_URL)
   const [loading, setLoading] = useState(false)
   const [applying, setApplying] = useState(false)
@@ -114,7 +118,7 @@ export default function PriceImportPage() {
     try {
       const res = await authedFetch('/api/admin/products/import-preview', {
         method: 'POST',
-        body: JSON.stringify({ url: url.trim() }),
+        body: JSON.stringify({ url: url.trim(), catalogueKey }),
       })
       const { ok, data, errorMessage } = await readJsonSafely(res)
       if (!ok) throw new Error(errorMessage || 'تعذر تحميل المعاينة')
@@ -128,7 +132,7 @@ export default function PriceImportPage() {
     } finally {
       setLoading(false)
     }
-  }, [url])
+  }, [url, catalogueKey])
 
   const toggle = (id: string) => {
     setSelected((prev) => {
@@ -200,7 +204,7 @@ export default function PriceImportPage() {
       try {
         const res = await authedFetch('/api/admin/products/import-apply', {
           method: 'POST',
-          body: JSON.stringify({ changes }),
+          body: JSON.stringify({ changes, catalogueKey }),
         })
         const { ok, data, errorMessage } = await readJsonSafely(res)
         if (!ok) throw new Error(errorMessage || 'فشل التطبيق')
@@ -220,7 +224,7 @@ export default function PriceImportPage() {
         setApplying(false)
       }
     },
-    [handleLoad],
+    [handleLoad, catalogueKey],
   )
 
   const handleApply = async () => {
@@ -261,6 +265,33 @@ export default function PriceImportPage() {
 
       {/* URL + load */}
       <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
+        {activeCatalogues.length > 1 && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              الكتالوج المستهدف
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {activeCatalogues.map((c) => (
+                <button
+                  key={c.key}
+                  type="button"
+                  onClick={() => {
+                    setCatalogueKey(c.key)
+                    setPreview(null)
+                    setSelected(new Set())
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-bold transition border ${
+                    catalogueKey === c.key
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                  }`}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <label className="block text-sm font-medium text-gray-700">
           رابط CSV المنشور (Publish to web → CSV)
         </label>

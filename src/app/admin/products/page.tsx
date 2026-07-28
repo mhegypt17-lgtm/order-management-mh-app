@@ -4,6 +4,16 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import toast from 'react-hot-toast'
 import { useProductCategories } from '@/lib/useProductCategories'
+import { useCatalogues } from '@/lib/useCatalogues'
+import { useAuthStore } from '@/lib/auth'
+import {
+  ONLINE_CATALOGUE_KEY,
+  CataloguePrice,
+  catalogueBasePrice,
+  catalogueOfferPrice,
+  catalogueStockStatus,
+  catalogueStockQuantity,
+} from '@/lib/catalogue'
 
 export interface Product {
   id?: string
@@ -26,12 +36,17 @@ export interface Product {
   pricingMode?: 'unit' | 'weight'
   stockStatus?: 'available' | 'low' | 'out'
   stockQuantity?: number | null
+  /** Non-'online' catalogue prices, embedded by GET /api/products. */
+  prices?: Record<string, CataloguePrice>
 }
 
 type StockStatus = 'available' | 'low' | 'out'
 
 export default function ProductCatalogPage() {
   const { activeCategories, compareCategories } = useProductCategories()
+  const { activeCatalogues } = useCatalogues()
+  const { user } = useAuthStore()
+  const [activeCatalogue, setActiveCatalogue] = useState<string>(ONLINE_CATALOGUE_KEY)
   const [products, setProducts] = useState<Product[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -269,38 +284,98 @@ export default function ProductCatalogPage() {
    * Inline-update a single field (price/offer) on a product without opening
    * the full edit modal. Optimistically mutates local state so the UI reflects
    * the new value instantly; rolls back + toasts on server error.
+   *
+   * 'online' writes straight to the legacy products columns (unchanged
+   * behaviour). Any other catalogue tab writes to product_prices via
+   * /api/products/prices instead — the legacy columns are untouched.
    */
   const saveProductField = async (
     product: Product,
     patch: Partial<Pick<Product, 'basePrice' | 'offerPrice'>>,
   ): Promise<boolean> => {
+    if (activeCatalogue === ONLINE_CATALOGUE_KEY) {
+      const before = { ...product }
+      const updated: Product = { ...product, ...patch }
+      setProducts((prev) =>
+        prev.map((p) => (p.id === product.id ? updated : p)),
+      )
+      try {
+        const res = await fetch('/api/products', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updated),
+        })
+        if (!res.ok) throw new Error('Failed to update')
+        toast.success('💰 تم تحديث السعر')
+        return true
+      } catch (err) {
+        console.error(err)
+        setProducts((prev) =>
+          prev.map((p) => (p.id === product.id ? before : p)),
+        )
+        toast.error('تعذر حفظ السعر — تم التراجع')
+        return false
+      }
+    }
+
+    // Non-'online' catalogue tab.
     const before = { ...product }
-    const updated: Product = { ...product, ...patch }
+    const prevPrice = product.prices?.[activeCatalogue]
+    const nextPrice: CataloguePrice = {
+      basePrice: patch.basePrice !== undefined ? patch.basePrice : prevPrice?.basePrice ?? null,
+      offerPrice: patch.offerPrice !== undefined ? patch.offerPrice : prevPrice?.offerPrice ?? null,
+      stockStatus: prevPrice?.stockStatus || 'available',
+      stockQuantity: prevPrice?.stockQuantity ?? null,
+    }
     setProducts((prev) =>
-      prev.map((p) => (p.id === product.id ? updated : p)),
+      prev.map((p) =>
+        p.id === product.id
+          ? { ...p, prices: { ...p.prices, [activeCatalogue]: nextPrice } }
+          : p,
+      ),
     )
     try {
-      const res = await fetch('/api/products', {
-        method: 'PUT',
+      const res = await fetch('/api/products/prices', {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updated),
+        body: JSON.stringify({
+          productId: product.id,
+          catalogueKey: activeCatalogue,
+          ...patch,
+          role: 'admin',
+          actor: user?.name || 'admin',
+        }),
       })
       if (!res.ok) throw new Error('Failed to update')
       toast.success('💰 تم تحديث السعر')
       return true
     } catch (err) {
       console.error(err)
-      setProducts((prev) =>
-        prev.map((p) => (p.id === product.id ? before : p)),
-      )
+      setProducts((prev) => prev.map((p) => (p.id === product.id ? before : p)))
       toast.error('تعذر حفظ السعر — تم التراجع')
       return false
     }
   }
 
+  // Products re-priced/re-stocked for the currently active catalogue tab.
+  // Every filter/sort/stat below reads from this instead of the raw
+  // `products` state, so switching tabs re-derives the whole view with zero
+  // extra network requests (the embedded `prices` map already has everything).
+  const displayProducts = useMemo<Product[]>(
+    () =>
+      products.map((p) => ({
+        ...p,
+        basePrice: catalogueBasePrice(p, activeCatalogue) ?? 0,
+        offerPrice: catalogueOfferPrice(p, activeCatalogue),
+        stockStatus: catalogueStockStatus(p, activeCatalogue),
+        stockQuantity: catalogueStockQuantity(p, activeCatalogue),
+      })),
+    [products, activeCatalogue],
+  )
+
   const filteredProducts = useMemo(() => {
     const term = searchTerm.trim().toLowerCase()
-    const list = products.filter((p) => {
+    const list = displayProducts.filter((p) => {
       if (showTargetedOnly && !p.isTargeted) return false
       if (showWeightOnly && p.pricingMode !== 'weight') return false
       if (selectedCategory && p.productCategory !== selectedCategory) return false
@@ -321,7 +396,7 @@ export default function ProductCatalogPage() {
     if (sortBy === 'priceAsc') return [...list].sort((a, b) => priceOf(a) - priceOf(b))
     if (sortBy === 'priceDesc') return [...list].sort((a, b) => priceOf(b) - priceOf(a))
     return list
-  }, [products, searchTerm, showTargetedOnly, showWeightOnly, selectedCategory, stockFilter, sortBy])
+  }, [displayProducts, searchTerm, showTargetedOnly, showWeightOnly, selectedCategory, stockFilter, sortBy])
 
   const targetedCount = useMemo(() => products.filter((p) => p.isTargeted).length, [products])
   const weightCount = useMemo(() => products.filter((p) => p.pricingMode === 'weight').length, [products])
@@ -331,11 +406,11 @@ export default function ProductCatalogPage() {
     return Array.from(cats).sort(compareCategories)
   }, [products])
   const stockCounts = useMemo(() => ({
-    all: products.length,
-    available: products.filter((p) => (p.stockStatus || 'available') === 'available').length,
-    low: products.filter((p) => p.stockStatus === 'low').length,
-    out: products.filter((p) => p.stockStatus === 'out').length,
-  }), [products])
+    all: displayProducts.length,
+    available: displayProducts.filter((p) => (p.stockStatus || 'available') === 'available').length,
+    low: displayProducts.filter((p) => p.stockStatus === 'low').length,
+    out: displayProducts.filter((p) => p.stockStatus === 'out').length,
+  }), [displayProducts])
   const stats = { total: products.length, active: filteredProducts.length }
 
   return (
@@ -354,6 +429,26 @@ export default function ProductCatalogPage() {
           <span>إضافة منتج جديد</span>
         </button>
       </div>
+
+      {/* Catalogue tabs — price/stock below are for whichever tab is active. */}
+      {activeCatalogues.length > 1 && (
+        <div className="flex flex-wrap gap-2 bg-white rounded-lg shadow p-3">
+          {activeCatalogues.map((c) => (
+            <button
+              key={c.key}
+              type="button"
+              onClick={() => setActiveCatalogue(c.key)}
+              className={`px-4 py-2 rounded-lg text-sm font-bold transition border ${
+                activeCatalogue === c.key
+                  ? 'bg-red-600 text-white border-red-600'
+                  : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+              }`}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
