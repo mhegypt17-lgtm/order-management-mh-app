@@ -8,7 +8,6 @@ import toast from 'react-hot-toast'
 interface PreviewRow {
   productId: string
   productName: string
-  productCategory: string
   currentBasePrice: number | null
   currentOfferPrice: number | null
   newBasePrice: number
@@ -98,10 +97,6 @@ export default function PriceImportPage() {
   const [applying, setApplying] = useState(false)
   const [preview, setPreview] = useState<PreviewResponse | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  // 'category' groups the pending updates by product category so each
-  // category can be reviewed and synced on its own; 'flat' is the classic
-  // single list. Grouping is client-side only — no extra fetch, zero egress.
-  const [viewMode, setViewMode] = useState<'category' | 'flat'>('category')
 
   const handleLoad = useCallback(async () => {
     if (!url.trim()) {
@@ -148,84 +143,54 @@ export default function PriceImportPage() {
     }
   }
 
-  // Select / deselect every pending row in one category.
-  const toggleCategory = (rows: PreviewRow[]) => {
-    setSelected((prev) => {
-      const next = new Set(prev)
-      const allSelected = rows.every((r) => next.has(r.productId))
-      if (allSelected) rows.forEach((r) => next.delete(r.productId))
-      else rows.forEach((r) => next.add(r.productId))
-      return next
-    })
-  }
-
-  // Pending updates grouped by product category. Sorted by category name so
-  // the layout is stable between reloads. Built purely from the loaded
-  // preview — no additional network calls.
-  const grouped = useMemo(() => {
-    if (!preview) return [] as Array<{ category: string; rows: PreviewRow[] }>
-    const map = new Map<string, PreviewRow[]>()
-    for (const r of preview.willUpdate) {
-      const cat = r.productCategory || 'غير محدد'
-      const arr = map.get(cat) ?? []
-      arr.push(r)
-      map.set(cat, arr)
-    }
-    return Array.from(map.entries())
-      .map(([category, rows]) => ({ category, rows }))
-      .sort((a, b) => a.category.localeCompare(b.category, 'ar'))
-  }, [preview])
-
-  // Shared apply core. `rows` is the exact set of pending updates to push;
-  // callers pass either the global selection or one category's selection.
-  const applyChanges = useCallback(
-    async (rows: PreviewRow[]) => {
-      const changes = rows.map((r) => ({
+  const changesToApply = useMemo(() => {
+    if (!preview) return []
+    return preview.willUpdate
+      .filter((r) => selected.has(r.productId))
+      .map((r) => ({
         productId: r.productId,
         newBasePrice: r.newBasePrice,
         newOfferPrice: r.newOfferPrice,
       }))
-      if (changes.length === 0) {
-        toast.error('لا توجد صفوف مختارة')
-        return
-      }
-      if (
-        !confirm(
-          `تأكيد تحديث ${changes.length} منتج؟ سيتم تعديل السعر الأساسي وسعر العرض فقط.`,
-        )
-      )
-        return
-
-      setApplying(true)
-      try {
-        const res = await authedFetch('/api/admin/products/import-apply', {
-          method: 'POST',
-          body: JSON.stringify({ changes }),
-        })
-        const { ok, data, errorMessage } = await readJsonSafely(res)
-        if (!ok) throw new Error(errorMessage || 'فشل التطبيق')
-        const updated = Number(data.updated ?? 0)
-        const errors = (data.errors as Array<{ productId: string; message: string }>) ?? []
-        if (errors.length > 0) {
-          toast.error(`تم تحديث ${updated}/${changes.length}. أخطاء: ${errors.length}`)
-          console.error('Import errors:', errors)
-        } else {
-          toast.success(`✅ تم تحديث ${updated} منتج`)
-        }
-        // Reload the preview to reflect the new state
-        await handleLoad()
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : 'خطأ')
-      } finally {
-        setApplying(false)
-      }
-    },
-    [handleLoad],
-  )
+  }, [preview, selected])
 
   const handleApply = async () => {
-    if (!preview) return
-    await applyChanges(preview.willUpdate.filter((r) => selected.has(r.productId)))
+    if (changesToApply.length === 0) {
+      toast.error('لا توجد صفوف مختارة')
+      return
+    }
+    if (
+      !confirm(
+        `تأكيد تحديث ${changesToApply.length} منتج؟ سيتم تعديل السعر الأساسي وسعر العرض فقط.`,
+      )
+    )
+      return
+
+    setApplying(true)
+    try {
+      const res = await authedFetch('/api/admin/products/import-apply', {
+        method: 'POST',
+        body: JSON.stringify({ changes: changesToApply }),
+      })
+      const { ok, data, errorMessage } = await readJsonSafely(res)
+      if (!ok) throw new Error(errorMessage || 'فشل التطبيق')
+      const updated = Number(data.updated ?? 0)
+      const errors = (data.errors as Array<{ productId: string; message: string }>) ?? []
+      if (errors.length > 0) {
+        toast.error(
+          `تم تحديث ${updated}/${changesToApply.length}. أخطاء: ${errors.length}`,
+        )
+        console.error('Import errors:', errors)
+      } else {
+        toast.success(`✅ تم تحديث ${updated} منتج`)
+      }
+      // Reload the preview to reflect the new state
+      await handleLoad()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'خطأ')
+    } finally {
+      setApplying(false)
+    }
   }
 
   useEffect(() => {
@@ -354,37 +319,14 @@ export default function PriceImportPage() {
             </div>
           )}
 
-          {/* Will update — flat list or grouped by category */}
+          {/* Will update table */}
           {preview.willUpdate.length > 0 && (
             <div className="bg-white border border-gray-200 rounded-xl p-4">
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <h3 className="font-bold text-gray-900">
                   ✅ سيتم تحديث ({selected.size}/{preview.willUpdate.length})
                 </h3>
-                <div className="flex items-center gap-2 flex-wrap">
-                  {/* View toggle: by category vs one flat list */}
-                  <div className="flex items-center rounded-lg border border-gray-300 overflow-hidden text-sm">
-                    <button
-                      onClick={() => setViewMode('category')}
-                      className={`px-3 py-1 ${
-                        viewMode === 'category'
-                          ? 'bg-emerald-600 text-white'
-                          : 'bg-white text-gray-700 hover:bg-gray-50'
-                      }`}
-                    >
-                      حسب الفئة
-                    </button>
-                    <button
-                      onClick={() => setViewMode('flat')}
-                      className={`px-3 py-1 border-r border-gray-300 ${
-                        viewMode === 'flat'
-                          ? 'bg-emerald-600 text-white'
-                          : 'bg-white text-gray-700 hover:bg-gray-50'
-                      }`}
-                    >
-                      قائمة واحدة
-                    </button>
-                  </div>
+                <div className="flex items-center gap-2">
                   <button
                     onClick={toggleAll}
                     className="px-3 py-1 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
@@ -398,60 +340,70 @@ export default function PriceImportPage() {
                     disabled={applying || selected.size === 0}
                     className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
                   >
-                    {applying ? '⏳ جارٍ التطبيق...' : `تطبيق الكل (${selected.size})`}
+                    {applying ? '⏳ جارٍ التطبيق...' : `تطبيق (${selected.size})`}
                   </button>
                 </div>
               </div>
 
-              {viewMode === 'flat' ? (
-                <PriceRows
-                  rows={preview.willUpdate}
-                  selected={selected}
-                  onToggle={toggle}
-                />
-              ) : (
-                <div className="space-y-3">
-                  {grouped.map(({ category, rows }) => {
-                    const selectedInCat = rows.filter((r) => selected.has(r.productId)).length
-                    const allSelected = selectedInCat === rows.length
-                    return (
-                      <div
-                        key={category}
-                        className="border border-gray-200 rounded-lg overflow-hidden"
-                      >
-                        <div className="flex items-center justify-between gap-2 flex-wrap bg-gray-50 px-3 py-2 border-b">
-                          <h4 className="font-bold text-gray-800">
-                            🏷️ {category}{' '}
-                            <span className="text-sm font-normal text-gray-500">
-                              ({selectedInCat}/{rows.length})
-                            </span>
-                          </h4>
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => toggleCategory(rows)}
-                              className="px-3 py-1 text-sm border border-gray-300 rounded-lg hover:bg-white bg-white"
-                            >
-                              {allSelected ? 'إلغاء تحديد الفئة' : 'تحديد الفئة'}
-                            </button>
-                            <button
-                              onClick={() =>
-                                applyChanges(rows.filter((r) => selected.has(r.productId)))
-                              }
-                              disabled={applying || selectedInCat === 0}
-                              className="px-3 py-1 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
-                            >
-                              {applying ? '⏳...' : `مزامنة الفئة (${selectedInCat})`}
-                            </button>
-                          </div>
-                        </div>
-                        <div className="p-2">
-                          <PriceRows rows={rows} selected={selected} onToggle={toggle} />
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-gray-50">
+                      <th className="p-2 text-right">اختيار</th>
+                      <th className="p-2 text-right">المنتج</th>
+                      <th className="p-2 text-right">السعر الأساسي</th>
+                      <th className="p-2 text-right">سعر العرض</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.willUpdate.map((r) => {
+                      const baseChanged = r.currentBasePrice !== r.newBasePrice
+                      const offerChanged = r.currentOfferPrice !== r.newOfferPrice
+                      return (
+                        <tr key={r.productId} className="border-b hover:bg-gray-50">
+                          <td className="p-2">
+                            <input
+                              type="checkbox"
+                              checked={selected.has(r.productId)}
+                              onChange={() => toggle(r.productId)}
+                              className="w-4 h-4"
+                            />
+                          </td>
+                          <td className="p-2 font-medium">{r.productName}</td>
+                          <td className="p-2">
+                            {baseChanged ? (
+                              <span>
+                                <span className="text-gray-400 line-through">
+                                  {formatPrice(r.currentBasePrice)}
+                                </span>{' '}
+                                <span className="text-emerald-700 font-bold">
+                                  → {formatPrice(r.newBasePrice)}
+                                </span>
+                              </span>
+                            ) : (
+                              <span className="text-gray-500">{formatPrice(r.newBasePrice)}</span>
+                            )}
+                          </td>
+                          <td className="p-2">
+                            {offerChanged ? (
+                              <span>
+                                <span className="text-gray-400 line-through">
+                                  {formatPrice(r.currentOfferPrice)}
+                                </span>{' '}
+                                <span className="text-emerald-700 font-bold">
+                                  → {formatPrice(r.newOfferPrice)}
+                                </span>
+                              </span>
+                            ) : (
+                              <span className="text-gray-500">{formatPrice(r.newOfferPrice)}</span>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
@@ -477,78 +429,6 @@ export default function PriceImportPage() {
           )}
         </>
       )}
-    </div>
-  )
-}
-
-function PriceRows({
-  rows,
-  selected,
-  onToggle,
-}: {
-  rows: PreviewRow[]
-  selected: Set<string>
-  onToggle: (id: string) => void
-}) {
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b bg-gray-50">
-            <th className="p-2 text-right">اختيار</th>
-            <th className="p-2 text-right">المنتج</th>
-            <th className="p-2 text-right">السعر الأساسي</th>
-            <th className="p-2 text-right">سعر العرض</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => {
-            const baseChanged = r.currentBasePrice !== r.newBasePrice
-            const offerChanged = r.currentOfferPrice !== r.newOfferPrice
-            return (
-              <tr key={r.productId} className="border-b hover:bg-gray-50">
-                <td className="p-2">
-                  <input
-                    type="checkbox"
-                    checked={selected.has(r.productId)}
-                    onChange={() => onToggle(r.productId)}
-                    className="w-4 h-4"
-                  />
-                </td>
-                <td className="p-2 font-medium">{r.productName}</td>
-                <td className="p-2">
-                  {baseChanged ? (
-                    <span>
-                      <span className="text-gray-400 line-through">
-                        {formatPrice(r.currentBasePrice)}
-                      </span>{' '}
-                      <span className="text-emerald-700 font-bold">
-                        → {formatPrice(r.newBasePrice)}
-                      </span>
-                    </span>
-                  ) : (
-                    <span className="text-gray-500">{formatPrice(r.newBasePrice)}</span>
-                  )}
-                </td>
-                <td className="p-2">
-                  {offerChanged ? (
-                    <span>
-                      <span className="text-gray-400 line-through">
-                        {formatPrice(r.currentOfferPrice)}
-                      </span>{' '}
-                      <span className="text-emerald-700 font-bold">
-                        → {formatPrice(r.newOfferPrice)}
-                      </span>
-                    </span>
-                  ) : (
-                    <span className="text-gray-500">{formatPrice(r.newOfferPrice)}</span>
-                  )}
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
     </div>
   )
 }

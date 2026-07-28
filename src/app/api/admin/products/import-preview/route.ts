@@ -8,7 +8,6 @@ export const dynamic = 'force-dynamic'
 interface PreviewRow {
   productId: string
   productName: string
-  productCategory: string
   currentBasePrice: number | null
   currentOfferPrice: number | null
   newBasePrice: number
@@ -95,7 +94,7 @@ export async function POST(request: NextRequest) {
     const supabase = getSupabaseAdmin()
     const { data: products, error: productsError } = await supabase
       .from('products')
-      .select('id,"productName","productCategory","basePrice","offerPrice","isActive"')
+      .select('id,"productName","basePrice","offerPrice","isActive"')
 
     if (productsError) {
       return NextResponse.json(
@@ -110,7 +109,6 @@ export async function POST(request: NextRequest) {
       Array<{
         id: string
         productName: string
-        productCategory: string
         basePrice: number | null
         offerPrice: number | null
       }>
@@ -122,7 +120,6 @@ export async function POST(request: NextRequest) {
       arr.push({
         id: String(p.id),
         productName: String(p.productName),
-        productCategory: String(p.productCategory || 'غير محدد'),
         basePrice:
           p.basePrice === null || p.basePrice === undefined
             ? null
@@ -177,7 +174,6 @@ export async function POST(request: NextRequest) {
       const preview: PreviewRow = {
         productId: dbRow.id,
         productName: dbRow.productName,
-        productCategory: dbRow.productCategory,
         currentBasePrice: dbRow.basePrice,
         currentOfferPrice: dbRow.offerPrice,
         newBasePrice: row.basePrice,
