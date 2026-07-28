@@ -66,22 +66,32 @@ export function resolveCatalogueKey(
 
 export function catalogueBasePrice(p: CataloguedProduct, key: string): number | null {
   if (key === ONLINE_CATALOGUE_KEY) return num(p.basePrice)
-  return num(p.prices?.[key]?.basePrice)
+  // No explicit row for this catalogue yet — inherit the online price so a
+  // brand-new catalogue isn't empty until an admin customises it per product.
+  const row = p.prices?.[key]
+  if (!row) return num(p.basePrice)
+  return num(row.basePrice)
 }
 
 export function catalogueOfferPrice(p: CataloguedProduct, key: string): number | null {
   if (key === ONLINE_CATALOGUE_KEY) return num(p.offerPrice)
-  return num(p.prices?.[key]?.offerPrice)
+  const row = p.prices?.[key]
+  if (!row) return num(p.offerPrice)
+  return num(row.offerPrice)
 }
 
 export function catalogueStockStatus(p: CataloguedProduct, key: string): StockStatus {
   if (key === ONLINE_CATALOGUE_KEY) return p.stockStatus || 'available'
-  return p.prices?.[key]?.stockStatus || 'available'
+  const row = p.prices?.[key]
+  if (!row) return p.stockStatus || 'available'
+  return row.stockStatus || 'available'
 }
 
 export function catalogueStockQuantity(p: CataloguedProduct, key: string): number | null {
   if (key === ONLINE_CATALOGUE_KEY) return p.stockQuantity ?? null
-  return p.prices?.[key]?.stockQuantity ?? null
+  const row = p.prices?.[key]
+  if (!row) return p.stockQuantity ?? null
+  return row.stockQuantity ?? null
 }
 
 /** A product is offered in a catalogue when it has a positive base price there. */
