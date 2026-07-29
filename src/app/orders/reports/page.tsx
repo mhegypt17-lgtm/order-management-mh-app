@@ -3,6 +3,8 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { calculateComplaintAnalytics, type ComplaintAnalyticsRecord } from '@/lib/complaintAnalytics'
 import { cairoDateString, cairoFirstDayOfMonth } from '@/lib/cairoTime'
+import { useCatalogues } from '@/lib/useCatalogues'
+import { resolveCatalogueKey } from '@/lib/catalogue'
 type OrderItem = {
   id: string
   productName: string
@@ -85,6 +87,10 @@ export default function ReportsPage() {
 
   const [dateFrom, setDateFrom] = useState(firstDayOfMonth)
   const [dateTo, setDateTo] = useState(today)
+  // LOB (catalogue) filter — client-side only, over the same already-fetched
+  // /api/orders response. 'all' means no filtering (existing behavior).
+  const { catalogues, activeCatalogues } = useCatalogues()
+  const [catalogueFilter, setCatalogueFilter] = useState<string>('all')
 
   const fetchOrders = async () => {
     setIsLoading(true)
@@ -151,21 +157,26 @@ export default function ReportsPage() {
     loadTargeted()
   }, [])
 
+  const catalogueFilteredOrders = useMemo(() => {
+    if (catalogueFilter === 'all') return orders
+    return orders.filter((o) => resolveCatalogueKey(o.orderType, catalogues) === catalogueFilter)
+  }, [orders, catalogueFilter, catalogues])
+
   const thisMonthOrders = useMemo(() => {
-    return orders.filter((o) => o.orderDate >= firstDayOfMonth && o.orderDate <= today)
-  }, [orders, firstDayOfMonth, today])
+    return catalogueFilteredOrders.filter((o) => o.orderDate >= firstDayOfMonth && o.orderDate <= today)
+  }, [catalogueFilteredOrders, firstDayOfMonth, today])
 
   const todayOrders = useMemo(() => {
-    return orders.filter((o) => o.orderDate === today)
-  }, [orders, today])
+    return catalogueFilteredOrders.filter((o) => o.orderDate === today)
+  }, [catalogueFilteredOrders, today])
 
   const rangeOrders = useMemo(() => {
-    return orders.filter((o) => {
+    return catalogueFilteredOrders.filter((o) => {
       if (dateFrom && o.orderDate < dateFrom) return false
       if (dateTo && o.orderDate > dateTo) return false
       return true
     })
-  }, [orders, dateFrom, dateTo])
+  }, [catalogueFilteredOrders, dateFrom, dateTo])
 
   const monthStatus = useMemo(() => countBy(thisMonthOrders.map((o) => o.orderStatus)), [thisMonthOrders])
   const todayStatus = useMemo(() => countBy(todayOrders.map((o) => o.orderStatus)), [todayOrders])
@@ -571,6 +582,19 @@ export default function ReportsPage() {
           >
             هذا الشهر
           </button>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1 text-right">قناة البيع (LOB)</label>
+            <select
+              value={catalogueFilter}
+              onChange={(e) => setCatalogueFilter(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg"
+            >
+              <option value="all">كل القنوات</option>
+              {activeCatalogues.map((c) => (
+                <option key={c.key} value={c.key}>{c.label}</option>
+              ))}
+            </select>
+          </div>
           <div className="text-sm text-gray-600">عدد الطلبات في النطاق: {rangeOrders.length}</div>
         </div>
       </section>

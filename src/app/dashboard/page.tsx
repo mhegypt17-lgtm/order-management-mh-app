@@ -4,6 +4,8 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { calculateComplaintAnalytics, type ComplaintAnalyticsRecord } from '@/lib/complaintAnalytics'
 import { cairoDateString, cairoFirstDayOfMonth, addDays, formatCairoDateTime } from '@/lib/cairoTime'
 import FeedbackSummaryWidget from '@/components/FeedbackSummaryWidget'
+import { useCatalogues } from '@/lib/useCatalogues'
+import { resolveCatalogueKey } from '@/lib/catalogue'
 
 type DashboardOrder = {
   id: string
@@ -89,6 +91,10 @@ export default function DashboardPage() {
   const [dateFrom, setDateFrom] = useState(firstDayOfMonth)
   const [dateTo, setDateTo] = useState(today)
   const [viewMode, setViewMode] = useState<'simple' | 'advanced'>('simple')
+  // LOB (catalogue) filter — client-side only, over the same already-fetched
+  // /api/orders response. 'all' means no filtering (existing behavior).
+  const { catalogues, activeCatalogues } = useCatalogues()
+  const [catalogueFilter, setCatalogueFilter] = useState<string>('all')
 
   const resetDateFilter = () => {
     setDateFrom(firstDayOfMonth)
@@ -170,9 +176,10 @@ export default function DashboardPage() {
     return orders.filter((o) => {
       if (dateFrom && o.orderDate < dateFrom) return false
       if (dateTo && o.orderDate > dateTo) return false
+      if (catalogueFilter !== 'all' && resolveCatalogueKey(o.orderType, catalogues) !== catalogueFilter) return false
       return true
     })
-  }, [orders, dateFrom, dateTo])
+  }, [orders, dateFrom, dateTo, catalogueFilter, catalogues])
 
   const analytics = useMemo(() => {
     const totalOrders = filtered.length
@@ -418,7 +425,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 p-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div className="bg-white rounded-lg border border-gray-200 p-4 grid grid-cols-1 md:grid-cols-5 gap-3">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1 text-right">من تاريخ</label>
           <input
@@ -438,6 +445,19 @@ export default function DashboardPage() {
             className="w-full px-3 py-2 border border-gray-300 rounded-lg"
             dir="ltr"
           />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1 text-right">قناة البيع (LOB)</label>
+          <select
+            value={catalogueFilter}
+            onChange={(e) => setCatalogueFilter(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+          >
+            <option value="all">كل القنوات</option>
+            {activeCatalogues.map((c) => (
+              <option key={c.key} value={c.key}>{c.label}</option>
+            ))}
+          </select>
         </div>
         <div className="md:col-span-2 flex items-end text-sm text-gray-600">
           {isLoading ? '⏳ جاري التحميل...' : `عدد الطلبات في الفترة: ${analytics.totalOrders}`}
