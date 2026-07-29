@@ -115,6 +115,13 @@ export default function DeliveryZonesTable({ editable, hideDeliveryCost = false 
     const nextZone =
       filterZone !== 'all' ? Number(filterZone) : allZoneNumbers[allZoneNumbers.length - 1] || 1
     setZones((prev) => [...prev, newRow(nextZone)])
+    // The new row starts with an empty area, so an active area filter or
+    // search text would hide it from view immediately after adding it —
+    // the admin then can't fill in Area/Sub-Area, and Save fails validation
+    // on a row they can't see or edit. Clear those two filters so the new
+    // row is always visible right after clicking "+ إضافة منطقة".
+    setFilterArea('all')
+    setSearch('')
   }
 
   // Add a sub-area row pre-filled with the same (zone, area) as an existing row.
