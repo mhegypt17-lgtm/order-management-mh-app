@@ -37,6 +37,8 @@ type Product = {
   stockQuantity?: number | null
   /** 'weight' = sold per kg; basePrice/offerPrice are interpreted as price-per-kg. */
   pricingMode?: 'unit' | 'weight'
+  /** Explicit membership in the 'online' catalogue — defaults to true. */
+  onlineEnabled?: boolean
   /** Non-'online' catalogue prices, embedded by GET /api/products. */
   prices?: Record<string, CataloguePrice>
 }

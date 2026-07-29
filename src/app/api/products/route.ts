@@ -13,7 +13,7 @@ export const revalidate = 300
 // text can be long-form Arabic marketing copy). Callers that need the
 // full row (product admin page, editing a product) can omit ?columns=lite.
 const PRODUCT_LITE_COLUMNS =
-  'id, productName, productCategory, packagingType, pricingMode, basePrice, offerPrice, weightGrams, isActive, isTargeted, stockStatus, stockQuantity, createdAt, updatedAt'
+  'id, productName, productCategory, packagingType, pricingMode, basePrice, offerPrice, weightGrams, isActive, isTargeted, stockStatus, stockQuantity, onlineEnabled, createdAt, updatedAt'
 
 function generateId() {
   return `prod_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
@@ -113,13 +113,21 @@ export async function POST(request: NextRequest) {
     // null on a new product. If we let `...body` spread that in, it would
     // override the generated id with null and the insert would fail the NOT
     // NULL primary-key constraint (surfacing as "خطأ في حفظ المنتج").
-    const { id: _incomingId, ...fields } = body
+    // `catalogueKey` is UI-only (which tab was active when "Add Product" was
+    // clicked) — never persisted on the products row itself.
+    const { id: _incomingId, catalogueKey, ...fields } = body
+    const scopedCatalogueKey =
+      typeof catalogueKey === 'string' && catalogueKey.trim() ? catalogueKey.trim() : null
 
     const newProduct = {
       ...fields,
       id: generateId(),
       productCategory: fields.productCategory || 'غير محدد',
       packagingType: fields.packagingType || 'غير محدد',
+      // Creating a product while a non-'online' catalogue tab is active scopes
+      // it to that catalogue only — it must never silently appear in Online/App.
+      onlineEnabled:
+        scopedCatalogueKey && scopedCatalogueKey !== ONLINE_CATALOGUE_KEY ? false : true,
     }
 
     const { data: inserted, error } = await supabase
@@ -140,6 +148,24 @@ export async function POST(request: NextRequest) {
     // Seed the 'online' catalogue row so this product behaves consistently
     // with every other catalogue-aware view (admin/branch tabs, order form).
     await mirrorOnlineCataloguePrice(created)
+
+    // Scoped creation (e.g. added while the B2B tab was active): also seed a
+    // product_prices row for THAT catalogue so it actually appears there —
+    // membership for non-'online' catalogues is the presence of this row.
+    if (scopedCatalogueKey && scopedCatalogueKey !== ONLINE_CATALOGUE_KEY) {
+      await supabase.from('product_prices').upsert(
+        {
+          productId: created.id,
+          catalogueKey: scopedCatalogueKey,
+          basePrice: created.basePrice ?? null,
+          offerPrice: created.offerPrice ?? null,
+          stockStatus: created.stockStatus || 'available',
+          stockQuantity: created.stockQuantity ?? null,
+          updatedAt: new Date().toISOString(),
+        },
+        { onConflict: 'productId,catalogueKey' },
+      )
+    }
 
     return NextResponse.json(created, { status: 201 })
   } catch (error) {

@@ -13,6 +13,7 @@ import {
   catalogueOfferPrice,
   catalogueStockStatus,
   catalogueStockQuantity,
+  isCatalogueMember,
 } from '@/lib/catalogue'
 
 type StockStatus = 'available' | 'low' | 'out'
@@ -39,6 +40,8 @@ type Product = {
   stockUpdatedAt?: string | null
   stockUpdatedBy?: string | null
   pricingMode?: 'unit' | 'weight'
+  /** Explicit membership in the 'online' catalogue — defaults to true. */
+  onlineEnabled?: boolean
   /** Non-'online' catalogue prices/stock, embedded by GET /api/products. */
   prices?: Record<string, CataloguePrice>
 }
@@ -92,16 +95,19 @@ export default function BranchProductsPage() {
 
   // Products re-priced/re-stocked for the currently active catalogue tab —
   // every filter/sort/count below reads from this so switching tabs needs
-  // zero extra network requests.
+  // zero extra network requests. Products that aren't members of this
+  // catalogue at all (different LOB assortment) are dropped entirely.
   const displayProducts = useMemo<Product[]>(
     () =>
-      products.map((p) => ({
-        ...p,
-        basePrice: catalogueBasePrice(p, activeCatalogue) ?? 0,
-        offerPrice: catalogueOfferPrice(p, activeCatalogue),
-        stockStatus: catalogueStockStatus(p, activeCatalogue),
-        stockQuantity: catalogueStockQuantity(p, activeCatalogue),
-      })),
+      products
+        .filter((p) => isCatalogueMember(p, activeCatalogue))
+        .map((p) => ({
+          ...p,
+          basePrice: catalogueBasePrice(p, activeCatalogue) ?? 0,
+          offerPrice: catalogueOfferPrice(p, activeCatalogue),
+          stockStatus: catalogueStockStatus(p, activeCatalogue),
+          stockQuantity: catalogueStockQuantity(p, activeCatalogue),
+        })),
     [products, activeCatalogue],
   )
 

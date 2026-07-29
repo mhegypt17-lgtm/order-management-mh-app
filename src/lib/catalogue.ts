@@ -41,7 +41,13 @@ export interface CataloguedProduct {
   offerPrice?: number | null
   stockStatus?: StockStatus
   stockQuantity?: number | null
-  /** Non-'online' catalogues only — 'online' always reads the columns above. */
+  /** Explicit membership in the 'online' catalogue. Defaults to true (every
+   * pre-existing product was already sold online) — set false to hide a
+   * product from Online/App without touching its price/stock data. */
+  onlineEnabled?: boolean
+  /** Non-'online' catalogues only — 'online' always reads the columns above.
+   * A product is a MEMBER of a non-'online' catalogue if and only if it has
+   * a key here — presence, not price, is what defines membership. */
   prices?: Record<string, CataloguePrice>
 }
 
@@ -66,36 +72,38 @@ export function resolveCatalogueKey(
 
 export function catalogueBasePrice(p: CataloguedProduct, key: string): number | null {
   if (key === ONLINE_CATALOGUE_KEY) return num(p.basePrice)
-  // No explicit row for this catalogue yet — inherit the online price so a
-  // brand-new catalogue isn't empty until an admin customises it per product.
-  const row = p.prices?.[key]
-  if (!row) return num(p.basePrice)
-  return num(row.basePrice)
+  return num(p.prices?.[key]?.basePrice)
 }
 
 export function catalogueOfferPrice(p: CataloguedProduct, key: string): number | null {
   if (key === ONLINE_CATALOGUE_KEY) return num(p.offerPrice)
-  const row = p.prices?.[key]
-  if (!row) return num(p.offerPrice)
-  return num(row.offerPrice)
+  return num(p.prices?.[key]?.offerPrice)
 }
 
 export function catalogueStockStatus(p: CataloguedProduct, key: string): StockStatus {
   if (key === ONLINE_CATALOGUE_KEY) return p.stockStatus || 'available'
-  const row = p.prices?.[key]
-  if (!row) return p.stockStatus || 'available'
-  return row.stockStatus || 'available'
+  return p.prices?.[key]?.stockStatus || 'available'
 }
 
 export function catalogueStockQuantity(p: CataloguedProduct, key: string): number | null {
   if (key === ONLINE_CATALOGUE_KEY) return p.stockQuantity ?? null
-  const row = p.prices?.[key]
-  if (!row) return p.stockQuantity ?? null
-  return row.stockQuantity ?? null
+  return p.prices?.[key]?.stockQuantity ?? null
 }
 
-/** A product is offered in a catalogue when it has a positive base price there. */
+/** Is this product a member of this catalogue at all — independent of price?
+ * 'online' membership is the explicit `onlineEnabled` flag (defaults to true).
+ * Any other catalogue's membership is the presence of a `product_prices` row
+ * (added/removed explicitly by an admin via the catalogue tab), NOT price
+ * inheritance — a LOB with a genuinely different assortment relies on this. */
+export function isCatalogueMember(p: CataloguedProduct, key: string): boolean {
+  if (key === ONLINE_CATALOGUE_KEY) return p.onlineEnabled !== false
+  return !!p.prices?.[key]
+}
+
+/** A product is offered in a catalogue when it's a member AND has a positive
+ * base price there. */
 export function isAvailableInCatalogue(p: CataloguedProduct, key: string): boolean {
+  if (!isCatalogueMember(p, key)) return false
   const b = catalogueBasePrice(p, key)
   return b != null && b > 0
 }

@@ -152,3 +152,46 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to update price' }, { status: 500 })
   }
 }
+
+/**
+ * DELETE /api/products/prices
+ *
+ * Removes a product's membership in a non-'online' catalogue by deleting its
+ * product_prices row entirely. Membership in a catalogue is defined by the
+ * presence of this row, so this is how an admin says "this SKU is not sold
+ * in this LOB" (distinct from setting price to 0).
+ *
+ * Body: { productId, catalogueKey, role }. 'online' membership is toggled
+ * via PUT /api/products { onlineEnabled } instead — there is no row to delete.
+ */
+export async function DELETE(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const productId: string = body?.productId
+    const catalogueKey: string = String(body?.catalogueKey || '').trim()
+    const role: string = body?.role || ''
+
+    if (role !== 'admin') {
+      return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+    }
+    if (!productId) return NextResponse.json({ error: 'productId is required' }, { status: 400 })
+    if (!catalogueKey || catalogueKey === ONLINE_CATALOGUE_KEY) {
+      return NextResponse.json({ error: 'invalid catalogueKey' }, { status: 400 })
+    }
+
+    const { error } = await supabase
+      .from('product_prices')
+      .delete()
+      .eq('productId', productId)
+      .eq('catalogueKey', catalogueKey)
+
+    if (error) {
+      return NextResponse.json({ error: error.message || 'delete failed' }, { status: 500 })
+    }
+
+    return NextResponse.json({ ok: true }, { status: 200 })
+  } catch (error) {
+    console.error('[products/prices] DELETE failed', error)
+    return NextResponse.json({ error: 'Failed to remove catalogue membership' }, { status: 500 })
+  }
+}

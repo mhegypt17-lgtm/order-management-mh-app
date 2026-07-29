@@ -47,3 +47,32 @@ on conflict ("productId", "catalogueKey") do nothing;
 -- order_settings — same pattern already used for `retention` / `agentNotice`.
 alter table public.order_settings
   add column if not exists "catalogues" jsonb;
+
+-- Explicit catalogue membership -----------------------------------------
+-- Two LOBs can have genuinely different assortments (some SKUs shared,
+-- some Instashop/B2B-only, some Online-only). Membership must be explicit,
+-- not implied by price:
+--   - 'online' membership = this new boolean flag (defaults to true so
+--     every existing product keeps behaving exactly as it does today).
+--   - Any other catalogue's membership = the presence of a `product_prices`
+--     row for that (productId, catalogueKey) — no row means "not sold in
+--     that catalogue at all", full stop.
+alter table public.products
+  add column if not exists "onlineEnabled" boolean not null default true;
+
+-- One-time backfill: give every existing product a starting row in every
+-- catalogue that is active today, copied from its current online price/
+-- stock. This satisfies "existing products start out available everywhere"
+-- — admins then remove/adjust per catalogue as assortments diverge.
+-- Re-run (or add more INSERT blocks) if you add further catalogue keys.
+insert into public.product_prices
+  ("productId", "catalogueKey", "basePrice", "offerPrice", "stockStatus", "stockQuantity", "updatedAt")
+select id, 'instashop', "basePrice", "offerPrice", coalesce("stockStatus", 'available'), "stockQuantity", now()
+from public.products
+on conflict ("productId", "catalogueKey") do nothing;
+
+insert into public.product_prices
+  ("productId", "catalogueKey", "basePrice", "offerPrice", "stockStatus", "stockQuantity", "updatedAt")
+select id, 'b2b', "basePrice", "offerPrice", coalesce("stockStatus", 'available'), "stockQuantity", now()
+from public.products
+on conflict ("productId", "catalogueKey") do nothing;

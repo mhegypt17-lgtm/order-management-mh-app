@@ -1,0 +1,43 @@
+Supbase new account
+sherif20.mohamed gmail
+Sheep2017!@#
+
+db pwd
+Sheep2017!@#!@
+
+
+
+Updated todo list
+
+Understood. Fresh account is actually the cleanest cut — no legacy meter, no restricted banner, no old data to keep alive as a fallback. All the fixes we shipped this week (windowing, caching, column allowlists, photo stripping, view+indexes, Frankfurt region) go live on day one instead of retroactively.
+
+## Fresh account — clean order
+
+1. **New Supabase account** (personal Gmail is fine) → new org → free tier
+2. **New project**:
+   - Name: `order-management-mh` (or whatever)
+   - Region: **Central EU (Frankfurt)** ← same as Vercel now
+   - Enable Data API ✅
+   - Automatically expose new tables ✅
+   - Automatic RLS ❌ (leave off — app has no policies)
+3. **Copy the new URL + anon key** from Project Settings → API. Paste them into Notepad — you'll need them 3 times (local `.env.local`, Vercel Production, Vercel Preview).
+4. **SQL Editor — run in this order** (each is idempotent, safe to re-run):
+   1. data/00-base-schema.sql — creates all 17 tables
+   2. data/hot-query-indexes.sql — indexes on hot columns
+   3. data/orders-dashboard-v1-view.sql — the pre-joined view
+5. **Import 12 CSVs from `TABLE BACKUP/`** via Table Editor → Import data → in this **exact order** (FK-safe, even though we have no FKs, this keeps the app happy):
+   ```
+   product_categories → products → customers → customer_addresses →
+   delivery_zones → order_settings → discount_codes → orders →
+   order_items → order_delivery → order_feedback → edit_history
+   ```
+   Note: your file is `products_rows (1).csv` — just pick that one for `products`.
+6. **Enable Realtime** — Database → Replication → toggle ON for: `orders`, `tasks`, `complaints`, `chat_messages`, `daily_briefings`
+7. **Swap credentials in 3 places**:
+   - Local: .env.local — update `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - Vercel → Settings → Environment Variables — replace both vars for **Production**
+   - Same page — also tick **Preview** scope so preview builds don't break again
+8. **Test locally**: `npm run dev` → verify dashboard loads, orders show, notifications work
+9. **Redeploy Vercel** (Deployments → ⋯ → Redeploy on latest)
+
+Once you have the new project created and the URL + key, come back and paste them (or just tell me you're at step 4) — I'll walk you through each SQL run and CSV import one at a time so nothing gets skipped.

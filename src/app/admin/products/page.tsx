@@ -13,6 +13,7 @@ import {
   catalogueOfferPrice,
   catalogueStockStatus,
   catalogueStockQuantity,
+  isCatalogueMember,
 } from '@/lib/catalogue'
 
 export interface Product {
@@ -36,6 +37,8 @@ export interface Product {
   pricingMode?: 'unit' | 'weight'
   stockStatus?: 'available' | 'low' | 'out'
   stockQuantity?: number | null
+  /** Explicit membership in the 'online' catalogue — defaults to true. */
+  onlineEnabled?: boolean
   /** Non-'online' catalogue prices, embedded by GET /api/products. */
   prices?: Record<string, CataloguePrice>
 }
@@ -203,6 +206,11 @@ export default function ProductCatalogPage() {
         body: JSON.stringify({
           ...formData,
           id: editingId,
+          // New product created while a non-Online tab is active is scoped to
+          // that catalogue only — never leaks into Online/App by accident.
+          ...(!editingId && activeCatalogue !== ONLINE_CATALOGUE_KEY
+            ? { catalogueKey: activeCatalogue }
+            : {}),
         }),
       })
 
@@ -354,6 +362,113 @@ export default function ProductCatalogPage() {
       setProducts((prev) => prev.map((p) => (p.id === product.id ? before : p)))
       toast.error('تعذر حفظ السعر — تم التراجع')
       return false
+    }
+  }
+
+  /**
+   * Add/remove a product's membership in the active catalogue tab. This is
+   * independent of price — a LOB can have a different assortment than
+   * Online/App (some products shared, some Instashop/B2B-only, some
+   * Online-only).
+   *
+   * 'online': flips the `onlineEnabled` flag on the product itself.
+   * Any other catalogue: adding creates a product_prices row seeded from the
+   * product's current online price (a starting point to then customise);
+   * removing deletes that row entirely (per the agreed design).
+   */
+  const handleToggleMembership = async (product: Product) => {
+    const original = products.find((p) => p.id === product.id) || product
+
+    if (activeCatalogue === ONLINE_CATALOGUE_KEY) {
+      const nextEnabled = original.onlineEnabled === false
+      setProducts((prev) =>
+        prev.map((p) => (p.id === product.id ? { ...p, onlineEnabled: nextEnabled } : p)),
+      )
+      try {
+        const res = await fetch('/api/products', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...original, onlineEnabled: nextEnabled }),
+        })
+        if (!res.ok) throw new Error('Failed to update')
+        toast.success(nextEnabled ? '✅ تمت الإضافة لأونلاين / تطبيق' : '🚫 تم الإخفاء من أونلاين / تطبيق')
+      } catch (err) {
+        console.error(err)
+        setProducts((prev) =>
+          prev.map((p) => (p.id === product.id ? { ...p, onlineEnabled: original.onlineEnabled } : p)),
+        )
+        toast.error('تعذر تنفيذ العملية — تم التراجع')
+      }
+      return
+    }
+
+    const isMember = isCatalogueMember(original, activeCatalogue)
+
+    if (isMember) {
+      const prevPrices = original.prices
+      setProducts((prev) =>
+        prev.map((p) => {
+          if (p.id !== product.id) return p
+          const next = { ...p.prices }
+          delete next[activeCatalogue]
+          return { ...p, prices: next }
+        }),
+      )
+      try {
+        const res = await fetch('/api/products/prices', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ productId: product.id, catalogueKey: activeCatalogue, role: 'admin' }),
+        })
+        if (!res.ok) throw new Error('Failed to remove')
+        toast.success('🚫 تم الإزالة من هذا الكتالوج')
+      } catch (err) {
+        console.error(err)
+        setProducts((prev) => prev.map((p) => (p.id === product.id ? { ...p, prices: prevPrices } : p)))
+        toast.error('تعذر الإزالة — تم التراجع')
+      }
+      return
+    }
+
+    const seed: CataloguePrice = {
+      basePrice: original.basePrice ?? null,
+      offerPrice: original.offerPrice ?? null,
+      stockStatus: original.stockStatus || 'available',
+      stockQuantity: original.stockQuantity ?? null,
+    }
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.id === product.id ? { ...p, prices: { ...p.prices, [activeCatalogue]: seed } } : p,
+      ),
+    )
+    try {
+      const res = await fetch('/api/products/prices', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productId: product.id,
+          catalogueKey: activeCatalogue,
+          basePrice: seed.basePrice,
+          offerPrice: seed.offerPrice,
+          stockStatus: seed.stockStatus,
+          stockQuantity: seed.stockQuantity,
+          role: 'admin',
+          actor: user?.name || 'admin',
+        }),
+      })
+      if (!res.ok) throw new Error('Failed to add')
+      toast.success('➕ تمت الإضافة لهذا الكتالوج')
+    } catch (err) {
+      console.error(err)
+      setProducts((prev) =>
+        prev.map((p) => {
+          if (p.id !== product.id) return p
+          const next = { ...p.prices }
+          delete next[activeCatalogue]
+          return { ...p, prices: next }
+        }),
+      )
+      toast.error('تعذر الإضافة — تم التراجع')
     }
   }
 
@@ -627,6 +742,11 @@ export default function ProductCatalogPage() {
                 <th className="px-6 py-3 text-center text-sm font-semibold text-gray-900">
                   🎯 مستهدف
                 </th>
+                {activeCatalogues.length > 1 && (
+                  <th className="px-6 py-3 text-center text-sm font-semibold text-gray-900">
+                    الكتالوج الحالي
+                  </th>
+                )}
                 <th className="px-6 py-3 text-center text-sm font-semibold text-gray-900">
                   الإجراءات
                 </th>
@@ -749,6 +869,30 @@ export default function ProductCatalogPage() {
                       {product.isTargeted ? '🎯 مستهدف' : 'غير مستهدف'}
                     </button>
                   </td>
+                  {activeCatalogues.length > 1 && (
+                    <td className="px-6 py-4 text-center" onClick={(e) => e.stopPropagation()}>
+                      {(() => {
+                        const isMember =
+                          activeCatalogue === ONLINE_CATALOGUE_KEY
+                            ? product.onlineEnabled !== false
+                            : !!product.prices?.[activeCatalogue]
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleMembership(product)}
+                            className={`px-3 py-1 rounded-full text-xs font-semibold border transition ${
+                              isMember
+                                ? 'bg-green-50 border-green-300 text-green-700 hover:bg-red-50 hover:border-red-300 hover:text-red-700'
+                                : 'bg-gray-50 border-gray-300 text-gray-500 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700'
+                            }`}
+                            title={isMember ? 'اضغط لإزالة المنتج من هذا الكتالوج' : 'اضغط لإضافة المنتج لهذا الكتالوج'}
+                          >
+                            {isMember ? '✅ ضمن الكتالوج' : '➕ إضافة'}
+                          </button>
+                        )
+                      })()}
+                    </td>
+                  )}
                   <td className="px-6 py-4 text-sm flex items-center justify-center space-x-2 rtl:space-x-reverse">
                     <button
                       onClick={(e) => {

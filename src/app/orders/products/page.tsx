@@ -11,6 +11,7 @@ import {
   catalogueOfferPrice,
   catalogueStockStatus,
   catalogueStockQuantity,
+  isCatalogueMember,
 } from '@/lib/catalogue'
 
 type Product = {
@@ -34,6 +35,8 @@ type Product = {
   stockQuantity?: number | null
   stockUpdatedAt?: string | null
   pricingMode?: 'unit' | 'weight'
+  /** Explicit membership in the 'online' catalogue — defaults to true. */
+  onlineEnabled?: boolean
   /** Non-'online' catalogue prices/stock, embedded by GET /api/products. */
   prices?: Record<string, CataloguePrice>
 }
@@ -86,16 +89,19 @@ export default function CSProductsPage() {
   }, [products])
 
   // Products re-priced/re-stocked for the currently active catalogue tab —
-  // read-only here (no editing on the CS browse page).
+  // read-only here (no editing on the CS browse page). Products that aren't
+  // members of this catalogue (different LOB assortment) are dropped entirely.
   const displayProducts = useMemo<Product[]>(
     () =>
-      products.map((p) => ({
-        ...p,
-        basePrice: catalogueBasePrice(p, activeCatalogue) ?? 0,
-        offerPrice: catalogueOfferPrice(p, activeCatalogue),
-        stockStatus: catalogueStockStatus(p, activeCatalogue),
-        stockQuantity: catalogueStockQuantity(p, activeCatalogue),
-      })),
+      products
+        .filter((p) => isCatalogueMember(p, activeCatalogue))
+        .map((p) => ({
+          ...p,
+          basePrice: catalogueBasePrice(p, activeCatalogue) ?? 0,
+          offerPrice: catalogueOfferPrice(p, activeCatalogue),
+          stockStatus: catalogueStockStatus(p, activeCatalogue),
+          stockQuantity: catalogueStockQuantity(p, activeCatalogue),
+        })),
     [products, activeCatalogue],
   )
 
