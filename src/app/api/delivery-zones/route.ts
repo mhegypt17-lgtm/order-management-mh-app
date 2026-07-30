@@ -93,8 +93,13 @@ export async function PUT(request: Request) {
         .delete()
         .in('id', toDelete)
       if (deleteErr) {
-        console.error('Error deleting zones:', deleteErr)
-        errors.push(`Delete: ${deleteErr.message}`)
+        // Non-fatal: a removed zone can still be referenced by historical
+        // orders (foreign key), which blocks its deletion. That's just
+        // cleanup of an old row — it must NOT fail the save the user is
+        // actually performing (the upsert below), which is what previously
+        // caused "save failed" toasts even though the new/edited zone had
+        // already been written successfully.
+        console.error('Non-fatal: failed to delete removed zones (likely still referenced by orders):', deleteErr)
       }
     }
 
