@@ -93,24 +93,18 @@ export async function PUT(request: Request) {
       }
     }
 
-    for (const z of normalized) {
-      if (existingById.has(z.id)) {
-        const { error: updateErr } = await supabase
-          .from('delivery_zones')
-          .update(z)
-          .eq('id', z.id)
-        if (updateErr) {
-          console.error('Error updating zone row:', z.id, updateErr)
-          errors.push(`Update ${z.area}/${z.subArea || '-'}: ${updateErr.message}`)
-        }
-      } else {
-        const { error: insertErr } = await supabase
-          .from('delivery_zones')
-          .insert([z])
-        if (insertErr) {
-          console.error('Error inserting zone row:', z.id, insertErr)
-          errors.push(`Insert ${z.area}/${z.subArea || '-'}: ${insertErr.message}`)
-        }
+    // Upsert every row in ONE round trip instead of looping update/insert
+    // per row. With 200+ zones, the old per-row loop meant 200+ sequential
+    // awaits on every save — easily enough to blow past the serverless
+    // function's execution timeout, which is what made saves fail (not
+    // just for new rows — any save, once the table grew large enough).
+    if (normalized.length > 0) {
+      const { error: upsertErr } = await supabase
+        .from('delivery_zones')
+        .upsert(normalized, { onConflict: 'id' })
+      if (upsertErr) {
+        console.error('Error upserting zones:', upsertErr)
+        errors.push(`Upsert: ${upsertErr.message}`)
       }
     }
 
