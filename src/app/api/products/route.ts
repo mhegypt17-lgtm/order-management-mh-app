@@ -2,11 +2,16 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { ONLINE_CATALOGUE_KEY, withPricesEmbed, foldPricesEmbed } from '@/lib/catalogue'
 
-// Product catalog changes rarely (admins add/edit products occasionally). It
-// is read on nearly every order-creation and every dashboard render, so a
-// 5-minute cache dramatically reduces egress. Edits happen through POST/PUT
-// below, so freshness is bounded to <=5 minutes after an admin change.
-export const revalidate = 300
+// Product catalog changes rarely (admins add/edit products occasionally). The
+// `?columns=lite` variant is read on nearly every order-creation and every
+// dashboard render, so it gets an explicit 5-minute edge Cache-Control below
+// (applied to the outgoing response only). `dynamic = 'force-dynamic'` keeps
+// this route's OWN Supabase fetches always-fresh (no Next Data Cache layer
+// underneath) — without it, a route segment-level `revalidate` value silently
+// becomes the default cache duration for every fetch() made inside the
+// handler (including Supabase's), which caused admin saves/deletes to appear
+// to do nothing for up to 5 minutes even though the DB write succeeded.
+export const dynamic = 'force-dynamic'
 
 // Lite column set — everything the order form + product pickers need,
 // minus any heavy blob columns (image URLs may be huge base64, description
@@ -86,13 +91,20 @@ export async function GET(request: NextRequest) {
       {
         status: 200,
         // Tier 1 caching: Vercel Edge holds the response for s-maxage seconds
-        // and serves stale-while-revalidate up to swr seconds after that. All
-        // clients within the window share one cached response — zero DB egress
-        // for the repeat hits. Admin edits go through POST/PUT below (dynamic)
-        // so freshness is bounded to <= s-maxage seconds after a change.
+        // and serves stale-while-revalidate up to swr seconds after that — but
+        // ONLY for the `?columns=lite` variant (OrderForm/ComplaintsSection,
+        // hit on nearly every order-creation). That is a shared, server-side
+        // CDN cache keyed by the exact URL: it is NOT bypassed by a client
+        // sending `{ cache: 'no-store' }` (that only affects the browser's own
+        // cache), so anything reading the full (non-lite) row set — the admin
+        // products page, branch product management, reports — must always get
+        // `no-store`, otherwise a save/delete can succeed in the DB while the
+        // very next refetch still returns the pre-change cached response for
+        // up to 30 minutes (looks like "nothing happened").
         headers: {
-          'Cache-Control':
-            'public, max-age=0, s-maxage=300, stale-while-revalidate=1800',
+          'Cache-Control': isLite
+            ? 'public, max-age=0, s-maxage=300, stale-while-revalidate=1800'
+            : 'no-store',
         },
       },
     )
