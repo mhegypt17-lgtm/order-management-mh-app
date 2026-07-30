@@ -7,6 +7,11 @@ import { DeliveryZoneRecord, generateId, readDeliveryZones } from '@/lib/omsData
 // PUT/POST/DELETE handlers below are naturally non-cacheable, so it's safe to
 // let Next.js cache GET responses; the previous `force-dynamic` was overkill.
 export const revalidate = 600
+// PUT does: 1 select (ids only) + 1 delete + 1 upsert, over 200+ rows.
+// Give it real headroom above the platform's 10s default so a slightly slow
+// Supabase round trip doesn't get cut off AFTER the write already committed
+// (which is what made saves look "failed" while the data was actually saved).
+export const maxDuration = 30
 
 export async function GET() {
   try {
@@ -34,7 +39,7 @@ export async function PUT(request: Request) {
 
     const { data: dbRows, error: fetchError } = await supabase
       .from('delivery_zones')
-      .select('*')
+      .select('id, "createdAt"')
       .range(0, 99999)
 
     if (fetchError) {
@@ -115,7 +120,14 @@ export async function PUT(request: Request) {
       )
     }
 
-    const zones = await readDeliveryZones()
+    // Return the rows we just wrote directly instead of re-querying the
+    // whole table again — saves a third round trip on top of the select
+    // + upsert above, which is what mattered most for staying under the
+    // function timeout with 200+ rows.
+    const zones = [...normalized].sort((a, b) => {
+      if (a.zone !== b.zone) return a.zone - b.zone
+      return a.averageDistanceKm - b.averageDistanceKm
+    })
     return NextResponse.json({ zones }, { status: 200 })
   } catch (error: any) {
     console.error('Error in delivery-zones PUT:', error)
