@@ -249,9 +249,18 @@ export async function DELETE(request: NextRequest) {
 
     if (deleteError) {
       console.error('Error deleting product:', deleteError)
+      // Postgres foreign_key_violation — this product still has historical
+      // orders/prices referencing it. Deleting it globally would corrupt
+      // that history, so surface a clear, actionable message instead of a
+      // generic failure (same lesson as the delivery-zones FK issue).
+      const isReferenced = deleteError.code === '23503'
       return NextResponse.json(
-        { error: 'Failed to delete product' },
-        { status: 500 }
+        {
+          error: isReferenced
+            ? 'لا يمكن حذف هذا المنتج نهائياً لوجود طلبات سابقة مرتبطة به. يمكنك إلغاء تفعيله (نشط) أو إزالته من كتالوج معين بدلاً من ذلك.'
+            : 'Failed to delete product',
+        },
+        { status: isReferenced ? 409 : 500 }
       )
     }
 

@@ -199,24 +199,66 @@ export default function ProductCatalogPage() {
     }
 
     try {
-      const method = editingId ? 'PUT' : 'POST'
-      const res = await fetch('/api/products', {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...formData,
-          id: editingId,
-          // New product created while a non-Online tab is active is scoped to
-          // that catalogue only — never leaks into Online/App by accident.
-          ...(!editingId && activeCatalogue !== ONLINE_CATALOGUE_KEY
-            ? { catalogueKey: activeCatalogue }
-            : {}),
-        }),
-      })
+      if (editingId && activeCatalogue !== ONLINE_CATALOGUE_KEY) {
+        // Editing an EXISTING product from a non-Online tab: the form's
+        // price/offer fields are showing THIS catalogue's price (via the
+        // displayProducts overlay), not the legacy Online one. Splitting the
+        // save in two here is what keeps LOBs actually independent — without
+        // this, saving from the B2B tab would silently overwrite the Online
+        // price/stock columns.
+        // Shared identity fields (name/category/packaging/etc.) go to
+        // /api/products. Catalogue-scoped fields (price/offer) — and
+        // stock/prices which aren't even edited by this form but would
+        // otherwise get dragged along from the overlay — are stripped out
+        // and sent to /api/products/prices instead.
+        const { basePrice, offerPrice, stockStatus, stockQuantity, prices, id: _omit, ...identityFields } = formData
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => null)
-        throw new Error(data?.error || 'Failed to save')
+        const identityRes = await fetch('/api/products', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...identityFields, id: editingId }),
+        })
+        if (!identityRes.ok) {
+          const data = await identityRes.json().catch(() => null)
+          throw new Error(data?.error || 'Failed to save')
+        }
+
+        const priceRes = await fetch('/api/products/prices', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            productId: editingId,
+            catalogueKey: activeCatalogue,
+            basePrice,
+            offerPrice,
+            role: 'admin',
+            actor: user?.name || 'admin',
+          }),
+        })
+        if (!priceRes.ok) {
+          const data = await priceRes.json().catch(() => null)
+          throw new Error(data?.error || 'Failed to save price')
+        }
+      } else {
+        const method = editingId ? 'PUT' : 'POST'
+        const res = await fetch('/api/products', {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...formData,
+            id: editingId,
+            // New product created while a non-Online tab is active is scoped to
+            // that catalogue only — never leaks into Online/App by accident.
+            ...(!editingId && activeCatalogue !== ONLINE_CATALOGUE_KEY
+              ? { catalogueKey: activeCatalogue }
+              : {}),
+          }),
+        })
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => null)
+          throw new Error(data?.error || 'Failed to save')
+        }
       }
 
       toast.success(editingId ? '✅ تم تحديث المنتج' : '✅ تم إضافة المنتج')
@@ -229,7 +271,29 @@ export default function ProductCatalogPage() {
   }
 
   const handleDeleteProduct = async (id: string) => {
-    if (!confirm('هل أنت متأكد من حذف هذا المنتج؟')) return
+    // Deleting from a non-Online tab means "remove from THIS LOB" — it must
+    // never delete the shared product (which would also wipe it from every
+    // other catalogue, including Online/App). That's just a membership
+    // removal, same as the ➕/✅ toggle in the table.
+    if (activeCatalogue !== ONLINE_CATALOGUE_KEY) {
+      if (!confirm('إزالة هذا المنتج من هذا الكتالوج فقط؟ لن يتأثر أونلاين/تطبيق أو باقي الكتالوجات.')) return
+      try {
+        const res = await fetch('/api/products/prices', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ productId: id, catalogueKey: activeCatalogue, role: 'admin' }),
+        })
+        if (!res.ok) throw new Error('Failed to remove')
+        toast.success('🚫 تم إزالة المنتج من هذا الكتالوج')
+        fetchProducts()
+      } catch (error) {
+        toast.error('خطأ في إزالة المنتج من الكتالوج')
+        console.error(error)
+      }
+      return
+    }
+
+    if (!confirm('هل أنت متأكد من حذف هذا المنتج؟ سيتم حذفه نهائياً من كل الكتالوجات.')) return
 
     try {
       const res = await fetch('/api/products', {
@@ -238,12 +302,15 @@ export default function ProductCatalogPage() {
         body: JSON.stringify({ id }),
       })
 
-      if (!res.ok) throw new Error('Failed to delete')
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(data?.error || 'Failed to delete')
+      }
 
       toast.success('✅ تم حذف المنتج')
       fetchProducts()
     } catch (error) {
-      toast.error('خطأ في حذف المنتج')
+      toast.error(`خطأ في حذف المنتج: ${error instanceof Error ? error.message : ''}`.trim())
       console.error(error)
     }
   }
@@ -472,19 +539,23 @@ export default function ProductCatalogPage() {
     }
   }
 
-  // Products re-priced/re-stocked for the currently active catalogue tab.
-  // Every filter/sort/stat below reads from this instead of the raw
-  // `products` state, so switching tabs re-derives the whole view with zero
-  // extra network requests (the embedded `prices` map already has everything).
+  // Products actually IN the active catalogue, re-priced/re-stocked for it.
+  // Filtering by membership first is what makes each LOB tab show its own
+  // segment instead of the full 199-product list under every tab — every
+  // count/filter/stat below reads from this, so switching tabs re-derives
+  // the whole view with zero extra network requests (the embedded `prices`
+  // map already has everything).
   const displayProducts = useMemo<Product[]>(
     () =>
-      products.map((p) => ({
-        ...p,
-        basePrice: catalogueBasePrice(p, activeCatalogue) ?? 0,
-        offerPrice: catalogueOfferPrice(p, activeCatalogue),
-        stockStatus: catalogueStockStatus(p, activeCatalogue),
-        stockQuantity: catalogueStockQuantity(p, activeCatalogue),
-      })),
+      products
+        .filter((p) => isCatalogueMember(p, activeCatalogue))
+        .map((p) => ({
+          ...p,
+          basePrice: catalogueBasePrice(p, activeCatalogue) ?? 0,
+          offerPrice: catalogueOfferPrice(p, activeCatalogue),
+          stockStatus: catalogueStockStatus(p, activeCatalogue),
+          stockQuantity: catalogueStockQuantity(p, activeCatalogue),
+        })),
     [products, activeCatalogue],
   )
 
@@ -513,8 +584,14 @@ export default function ProductCatalogPage() {
     return list
   }, [displayProducts, searchTerm, showTargetedOnly, showWeightOnly, selectedCategory, stockFilter, sortBy])
 
-  const targetedCount = useMemo(() => products.filter((p) => p.isTargeted).length, [products])
-  const weightCount = useMemo(() => products.filter((p) => p.pricingMode === 'weight').length, [products])
+  // Targeted/weight counts reflect the active catalogue's segment, same as
+  // everything else derived from displayProducts.
+  const targetedCount = useMemo(() => displayProducts.filter((p) => p.isTargeted).length, [displayProducts])
+  const weightCount = useMemo(() => displayProducts.filter((p) => p.pricingMode === 'weight').length, [displayProducts])
+  // Category list stays global (every category any product could use across
+  // all LOBs) so an admin can still assign any category while adding a
+  // product to a specific catalogue — only the per-category counts below are
+  // catalogue-scoped.
   const categories = useMemo(() => {
     const cats = new Set<string>()
     products.forEach((p) => { if (p.productCategory) cats.add(p.productCategory) })
@@ -526,7 +603,7 @@ export default function ProductCatalogPage() {
     low: displayProducts.filter((p) => p.stockStatus === 'low').length,
     out: displayProducts.filter((p) => p.stockStatus === 'out').length,
   }), [displayProducts])
-  const stats = { total: products.length, active: filteredProducts.length }
+  const stats = { total: displayProducts.length, active: filteredProducts.length }
 
   return (
     <div className="space-y-6">
@@ -644,10 +721,10 @@ export default function ProductCatalogPage() {
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
-              الكل ({products.length})
+              الكل ({displayProducts.length})
             </button>
             {categories.map((cat) => {
-              const count = products.filter((p) => p.productCategory === cat).length
+              const count = displayProducts.filter((p) => p.productCategory === cat).length
               return (
                 <button
                   key={cat}
