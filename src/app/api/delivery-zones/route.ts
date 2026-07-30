@@ -4,9 +4,14 @@ import { DeliveryZoneRecord, generateId, readDeliveryZones } from '@/lib/omsData
 
 // Delivery zones change rarely (ops team edits area/cost lists occasionally)
 // but are read on every OrderForm mount + several dashboard aggregates.
-// PUT/POST/DELETE handlers below are naturally non-cacheable, so it's safe to
-// let Next.js cache GET responses; the previous `force-dynamic` was overkill.
-export const revalidate = 600
+// IMPORTANT: this file also exports PUT. `export const revalidate` without
+// `dynamic = 'force-dynamic'` lets Next.js statically prerender the whole
+// route at build time — Vercel then serves it as a static GET-only asset and
+// rejects PUT with a 405 at the edge, never even reaching this code. That was
+// the real cause of every "save failed" report. force-dynamic fixes that;
+// the manual Cache-Control header on the GET response below still gets the
+// response cached at Vercel's edge, so we don't lose the caching benefit.
+export const dynamic = 'force-dynamic'
 // PUT does: 1 select (ids only) + 1 delete + 1 upsert, over 200+ rows.
 // Give it real headroom above the platform's 10s default so a slightly slow
 // Supabase round trip doesn't get cut off AFTER the write already committed
