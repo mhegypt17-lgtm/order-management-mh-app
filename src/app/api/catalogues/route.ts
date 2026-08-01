@@ -37,9 +37,9 @@ export async function GET() {
  *
  * Body: { label: string, orderTypes: string[] }
  *
- * Creates a new catalogue AND duplicates the full 'online' price+stock list
- * (every product row) as its starting point — per the agreed design, a new
- * catalogue is never empty on day one.
+ * Creates a new catalogue. It starts empty — no products are duplicated
+ * in; an admin adds products to it explicitly (per-product "add to
+ * catalogue" or the bulk import), same as any other independent LOB.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -74,53 +74,7 @@ export async function POST(request: NextRequest) {
     ]
     await saveCatalogues(nextCatalogues)
 
-    // Duplicate every 'online' product_prices row into the new catalogue.
-    // Products with no explicit 'online' row yet (i.e. still only on the
-    // legacy products columns) are seeded straight from `products`.
-    const { data: onlineRows } = await supabase
-      .from('product_prices')
-      .select('productId,basePrice,offerPrice,stockStatus,stockQuantity')
-      .eq('catalogueKey', ONLINE_CATALOGUE_KEY)
-
-    const seededIds = new Set((onlineRows || []).map((r: any) => r.productId))
-    const { data: allProducts } = await supabase
-      .from('products')
-      .select('id,basePrice,offerPrice,stockStatus,stockQuantity')
-
-    const now = new Date().toISOString()
-    const seedRows = [
-      ...(onlineRows || []).map((r: any) => ({
-        productId: r.productId,
-        catalogueKey: key,
-        basePrice: r.basePrice ?? null,
-        offerPrice: r.offerPrice ?? null,
-        stockStatus: r.stockStatus || 'available',
-        stockQuantity: r.stockQuantity ?? null,
-        updatedAt: now,
-      })),
-      ...(allProducts || [])
-        .filter((p: any) => !seededIds.has(p.id))
-        .map((p: any) => ({
-          productId: p.id,
-          catalogueKey: key,
-          basePrice: p.basePrice ?? null,
-          offerPrice: p.offerPrice ?? null,
-          stockStatus: p.stockStatus || 'available',
-          stockQuantity: p.stockQuantity ?? null,
-          updatedAt: now,
-        })),
-    ]
-
-    if (seedRows.length > 0) {
-      const { error: seedError } = await supabase
-        .from('product_prices')
-        .upsert(seedRows, { onConflict: 'productId,catalogueKey' })
-      if (seedError) {
-        console.error('[catalogues] duplicate-from-online seed failed:', seedError.message)
-      }
-    }
-
-    return NextResponse.json({ catalogues: nextCatalogues, seeded: seedRows.length }, { status: 201 })
+    return NextResponse.json({ catalogues: nextCatalogues }, { status: 201 })
   } catch (error) {
     console.error('[catalogues] POST failed', error)
     return NextResponse.json({ error: 'Failed to create catalogue' }, { status: 500 })
