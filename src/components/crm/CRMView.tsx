@@ -178,8 +178,16 @@ const STATUS_COLORS: Record<string, string> = {
   'حجز':   'bg-blue-100 text-blue-800',
 }
 
+// `en-US` on purpose, not `ar-EG`: the Arabic locale renders both the
+// thousands separator (٬) and the decimal separator (٫) as glyphs that look
+// like a plain comma in most fonts, so "2,651.77" became visually
+// indistinguishable from "2,651,77" — looked like a totally different,
+// much larger number. Western digits/separators here keep amounts unambiguous
+// while the rest of the UI stays Arabic.
 function formatCurrency(n: number) {
-  return n.toLocaleString('ar-EG') + ' ج.م'
+  return (
+    n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ج.م'
+  )
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
