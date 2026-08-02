@@ -13,6 +13,7 @@ import {
   readOrderItems,
   readOrderDelivery,
   readOrders,
+  readOrderSettings,
   readDeliveryZones,
   readOrderItemsByOrderIds,
   readOrderDeliveryByOrderIds,
@@ -26,6 +27,7 @@ import {
   DELIVERY_COLUMNS_LIST,
   PRODUCT_COLUMNS,
 } from '@/lib/omsData'
+import { withPricesEmbed, foldPricesEmbed, resolveCatalogueKey, catalogueBasePrice, catalogueOfferPrice } from '@/lib/catalogue'
 
 // Disable Next.js fetch caching — Supabase queries here must always
 // return fresh data, otherwise a just-created order can 404 on its
@@ -66,12 +68,17 @@ function findMatchedProduct(products: any[], productNameInput?: string) {
 
 async function readProducts() {
   try {
-    // Name-matching + pricing only — skip image/description blobs.
+    // Name-matching + pricing only — skip image/description blobs. Embeds
+    // the per-catalogue product_prices rows (via withPricesEmbed/
+    // foldPricesEmbed) so catalogueBasePrice/catalogueOfferPrice can resolve
+    // the correct price for non-'online' catalogues (b2b/instashop) — this
+    // MUST mirror orders/route.ts's POST handler or new lines added while
+    // editing a non-online order silently snapshot the online price.
     const { data, error } = await supabase
       .from('products')
-      .select('id, productName, productCategory, pricingMode, basePrice, offerPrice')
+      .select(withPricesEmbed('id, productName, productCategory, pricingMode, basePrice, offerPrice'))
     if (error) return []
-    return Array.isArray(data) ? data : []
+    return Array.isArray(data) ? (data as any[]).map((p) => foldPricesEmbed(p)) : []
   } catch {
     return []
   }
@@ -558,6 +565,11 @@ export async function PUT(
     // surviving lines by productId since CS regenerates item ids on save.
     const existingForOrder = orderItems.filter((i) => i.orderId === params.id)
     const productById = new Map<string, any>((products as any[]).map((p) => [p.id, p]))
+    // Catalogue-aware pricing for brand-new lines — must mirror orders/
+    // route.ts's POST handler, otherwise a new line added while editing a
+    // non-online order (b2b/instashop) would snapshot the online price.
+    const orderSettingsForEdit = await readOrderSettings()
+    const catalogueKeyForEdit = resolveCatalogueKey(body.orderType || existing.orderType, orderSettingsForEdit.catalogues)
     const rewrittenItems: any[] = normalizedItems.map((i) => {
       const prior = existingForOrder.find((p) => p.productId === i.productId)
       // Price-snapshot preservation rule:
@@ -565,15 +577,17 @@ export async function PUT(
       //     snapshot EXACTLY — including null. We never retroactively
       //     backfill an old order with today's price on a CS re-save.
       //   • If this is a brand-new line added during the edit, capture the
-      //     current product's basePrice/offerPrice as the new snapshot.
+      //     current product's catalogue-specific base/offer price as the
+      //     new snapshot (resolved via the order's own catalogue, not the
+      //     legacy online columns).
       const isExistingLine = !!prior
       const productNow = productById.get(i.productId)
       const basePriceSnapshot = isExistingLine
         ? (prior!.basePriceSnapshot ?? null)
-        : (productNow && productNow.basePrice != null ? Number(productNow.basePrice) : null)
+        : (productNow ? catalogueBasePrice(productNow, catalogueKeyForEdit) : null)
       const offerRaw = isExistingLine
         ? (prior!.offerPriceSnapshot ?? null)
-        : (productNow && productNow.offerPrice != null ? Number(productNow.offerPrice) : null)
+        : (productNow ? catalogueOfferPrice(productNow, catalogueKeyForEdit) : null)
       const offerPriceSnapshot = offerRaw != null && offerRaw > 0 ? offerRaw : null
       return {
         id: generateId('item'),
