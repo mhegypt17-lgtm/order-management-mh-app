@@ -21,6 +21,8 @@ interface CustomerSummary {
   daysSinceLastOrder: number | null
   // Tier may be returned as Arabic legacy values or English loyalty-config names.
   tier: string
+  // True if any of the customer's orders was placed with orderType === 'B2B'.
+  isB2B: boolean
 }
 
 interface Address {
@@ -201,6 +203,7 @@ export default function CRMView({ role }: CRMViewProps) {
   const router = useRouter()
   const [customers, setCustomers] = useState<CustomerSummary[]>([])
   const [search, setSearch] = useState('')
+  const [segment, setSegment] = useState<'all' | 'b2b' | 'retail'>('all')
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [profile, setProfile] = useState<CustomerProfile | null>(null)
@@ -597,7 +600,7 @@ export default function CRMView({ role }: CRMViewProps) {
     const fetchCustomers = async () => {
       setLoading(true)
       try {
-        const res = await fetch(`/api/crm/customers?search=${encodeURIComponent(search)}`)
+        const res = await fetch(`/api/crm/customers?search=${encodeURIComponent(search)}&segment=${segment}`)
         if (!res.ok) throw new Error('Failed to load')
         const data = await res.json()
         setCustomers(data)
@@ -609,7 +612,7 @@ export default function CRMView({ role }: CRMViewProps) {
     }
     const debounce = setTimeout(fetchCustomers, 300)
     return () => clearTimeout(debounce)
-  }, [search, reloadKey])
+  }, [search, segment, reloadKey])
 
   // Load customer profile
   const loadProfile = useCallback(async (id: string) => {
@@ -667,6 +670,26 @@ export default function CRMView({ role }: CRMViewProps) {
             onChange={(e) => setSearch(e.target.value)}
             className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
           />
+          <div className="flex gap-1 mt-2">
+            {([
+              { key: 'all', label: 'الكل' },
+              { key: 'retail', label: 'أفراد' },
+              { key: 'b2b', label: 'B2B' },
+            ] as const).map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => setSegment(opt.key)}
+                className={`flex-1 text-xs font-semibold px-2 py-1.5 rounded transition-colors ${
+                  segment === opt.key
+                    ? 'bg-red-600 text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto">
           {loading ? (
@@ -681,8 +704,15 @@ export default function CRMView({ role }: CRMViewProps) {
                 className={`w-full text-right px-3 py-3 border-b border-gray-100 hover:bg-red-50 transition-colors ${selectedId === c.id ? 'bg-red-50 border-r-4 border-r-red-500' : ''}`}
               >
                 <div className="flex justify-between items-start">
-                  <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${TIER_COLORS[c.tier]}`}>
-                    {c.tier}
+                  <span className="flex items-center gap-1">
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${TIER_COLORS[c.tier]}`}>
+                      {c.tier}
+                    </span>
+                    {c.isB2B && (
+                      <span className="text-xs px-1.5 py-0.5 rounded-full font-medium bg-indigo-100 text-indigo-700">
+                        B2B
+                      </span>
+                    )}
                   </span>
                   <span className="font-semibold text-sm text-gray-900 truncate max-w-[130px]">{c.customerName}</span>
                 </div>

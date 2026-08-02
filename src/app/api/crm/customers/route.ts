@@ -13,6 +13,12 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
     const search = searchParams.get('search') || ''
+    // 'all' (default) | 'b2b' | 'retail'. A customer is considered B2B if
+    // ANY of their orders was placed with orderType === 'B2B' — derived live
+    // from the orders table (no extra column/migration needed, always in
+    // sync with reality, matches how order.orderType already drives which
+    // product-price catalogue an order uses — see src/lib/catalogue.ts).
+    const segment = (searchParams.get('segment') || 'all').toLowerCase()
 
     const customers = await readCustomers()
     const addresses = await readAddresses()
@@ -53,6 +59,7 @@ export async function GET(req: NextRequest) {
           totalRevenue: loyaltyRevenue,
         })
         const tier = tierConfig.name
+        const isB2B = custOrders.some((o) => o.orderType === 'B2B')
 
         return {
           id: c.id,
@@ -67,7 +74,13 @@ export async function GET(req: NextRequest) {
           lastOrderDate: lastOrder?.orderDate || null,
           daysSinceLastOrder,
           tier,
+          isB2B,
         }
+      })
+      .filter((c) => {
+        if (segment === 'b2b') return c.isB2B
+        if (segment === 'retail') return !c.isB2B
+        return true
       })
       .sort((a, b) => (b.lastOrderDate || '').localeCompare(a.lastOrderDate || ''))
 
