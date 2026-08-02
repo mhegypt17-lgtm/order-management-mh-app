@@ -1457,17 +1457,21 @@ export default function OrderForm({ mode, orderId }: Props) {
                 // row (unitPrice, lineTotal, subtotal) is already the price
                 // the customer committed to, so this cell must be too.
                 // Prefer the item's snapshot; only fall back to the current
-                // product's price for brand-new rows that have no productId
-                // yet (i.e. haven't been saved). NEVER invent a promo price
-                // from the current product for an existing (saved) line.
+                // product's price when there's no snapshot yet — i.e. a
+                // brand-new row just added/selected (not yet round-tripped
+                // through a save), regardless of whether productId has
+                // already been set by onProductNameChange (it's set the
+                // instant a product is picked, well before Save is clicked).
+                // NEVER invent a promo price from the current product for an
+                // existing (saved) line — that line already has a snapshot,
+                // even if the snapshot's offerPriceSnapshot is null (no promo
+                // at save time), so it correctly takes the branch above.
                 const displayBase = item.basePriceSnapshot != null
                   ? Number(item.basePriceSnapshot)
                   : Number(selectedProduct?.basePrice || 0)
                 const displayOffer = item.offerPriceSnapshot != null
                   ? Number(item.offerPriceSnapshot)
-                  : (item.productId
-                      ? null
-                      : (selectedProduct?.offerPrice != null ? Number(selectedProduct.offerPrice) : null))
+                  : (selectedProduct?.offerPrice != null ? Number(selectedProduct.offerPrice) : null)
                 const hasValidOffer =
                   displayOffer != null && displayOffer > 0 && displayBase > 0 && displayOffer < displayBase
                 const pricePerKg = isWeightMode ? Number(selectedProduct?.offerPrice ?? selectedProduct?.basePrice ?? 0) : 0
