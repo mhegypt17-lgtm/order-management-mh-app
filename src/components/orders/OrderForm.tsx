@@ -567,46 +567,6 @@ export default function OrderForm({ mode, orderId }: Props) {
     loadBase()
   }, [mode, orderId])
 
-  // Products (stock/availability) get fetched once above on mount, but CS
-  // agents routinely leave an order tab open for a long time (multitasking,
-  // breaks, phone calls). The `/api/products?columns=lite` response is also
-  // CDN-cached (up to ~35 min stale, see route.ts), so relying on a single
-  // mount-time fetch meant stock/availability could silently drift for
-  // hours — reported as "branch marked it available but CS still shows
-  // unavailable" long after the branch's change. Fix: periodically refetch
-  // ONLY the products list (never the order/customer/form data — those stay
-  // untouched to avoid clobbering in-progress edits) on an interval and
-  // whenever the tab regains focus/visibility.
-  useEffect(() => {
-    const refreshProductsOnly = async () => {
-      try {
-        const res = await fetch('/api/products?columns=lite', { cache: 'no-store' })
-        if (!res.ok) return
-        const data = await res.json()
-        const activeProducts = (data.products || []).filter((p: Product) => p.isActive)
-        setProducts(activeProducts)
-      } catch (err) {
-        console.warn('[OrderForm] background products refresh failed', err)
-      }
-    }
-
-    const intervalId = window.setInterval(refreshProductsOnly, 3 * 60 * 1000)
-
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        refreshProductsOnly()
-      }
-    }
-    document.addEventListener('visibilitychange', onVisibilityChange)
-    window.addEventListener('focus', onVisibilityChange)
-
-    return () => {
-      window.clearInterval(intervalId)
-      document.removeEventListener('visibilitychange', onVisibilityChange)
-      window.removeEventListener('focus', onVisibilityChange)
-    }
-  }, [])
-
   // Prefill from URL when launching new order from a customer profile.
   // Supports ?phone=...&name=...&customerId=...
   useEffect(() => {
@@ -1145,8 +1105,13 @@ export default function OrderForm({ mode, orderId }: Props) {
         const p = products.find((pp) => pp.id === i.productId)
         if (!p) return null
         const s = String((p.stockStatus as any) || '').toLowerCase().trim()
-        const qty = (p as any).stockQuantity
-        const isOut = s === 'out' || s === 'out_of_stock' || s === 'unavailable' || s === 'غير متاح' || (qty != null && Number(qty) === 0)
+        // Quantity is an OPTIONAL, informational-only field on the branch
+        // stock page ("عدد القطع المتاحة (اختياري)") — it must never override
+        // an explicit stockStatus. A branch marking a product "متاح" while
+        // leaving quantity at 0/blank was being silently flipped back to
+        // "غير متاح" here, which looked like a caching/sync glitch but was
+        // actually this bad override.
+        const isOut = s === 'out' || s === 'out_of_stock' || s === 'unavailable' || s === 'غير متاح'
         return isOut ? p.productName : null
       })
       .filter(Boolean) as string[]
@@ -1517,12 +1482,15 @@ export default function OrderForm({ mode, orderId }: Props) {
                 const pricePerKg = isWeightMode ? Number(selectedProduct?.offerPrice ?? selectedProduct?.basePrice ?? 0) : 0
                 const stockRaw = String((selectedProduct?.stockStatus as any) || 'available').toLowerCase().trim()
                 const stockQty = selectedProduct?.stockQuantity
+                // Quantity is an OPTIONAL, informational-only field on the
+                // branch stock page ("عدد القطع المتاحة (اختياري)") — it must
+                // never override an explicit stockStatus. Do not add a
+                // `stockQty === 0` clause here again.
                 const isOut =
                   stockRaw === 'out' ||
                   stockRaw === 'out_of_stock' ||
                   stockRaw === 'unavailable' ||
-                  stockRaw === 'غير متاح' ||
-                  (stockQty != null && Number(stockQty) === 0)
+                  stockRaw === 'غير متاح'
                 const isLow =
                   !isOut &&
                   (stockRaw === 'low' ||
