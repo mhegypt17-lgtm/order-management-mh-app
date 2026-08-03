@@ -567,6 +567,46 @@ export default function OrderForm({ mode, orderId }: Props) {
     loadBase()
   }, [mode, orderId])
 
+  // Products (stock/availability) get fetched once above on mount, but CS
+  // agents routinely leave an order tab open for a long time (multitasking,
+  // breaks, phone calls). The `/api/products?columns=lite` response is also
+  // CDN-cached (up to ~35 min stale, see route.ts), so relying on a single
+  // mount-time fetch meant stock/availability could silently drift for
+  // hours — reported as "branch marked it available but CS still shows
+  // unavailable" long after the branch's change. Fix: periodically refetch
+  // ONLY the products list (never the order/customer/form data — those stay
+  // untouched to avoid clobbering in-progress edits) on an interval and
+  // whenever the tab regains focus/visibility.
+  useEffect(() => {
+    const refreshProductsOnly = async () => {
+      try {
+        const res = await fetch('/api/products?columns=lite', { cache: 'no-store' })
+        if (!res.ok) return
+        const data = await res.json()
+        const activeProducts = (data.products || []).filter((p: Product) => p.isActive)
+        setProducts(activeProducts)
+      } catch (err) {
+        console.warn('[OrderForm] background products refresh failed', err)
+      }
+    }
+
+    const intervalId = window.setInterval(refreshProductsOnly, 3 * 60 * 1000)
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refreshProductsOnly()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    window.addEventListener('focus', onVisibilityChange)
+
+    return () => {
+      window.clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      window.removeEventListener('focus', onVisibilityChange)
+    }
+  }, [])
+
   // Prefill from URL when launching new order from a customer profile.
   // Supports ?phone=...&name=...&customerId=...
   useEffect(() => {

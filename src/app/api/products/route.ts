@@ -101,6 +101,14 @@ export async function GET(request: NextRequest) {
         // `no-store`, otherwise a save/delete can succeed in the DB while the
         // very next refetch still returns the pre-change cached response for
         // up to 30 minutes (looks like "nothing happened").
+        //
+        // Confirmed 2026-08: worst-case staleness is bounded at s-maxage +
+        // stale-while-revalidate = 300 + 1800 = 2100s = 35 minutes from the
+        // moment a given edge PoP last cached the response — NOT open-ended.
+        // After that window the edge is forced to revalidate against origin
+        // (Supabase) before serving again, so a branch stock flip always
+        // shows up on CS within ~35 minutes, worst case. Kept as-is per
+        // explicit request — do not shrink this without checking in first.
         headers: {
           'Cache-Control': isLite
             ? 'public, max-age=0, s-maxage=300, stale-while-revalidate=1800'
