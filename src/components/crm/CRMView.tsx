@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
@@ -595,12 +595,16 @@ export default function CRMView({ role }: CRMViewProps) {
     }
   }
 
-  // Load customer list
+  // Load customer list. `segment` is deliberately NOT a dependency here —
+  // the API already returns `isB2B` per customer, so filtering by segment
+  // is done client-side below (see `displayedCustomers`) instead of
+  // re-fetching the whole customers+orders list from the server on every
+  // toggle click (that read is expensive: it scans the full orders table).
   useEffect(() => {
     const fetchCustomers = async () => {
       setLoading(true)
       try {
-        const res = await fetch(`/api/crm/customers?search=${encodeURIComponent(search)}&segment=${segment}`)
+        const res = await fetch(`/api/crm/customers?search=${encodeURIComponent(search)}`)
         if (!res.ok) throw new Error('Failed to load')
         const data = await res.json()
         setCustomers(data)
@@ -612,7 +616,12 @@ export default function CRMView({ role }: CRMViewProps) {
     }
     const debounce = setTimeout(fetchCustomers, 300)
     return () => clearTimeout(debounce)
-  }, [search, segment, reloadKey])
+  }, [search, reloadKey])
+
+  const displayedCustomers = useMemo(() => {
+    if (segment === 'all') return customers
+    return customers.filter((c) => (segment === 'b2b' ? c.isB2B : !c.isB2B))
+  }, [customers, segment])
 
   // Load customer profile
   const loadProfile = useCallback(async (id: string) => {
@@ -694,10 +703,10 @@ export default function CRMView({ role }: CRMViewProps) {
         <div className="flex-1 overflow-y-auto">
           {loading ? (
             <div className="p-4 text-center text-gray-500 text-sm">⏳ جاري التحميل...</div>
-          ) : customers.length === 0 ? (
+          ) : displayedCustomers.length === 0 ? (
             <div className="p-4 text-center text-gray-500 text-sm">لا يوجد عملاء</div>
           ) : (
-            customers.map((c) => (
+            displayedCustomers.map((c) => (
               <button
                 key={c.id}
                 onClick={() => handleSelectCustomer(c.id)}
@@ -733,7 +742,7 @@ export default function CRMView({ role }: CRMViewProps) {
           )}
         </div>
         <div className="p-2 text-xs text-center text-gray-400 border-t border-gray-100">
-          {customers.length} عميل
+          {displayedCustomers.length} عميل
         </div>
       </div>
 

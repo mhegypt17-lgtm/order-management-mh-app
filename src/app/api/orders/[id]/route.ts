@@ -27,7 +27,7 @@ import {
   DELIVERY_COLUMNS_LIST,
   PRODUCT_COLUMNS,
 } from '@/lib/omsData'
-import { withPricesEmbed, foldPricesEmbed, resolveCatalogueKey, catalogueBasePrice, catalogueOfferPrice } from '@/lib/catalogue'
+import { ONLINE_CATALOGUE_KEY, resolveCatalogueKey } from '@/lib/catalogue'
 
 // Disable Next.js fetch caching — Supabase queries here must always
 // return fresh data, otherwise a just-created order can 404 on its
@@ -68,17 +68,16 @@ function findMatchedProduct(products: any[], productNameInput?: string) {
 
 async function readProducts() {
   try {
-    // Name-matching + pricing only — skip image/description blobs. Embeds
-    // the per-catalogue product_prices rows (via withPricesEmbed/
-    // foldPricesEmbed) so catalogueBasePrice/catalogueOfferPrice can resolve
-    // the correct price for non-'online' catalogues (b2b/instashop) — this
-    // MUST mirror orders/route.ts's POST handler or new lines added while
-    // editing a non-online order silently snapshot the online price.
+    // Name-matching + legacy ('online') pricing only — skip image/description
+    // blobs AND skip the product_prices embed here (that JOIN across the
+    // whole catalog is only needed for non-'online' catalogue pricing on
+    // brand-new lines, which is rare — see the targeted lookup further down
+    // in the PUT handler instead of paying this cost on every single edit).
     const { data, error } = await supabase
       .from('products')
-      .select(withPricesEmbed('id, productName, productCategory, pricingMode, basePrice, offerPrice'))
+      .select('id, productName, productCategory, pricingMode, basePrice, offerPrice')
     if (error) return []
-    return Array.isArray(data) ? (data as any[]).map((p) => foldPricesEmbed(p)) : []
+    return Array.isArray(data) ? data : []
   } catch {
     return []
   }
@@ -568,8 +567,34 @@ export async function PUT(
     // Catalogue-aware pricing for brand-new lines — must mirror orders/
     // route.ts's POST handler, otherwise a new line added while editing a
     // non-online order (b2b/instashop) would snapshot the online price.
-    const orderSettingsForEdit = await readOrderSettings()
-    const catalogueKeyForEdit = resolveCatalogueKey(body.orderType || existing.orderType, orderSettingsForEdit.catalogues)
+    // Lazy/targeted on purpose: most PUTs touch zero new lines (status,
+    // address, notes, etc.), so only pay for readOrderSettings() + a
+    // per-catalogue product_prices lookup when there's actually a brand-new
+    // line to price, and only fetch prices for those specific product IDs
+    // instead of embedding product_prices onto the whole catalog.
+    const newLineProductIds = [
+      ...new Set(
+        normalizedItems
+          .filter((i) => !existingForOrder.some((p) => p.productId === i.productId))
+          .map((i) => i.productId),
+      ),
+    ]
+    let catalogueKeyForEdit = ONLINE_CATALOGUE_KEY
+    let nonOnlinePricesById = new Map<string, { basePrice: number | null; offerPrice: number | null }>()
+    if (newLineProductIds.length > 0) {
+      const orderSettingsForEdit = await readOrderSettings()
+      catalogueKeyForEdit = resolveCatalogueKey(body.orderType || existing.orderType, orderSettingsForEdit.catalogues)
+      if (catalogueKeyForEdit !== ONLINE_CATALOGUE_KEY) {
+        const { data: priceRows } = await supabase
+          .from('product_prices')
+          .select('productId, basePrice, offerPrice')
+          .in('productId', newLineProductIds)
+          .eq('catalogueKey', catalogueKeyForEdit)
+        for (const row of priceRows || []) {
+          nonOnlinePricesById.set(row.productId, { basePrice: row.basePrice ?? null, offerPrice: row.offerPrice ?? null })
+        }
+      }
+    }
     const rewrittenItems: any[] = normalizedItems.map((i) => {
       const prior = existingForOrder.find((p) => p.productId === i.productId)
       // Price-snapshot preservation rule:
@@ -582,12 +607,17 @@ export async function PUT(
       //     legacy online columns).
       const isExistingLine = !!prior
       const productNow = productById.get(i.productId)
+      const nonOnlinePrice = nonOnlinePricesById.get(i.productId)
       const basePriceSnapshot = isExistingLine
         ? (prior!.basePriceSnapshot ?? null)
-        : (productNow ? catalogueBasePrice(productNow, catalogueKeyForEdit) : null)
+        : catalogueKeyForEdit === ONLINE_CATALOGUE_KEY
+        ? (productNow?.basePrice != null ? Number(productNow.basePrice) : null)
+        : (nonOnlinePrice?.basePrice ?? null)
       const offerRaw = isExistingLine
         ? (prior!.offerPriceSnapshot ?? null)
-        : (productNow ? catalogueOfferPrice(productNow, catalogueKeyForEdit) : null)
+        : catalogueKeyForEdit === ONLINE_CATALOGUE_KEY
+        ? (productNow?.offerPrice != null ? Number(productNow.offerPrice) : null)
+        : (nonOnlinePrice?.offerPrice ?? null)
       const offerPriceSnapshot = offerRaw != null && offerRaw > 0 ? offerRaw : null
       return {
         id: generateId('item'),
