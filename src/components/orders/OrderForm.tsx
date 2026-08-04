@@ -1234,6 +1234,14 @@ export default function OrderForm({ mode, orderId }: Props) {
     (deliveryData.deliveryStatus === 'في الطريق' || deliveryData.deliveryStatus === 'تم التوصيل') &&
     user?.role !== 'admin'
 
+  // Order date: admins can freely backdate/forward-date orders; everyone
+  // else (CS) is locked to today's date only — no forward-dated orders
+  // (until further notice). This is a UI-level gate consistent with the
+  // rest of this form's role checks (this app has no server-side role
+  // enforcement layer), so it only guards the front-end input.
+  const isAdminUser = user?.role === 'admin'
+  const todayCairoDate = cairoDateString()
+
   return (
     <>
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -1248,7 +1256,16 @@ export default function OrderForm({ mode, orderId }: Props) {
         <summary className="font-bold text-gray-900 cursor-pointer">1) بيانات الطلب</summary>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
           <FieldSelect label="نوع الطلب" value={form.orderType} onChange={(v) => updateForm('orderType', v)} options={orderTypes.includes(form.orderType) ? orderTypes : [form.orderType, ...orderTypes]} />
-          <FieldInput label="تاريخ الطلب" type="date" value={form.orderDate} onChange={(v) => updateForm('orderDate', v)} />
+          <FieldInput
+            label="تاريخ الطلب"
+            type="date"
+            value={form.orderDate}
+            onChange={(v) => updateForm('orderDate', v)}
+            disabled={!isAdminUser}
+            min={!isAdminUser ? todayCairoDate : undefined}
+            max={!isAdminUser ? todayCairoDate : undefined}
+            hint={!isAdminUser ? 'مقفل على تاريخ اليوم لخدمة العملاء — الأدمن فقط يمكنه اختيار تاريخ آخر' : undefined}
+          />
           <FieldInput label="الساعة" type="time" value={form.orderTime} onChange={(v) => updateForm('orderTime', v)} />
           <FieldSelect
             label="متلقي الطلب"
@@ -2245,12 +2262,20 @@ function FieldInput({
   onChange,
   type = 'text',
   dir = 'rtl',
+  disabled = false,
+  min,
+  max,
+  hint,
 }: {
   label: string
   value: string
   onChange: (value: string) => void
   type?: string
   dir?: 'rtl' | 'ltr'
+  disabled?: boolean
+  min?: string
+  max?: string
+  hint?: string
 }) {
   return (
     <div>
@@ -2259,9 +2284,13 @@ function FieldInput({
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+        disabled={disabled}
+        min={min}
+        max={max}
+        className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 ${disabled ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
         dir={dir}
       />
+      {hint && <p className="text-xs text-gray-500 mt-1 text-right">{hint}</p>}
     </div>
   )
 }
