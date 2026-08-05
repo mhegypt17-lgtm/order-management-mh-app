@@ -5,6 +5,7 @@ import {
   readOrderItemsByOrderIds,
   readOrderSettings,
   refreshOrderItemPriceSnapshots,
+  computeOrderTotals,
 } from '@/lib/omsData'
 import { DEFAULT_CATALOGUES } from '@/lib/catalogue'
 
@@ -20,7 +21,7 @@ export async function POST(
   try {
     const { data: orderRow, error: orderError } = await supabase
       .from('orders')
-      .select('id, orderType, orderStatus')
+      .select('id, orderType, orderStatus, deliveryFee, discountAmount, walletUsed')
       .eq('id', params.id)
       .maybeSingle()
 
@@ -41,6 +42,10 @@ export async function POST(
       itemRows.map((i) => ({
         id: i.id,
         productId: i.productId,
+        quantity: i.quantity,
+        weightGrams: i.weightGrams,
+        unitPrice: i.unitPrice,
+        lineTotal: (i as any).lineTotal,
         basePriceSnapshot: (i as any).basePriceSnapshot,
         offerPriceSnapshot: (i as any).offerPriceSnapshot,
       })),
@@ -48,9 +53,21 @@ export async function POST(
       orderSettings.catalogues || DEFAULT_CATALOGUES,
     )
 
-    return NextResponse.json({ items: refreshed }, { status: 200 })
+    const totals = computeOrderTotals(
+      refreshed.map((i) => (i as any).lineTotal),
+      (orderRow as any).deliveryFee,
+      (orderRow as any).discountAmount,
+      (orderRow as any).walletUsed,
+    )
+    await supabase
+      .from('orders')
+      .update({ subtotal: totals.subtotal, orderTotal: totals.orderTotal, netTotal: totals.netTotal })
+      .eq('id', params.id)
+
+    return NextResponse.json({ items: refreshed, ...totals }, { status: 200 })
   } catch (err) {
     console.error('[refresh-prices] failed', err)
     return NextResponse.json({ error: 'Failed to refresh prices' }, { status: 500 })
   }
 }
+

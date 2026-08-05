@@ -773,21 +773,36 @@ export default function OrderForm({ mode, orderId }: Props) {
         toast.error(data?.error || 'فشل تحديث الأسعار')
         return
       }
-      const refreshedByProductId = new Map<string, { basePriceSnapshot: number | null; offerPriceSnapshot: number | null }>(
+      const refreshedByProductId = new Map<
+        string,
+        { basePriceSnapshot: number | null; offerPriceSnapshot: number | null; unitPrice: number | null }
+      >(
         (Array.isArray(data.items) ? data.items : []).map((i: any) => [
           i.productId,
-          { basePriceSnapshot: i.basePriceSnapshot ?? null, offerPriceSnapshot: i.offerPriceSnapshot ?? null },
+          {
+            basePriceSnapshot: i.basePriceSnapshot ?? null,
+            offerPriceSnapshot: i.offerPriceSnapshot ?? null,
+            unitPrice: i.unitPrice ?? null,
+          },
         ]),
       )
       setItems((prev) =>
         prev.map((it) => {
           const fresh = refreshedByProductId.get(it.productId)
-          return fresh
-            ? { ...it, basePriceSnapshot: fresh.basePriceSnapshot, offerPriceSnapshot: fresh.offerPriceSnapshot }
-            : it
+          if (!fresh) return it
+          return {
+            ...it,
+            basePriceSnapshot: fresh.basePriceSnapshot,
+            offerPriceSnapshot: fresh.offerPriceSnapshot,
+            // The server recomputes unitPrice from the refreshed base/offer
+            // (weight-aware) — apply it directly so subtotal/orderTotal/
+            // netTotal (all derived live from items[].unitPrice) update
+            // immediately, matching the newly-persisted order totals.
+            unitPrice: fresh.unitPrice != null ? fresh.unitPrice : it.unitPrice,
+          }
         }),
       )
-      toast.success('تم تحديث الأسعار')
+      toast.success('تم تحديث الأسعار والإجمالي')
     } catch {
       toast.error('فشل تحديث الأسعار')
     } finally {

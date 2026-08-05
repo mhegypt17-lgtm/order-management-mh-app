@@ -935,6 +935,10 @@ export async function readProductsByIds(
 export interface RefreshableOrderItem {
   id: string
   productId: string
+  quantity: number
+  weightGrams: number
+  unitPrice?: number | null
+  lineTotal?: number | null
   basePriceSnapshot?: number | null
   offerPriceSnapshot?: number | null
 }
@@ -948,18 +952,25 @@ export function isDueForPriceRefresh(orderStatus: string, scheduledDate: string 
 }
 
 /**
- * Recompute + persist basePriceSnapshot/offerPriceSnapshot for a reserved
- * order's line items using CURRENT catalogue prices — scoped strictly to
- * THIS order's own product ids (never a catalogue-wide scan). Catalogue is
- * re-resolved from the order's CURRENT orderType, so a rescheduled/edited
- * order re-prices against the right LOB. Used by both the automatic
- * past-scheduledDate check (order detail GETs) and the manual "تحديث
- * الأسعار" button.
+ * Recompute + persist basePriceSnapshot/offerPriceSnapshot AND the derived
+ * unitPrice/lineTotal for a reserved order's line items using CURRENT
+ * catalogue prices — scoped strictly to THIS order's own product ids (never
+ * a catalogue-wide scan). Catalogue is re-resolved from the order's CURRENT
+ * orderType, so a rescheduled/edited order re-prices against the right LOB.
+ * Used by both the automatic past-scheduledDate check (order detail GETs)
+ * and the manual "تحديث الأسعار" button.
  *
- * A product that no longer exists (deleted) keeps its prior snapshot
- * untouched — we never null out a price the branch/customer already agreed
- * to just because the catalogue lookup came back empty. Only rows whose
- * snapshot actually changed are written.
+ * unitPrice/lineTotal MUST move together with the snapshot — they drive the
+ * order's subtotal/total, and leaving them frozen while only the "السعر"/
+ * "سعر البرومو" display columns update was the original bug this fixes.
+ * Weight-priced products keep unitPrice = effective price-per-kg × the
+ * item's existing weightGrams (mirrors the client's WeightKgInput math);
+ * unit-priced products just take the effective per-unit price directly.
+ *
+ * A product that no longer exists (deleted) keeps its prior snapshot AND
+ * prior unitPrice/lineTotal untouched — we never null out or reprice a line
+ * the branch/customer already agreed to just because the catalogue lookup
+ * came back empty. Only rows whose values actually changed are written.
  */
 export async function refreshOrderItemPriceSnapshots(
   orderItemsForOrder: RefreshableOrderItem[],
@@ -990,10 +1001,16 @@ export async function refreshOrderItemPriceSnapshots(
     }
   }
 
-  const writes: Array<{ id: string; basePriceSnapshot: number | null; offerPriceSnapshot: number | null }> = []
+  const writes: Array<{
+    id: string
+    basePriceSnapshot: number | null
+    offerPriceSnapshot: number | null
+    unitPrice: number
+    lineTotal: number
+  }> = []
   const refreshed = orderItemsForOrder.map((item) => {
     const product = productById.get(item.productId)
-    // Deleted/missing product — keep the last known snapshot.
+    // Deleted/missing product — keep the last known snapshot + price.
     if (!product) return item
 
     const nextBase = catalogueKey === ONLINE_CATALOGUE_KEY
@@ -1008,11 +1025,21 @@ export async function refreshOrderItemPriceSnapshots(
       : (nonOnlinePricesById.get(item.productId)?.offerPrice ?? null)
     const nextOffer = offerRaw != null && offerRaw > 0 ? offerRaw : null
 
-    if (nextBase === (item.basePriceSnapshot ?? null) && nextOffer === (item.offerPriceSnapshot ?? null)) {
-      return item
-    }
-    writes.push({ id: item.id, basePriceSnapshot: nextBase, offerPriceSnapshot: nextOffer })
-    return { ...item, basePriceSnapshot: nextBase, offerPriceSnapshot: nextOffer }
+    const effectivePrice = nextOffer != null && nextOffer > 0 && nextOffer < nextBase ? nextOffer : nextBase
+    const isWeightMode = product.pricingMode === 'weight'
+    const nextUnitPrice = isWeightMode
+      ? Math.round(effectivePrice * ((Number(item.weightGrams) || 0) / 1000) * 100) / 100
+      : effectivePrice
+    const nextLineTotal = (Number(item.quantity) || 0) * nextUnitPrice
+
+    const unchanged =
+      nextBase === (item.basePriceSnapshot ?? null) &&
+      nextOffer === (item.offerPriceSnapshot ?? null) &&
+      nextUnitPrice === (Number(item.unitPrice) || 0)
+    if (unchanged) return item
+
+    writes.push({ id: item.id, basePriceSnapshot: nextBase, offerPriceSnapshot: nextOffer, unitPrice: nextUnitPrice, lineTotal: nextLineTotal })
+    return { ...item, basePriceSnapshot: nextBase, offerPriceSnapshot: nextOffer, unitPrice: nextUnitPrice, lineTotal: nextLineTotal }
   })
 
   // One small UPDATE per changed line — order_items rows per order number in
@@ -1020,11 +1047,37 @@ export async function refreshOrderItemPriceSnapshots(
   for (const w of writes) {
     await supabase
       .from('order_items')
-      .update({ basePriceSnapshot: w.basePriceSnapshot, offerPriceSnapshot: w.offerPriceSnapshot })
+      .update({
+        basePriceSnapshot: w.basePriceSnapshot,
+        offerPriceSnapshot: w.offerPriceSnapshot,
+        unitPrice: w.unitPrice,
+        lineTotal: w.lineTotal,
+      })
       .eq('id', w.id)
   }
 
   return refreshed
+}
+
+/** Recompute subtotal/orderTotal/netTotal from a set of line totals plus the
+ * order's existing deliveryFee/discountAmount/walletUsed. Does NOT
+ * re-evaluate the discount code or touch wallet balances — those stay as
+ * whatever the last explicit Save set them to; only the price-driven totals
+ * move. discountAmount is re-capped against the new orderTotal in case a
+ * price refresh brought the total below what a previously-applied voucher
+ * assumed. */
+export function computeOrderTotals(
+  lineTotals: Array<number | null | undefined>,
+  deliveryFee: number,
+  discountAmount: number,
+  walletUsed: number,
+): { subtotal: number; orderTotal: number; netTotal: number } {
+  const subtotal = lineTotals.reduce((sum: number, v) => sum + (Number(v) || 0), 0)
+  const orderTotal = subtotal + (Number(deliveryFee) || 0)
+  const cappedDiscount = Math.min(Number(discountAmount) || 0, orderTotal)
+  const afterVoucher = Math.max(0, orderTotal - cappedDiscount)
+  const netTotal = Math.max(0, afterVoucher - (Number(walletUsed) || 0))
+  return { subtotal, orderTotal, netTotal }
 }
 
 // Windowed orders fetch — applies the column allowlist + optional date filter.

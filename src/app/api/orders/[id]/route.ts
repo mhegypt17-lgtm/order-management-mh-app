@@ -20,6 +20,7 @@ import {
   readProductsByIds,
   isDueForPriceRefresh,
   refreshOrderItemPriceSnapshots,
+  computeOrderTotals,
   ORDER_COLUMNS,
   ORDER_COLUMNS_LIST,
   CUSTOMER_COLUMNS,
@@ -120,8 +121,9 @@ async function enrichOrder(order: OrderRecord, opts: { includePhotos: boolean } 
 
   // Reserved (حجز) orders freeze their price at reservation time but must
   // reflect the price on the day of delivery/execution. Once scheduledDate
-  // has arrived, refresh + persist the snapshot before returning — scoped to
-  // this order's own product ids only (see refreshOrderItemPriceSnapshots).
+  // has arrived, refresh + persist the snapshot (and the derived
+  // unitPrice/lineTotal + order totals) before returning — scoped to this
+  // order's own product ids only (see refreshOrderItemPriceSnapshots).
   let effectiveItemRows = itemRows as OrderItemRecord[]
   if (isDueForPriceRefresh(order.orderStatus, (order as any).scheduledDate)) {
     const orderSettingsForRefresh = await readOrderSettings()
@@ -129,12 +131,30 @@ async function enrichOrder(order: OrderRecord, opts: { includePhotos: boolean } 
       effectiveItemRows.map((i) => ({
         id: i.id,
         productId: i.productId,
+        quantity: i.quantity,
+        weightGrams: i.weightGrams,
+        unitPrice: i.unitPrice,
+        lineTotal: (i as any).lineTotal,
         basePriceSnapshot: (i as any).basePriceSnapshot,
         offerPriceSnapshot: (i as any).offerPriceSnapshot,
       })),
       order.orderType,
       orderSettingsForRefresh.catalogues || DEFAULT_CATALOGUES,
     )) as unknown as OrderItemRecord[]
+
+    const totals = computeOrderTotals(
+      effectiveItemRows.map((i) => (i as any).lineTotal),
+      (order as any).deliveryFee,
+      (order as any).discountAmount,
+      (order as any).walletUsed,
+    )
+    await supabase
+      .from('orders')
+      .update({ subtotal: totals.subtotal, orderTotal: totals.orderTotal, netTotal: totals.netTotal })
+      .eq('id', orderId)
+    ;(order as any).subtotal = totals.subtotal
+    ;(order as any).orderTotal = totals.orderTotal
+    ;(order as any).netTotal = totals.netTotal
   }
 
   // Products — only those actually referenced by this order's items, with a

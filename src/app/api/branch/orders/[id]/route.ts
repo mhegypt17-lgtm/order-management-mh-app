@@ -26,6 +26,7 @@ import {
   readProductsByIds,
   isDueForPriceRefresh,
   refreshOrderItemPriceSnapshots,
+  computeOrderTotals,
 } from '@/lib/omsData'
 import { DEFAULT_CATALOGUES } from '@/lib/catalogue'
 
@@ -107,8 +108,9 @@ async function enrich(orderId: string, opts: { includePhotos: boolean }) {
 
   // Reserved (حجز) orders freeze their price at reservation time but must
   // reflect the price on the day of delivery/execution. Once scheduledDate
-  // has arrived, refresh + persist the snapshot before returning — scoped to
-  // this order's own product ids only (see refreshOrderItemPriceSnapshots).
+  // has arrived, refresh + persist the snapshot (and the derived
+  // unitPrice/lineTotal + order totals) before returning — scoped to this
+  // order's own product ids only (see refreshOrderItemPriceSnapshots).
   let effectiveItemRows = itemRows as OrderItemRecord[]
   if (isDueForPriceRefresh(order.orderStatus, order.scheduledDate)) {
     const orderSettingsForRefresh = await readOrderSettings()
@@ -116,12 +118,30 @@ async function enrich(orderId: string, opts: { includePhotos: boolean }) {
       effectiveItemRows.map((i) => ({
         id: i.id,
         productId: i.productId,
+        quantity: i.quantity,
+        weightGrams: i.weightGrams,
+        unitPrice: i.unitPrice,
+        lineTotal: (i as any).lineTotal,
         basePriceSnapshot: (i as any).basePriceSnapshot,
         offerPriceSnapshot: (i as any).offerPriceSnapshot,
       })),
       order.orderType,
       orderSettingsForRefresh.catalogues || DEFAULT_CATALOGUES,
     )) as unknown as OrderItemRecord[]
+
+    const totals = computeOrderTotals(
+      effectiveItemRows.map((i) => (i as any).lineTotal),
+      order.deliveryFee,
+      order.discountAmount,
+      order.walletUsed,
+    )
+    await supabase
+      .from('orders')
+      .update({ subtotal: totals.subtotal, orderTotal: totals.orderTotal, netTotal: totals.netTotal })
+      .eq('id', orderId)
+    order.subtotal = totals.subtotal
+    order.orderTotal = totals.orderTotal
+    order.netTotal = totals.netTotal
   }
 
   // 3) Products scoped to product ids actually referenced by this order's items.
