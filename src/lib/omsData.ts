@@ -1,4 +1,12 @@
 import { supabase } from '@/lib/supabase'
+import { cairoDateString } from '@/lib/cairoTime'
+import {
+  CatalogueEntry,
+  ONLINE_CATALOGUE_KEY,
+  catalogueBasePrice,
+  catalogueOfferPrice,
+  resolveCatalogueKey,
+} from '@/lib/catalogue'
 
 export interface CustomerRecord {
   id: string
@@ -438,7 +446,11 @@ const DEFAULT_ORDER_RECEIVERS = ['رنا', 'مى', 'ميرنا', 'أمل']
 const DEFAULT_ORDER_METHODS = ['FB', 'Call', 'App', 'WhatsApp', 'B2B', 'W.S']
 const DEFAULT_ORDER_TYPES = ['B2B', 'Online', 'Instashop', 'App']
 const DEFAULT_PAYMENT_METHODS = ['Instapay', 'Cash', 'Visa', 'Credit']
-const DEFAULT_ORDER_STATUSES = ['تم', 'مؤجل', 'لاغي', 'حجز']
+// 'مؤجل' removed going forward (no longer offered as a selectable status) —
+// historical orders already set to 'مؤجل' are untouched and still render
+// fine (see orderStatus FieldSelect fallback in OrderForm.tsx + the type
+// union below, both of which still include it for that reason).
+const DEFAULT_ORDER_STATUSES = ['تم', 'لاغي', 'حجز']
 const DEFAULT_COMPLAINT_CHANNELS = ['Instashop', 'App', 'Branch', 'Breadfast']
 
 // Default catalogues: Online+App share one price/stock list; Instashop and
@@ -918,6 +930,101 @@ export async function readProductsByIds(
   columns: string = PRODUCT_COLUMNS,
 ): Promise<any[]> {
   return fetchRowsIn<any>('products', 'id', ids, columns)
+}
+
+export interface RefreshableOrderItem {
+  id: string
+  productId: string
+  basePriceSnapshot?: number | null
+  offerPriceSnapshot?: number | null
+}
+
+/** True once a حجز (reserved) order's scheduledDate has arrived (today or
+ * earlier, Cairo time) — meaning it's being executed/delivered now and its
+ * frozen price should be refreshed to reflect today, not the reservation day. */
+export function isDueForPriceRefresh(orderStatus: string, scheduledDate: string | null | undefined): boolean {
+  if (orderStatus !== 'حجز' || !scheduledDate) return false
+  return scheduledDate <= cairoDateString()
+}
+
+/**
+ * Recompute + persist basePriceSnapshot/offerPriceSnapshot for a reserved
+ * order's line items using CURRENT catalogue prices — scoped strictly to
+ * THIS order's own product ids (never a catalogue-wide scan). Catalogue is
+ * re-resolved from the order's CURRENT orderType, so a rescheduled/edited
+ * order re-prices against the right LOB. Used by both the automatic
+ * past-scheduledDate check (order detail GETs) and the manual "تحديث
+ * الأسعار" button.
+ *
+ * A product that no longer exists (deleted) keeps its prior snapshot
+ * untouched — we never null out a price the branch/customer already agreed
+ * to just because the catalogue lookup came back empty. Only rows whose
+ * snapshot actually changed are written.
+ */
+export async function refreshOrderItemPriceSnapshots(
+  orderItemsForOrder: RefreshableOrderItem[],
+  orderType: string,
+  catalogues: CatalogueEntry[],
+): Promise<RefreshableOrderItem[]> {
+  if (orderItemsForOrder.length === 0) return orderItemsForOrder
+
+  const catalogueKey = resolveCatalogueKey(orderType, catalogues)
+  const productIds = [...new Set(orderItemsForOrder.map((i) => i.productId).filter(Boolean))]
+  if (productIds.length === 0) return orderItemsForOrder
+
+  const productRows = await readProductsByIds(productIds, PRODUCT_COLUMNS)
+  const productById = new Map<string, any>(productRows.map((p) => [p.id, p]))
+
+  const nonOnlinePricesById = new Map<string, { basePrice: number | null; offerPrice: number | null }>()
+  if (catalogueKey !== ONLINE_CATALOGUE_KEY) {
+    const { data: priceRows } = await supabase
+      .from('product_prices')
+      .select('productId, basePrice, offerPrice')
+      .in('productId', productIds)
+      .eq('catalogueKey', catalogueKey)
+    for (const row of priceRows || []) {
+      nonOnlinePricesById.set((row as any).productId, {
+        basePrice: (row as any).basePrice ?? null,
+        offerPrice: (row as any).offerPrice ?? null,
+      })
+    }
+  }
+
+  const writes: Array<{ id: string; basePriceSnapshot: number | null; offerPriceSnapshot: number | null }> = []
+  const refreshed = orderItemsForOrder.map((item) => {
+    const product = productById.get(item.productId)
+    // Deleted/missing product — keep the last known snapshot.
+    if (!product) return item
+
+    const nextBase = catalogueKey === ONLINE_CATALOGUE_KEY
+      ? catalogueBasePrice(product, catalogueKey)
+      : (nonOnlinePricesById.get(item.productId)?.basePrice ?? null)
+    // Not (yet) priced for this catalogue — keep the last known snapshot
+    // rather than wiping it out.
+    if (nextBase == null) return item
+
+    const offerRaw = catalogueKey === ONLINE_CATALOGUE_KEY
+      ? catalogueOfferPrice(product, catalogueKey)
+      : (nonOnlinePricesById.get(item.productId)?.offerPrice ?? null)
+    const nextOffer = offerRaw != null && offerRaw > 0 ? offerRaw : null
+
+    if (nextBase === (item.basePriceSnapshot ?? null) && nextOffer === (item.offerPriceSnapshot ?? null)) {
+      return item
+    }
+    writes.push({ id: item.id, basePriceSnapshot: nextBase, offerPriceSnapshot: nextOffer })
+    return { ...item, basePriceSnapshot: nextBase, offerPriceSnapshot: nextOffer }
+  })
+
+  // One small UPDATE per changed line — order_items rows per order number in
+  // the single digits, never a bulk/catalogue-wide write.
+  for (const w of writes) {
+    await supabase
+      .from('order_items')
+      .update({ basePriceSnapshot: w.basePriceSnapshot, offerPriceSnapshot: w.offerPriceSnapshot })
+      .eq('id', w.id)
+  }
+
+  return refreshed
 }
 
 // Windowed orders fetch — applies the column allowlist + optional date filter.

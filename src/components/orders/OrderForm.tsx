@@ -147,7 +147,9 @@ const ORDER_RECEIVERS_FALLBACK = ['رنا', 'مى', 'ميرنا', 'أمل']
 const ORDER_METHODS_FALLBACK = ['FB', 'Call', 'App', 'WhatsApp', 'B2B', 'W.S']
 const CUSTOMER_TYPES: OrderFormModel['customerType'][] = ['جديد', 'قديم', 'عائد', 'استكمال', 'استرجاع', 'استبدال', 'تسويق', 'تعويض', 'فحص', 'تحصيل']
 const CUSTOMER_SOURCES_FALLBACK = ['Facebook', 'Instashop', 'Google', 'Breadfast', 'Friend', 'Branch', 'Family', 'Instagram', 'Play Store', 'Ad', 'GoodsMart', 'Other']
-const ORDER_STATUSES_FALLBACK = ['تم', 'مؤجل', 'لاغي', 'حجز']
+// 'مؤجل' removed going forward — historical orders already set to it still
+// display fine via the FieldSelect fallback (options={orderStatuses.includes(...) ? ... : [form.orderStatus, ...]}).
+const ORDER_STATUSES_FALLBACK = ['تم', 'لاغي', 'حجز']
 const CANCELLATION_REASONS: string[] = ['نفاد المنتج', 'عدم توفر', 'تأخير التوصيل', 'سعر مرتفع', 'موعد غير مناسب', 'Other']
 const PAYMENT_METHODS_FALLBACK = ['Instapay', 'Cash', 'Visa', 'Credit']
 
@@ -336,6 +338,7 @@ export default function OrderForm({ mode, orderId }: Props) {
   const [orderStatuses, setOrderStatuses] = useState<string[]>(ORDER_STATUSES_FALLBACK)
   const [form, setForm] = useState<OrderFormModel>(getDefaultOrderModel())
   const [items, setItems] = useState<OrderItemForm[]>([emptyItem()])
+  const [isRefreshingPrices, setIsRefreshingPrices] = useState(false)
   const [deliveryData, setDeliveryData] = useState<DeliveryData | null>(null)
   const [loadedOrderInfo, setLoadedOrderInfo] = useState<{ appOrderNo: string } | null>(null)
 
@@ -753,6 +756,44 @@ export default function OrderForm({ mode, orderId }: Props) {
   // on save, and 15-20× smaller egress on every subsequent read. Non-image
   // files (PDFs) pass through unchanged.
   const MAX_CS_ATTACHMENT_BYTES = 5 * 1024 * 1024 // 5 MB per file
+
+  // Manual "تحديث الأسعار" button — حجز orders only. Forces the same
+  // catalogue-aware price-snapshot refresh the server also runs
+  // automatically once scheduledDate arrives, so an agent/admin can check
+  // current prices early (or right after a catalogue price change) without
+  // waiting. Updates local item state in place so the price cells re-render
+  // immediately with the new snapshot.
+  const handleRefreshPrices = async () => {
+    if (!orderId) return
+    setIsRefreshingPrices(true)
+    try {
+      const res = await fetch(`/api/orders/${orderId}/refresh-prices`, { method: 'POST' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(data?.error || 'فشل تحديث الأسعار')
+        return
+      }
+      const refreshedByProductId = new Map<string, { basePriceSnapshot: number | null; offerPriceSnapshot: number | null }>(
+        (Array.isArray(data.items) ? data.items : []).map((i: any) => [
+          i.productId,
+          { basePriceSnapshot: i.basePriceSnapshot ?? null, offerPriceSnapshot: i.offerPriceSnapshot ?? null },
+        ]),
+      )
+      setItems((prev) =>
+        prev.map((it) => {
+          const fresh = refreshedByProductId.get(it.productId)
+          return fresh
+            ? { ...it, basePriceSnapshot: fresh.basePriceSnapshot, offerPriceSnapshot: fresh.offerPriceSnapshot }
+            : it
+        }),
+      )
+      toast.success('تم تحديث الأسعار')
+    } catch {
+      toast.error('فشل تحديث الأسعار')
+    } finally {
+      setIsRefreshingPrices(false)
+    }
+  }
 
   // Phase 2H — pull the actual photo bytes on demand. The initial order GET
   // returns empty arrays + counts; this fetch hydrates them so the UI can
@@ -1866,6 +1907,21 @@ export default function OrderForm({ mode, orderId }: Props) {
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
                     dir="ltr"
                   />
+                </div>
+              )}
+              {mode === 'edit' && orderId && (
+                <div className="md:col-span-2">
+                  <button
+                    type="button"
+                    disabled={isRefreshingPrices}
+                    onClick={handleRefreshPrices}
+                    className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold disabled:opacity-60"
+                  >
+                    {isRefreshingPrices ? 'جارٍ تحديث الأسعار...' : 'تحديث الأسعار لسعر اليوم'}
+                  </button>
+                  <p className="text-xs text-gray-500 mt-1">
+                    يحدّث أسعار منتجات هذا الطلب إلى السعر الحالي — يُستخدم عادة عند تنفيذ/توصيل الحجز فعليًا (يحدث تلقائيًا أيضًا عند وصول تاريخ الحجز)
+                  </p>
                 </div>
               )}
             </>

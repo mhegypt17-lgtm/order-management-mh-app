@@ -18,6 +18,8 @@ import {
   readOrderItemsByOrderIds,
   readOrderDeliveryByOrderIds,
   readProductsByIds,
+  isDueForPriceRefresh,
+  refreshOrderItemPriceSnapshots,
   ORDER_COLUMNS,
   ORDER_COLUMNS_LIST,
   CUSTOMER_COLUMNS,
@@ -27,7 +29,7 @@ import {
   DELIVERY_COLUMNS_LIST,
   PRODUCT_COLUMNS,
 } from '@/lib/omsData'
-import { ONLINE_CATALOGUE_KEY, resolveCatalogueKey } from '@/lib/catalogue'
+import { ONLINE_CATALOGUE_KEY, DEFAULT_CATALOGUES, resolveCatalogueKey } from '@/lib/catalogue'
 
 // Disable Next.js fetch caching — Supabase queries here must always
 // return fresh data, otherwise a just-created order can 404 on its
@@ -116,16 +118,35 @@ async function enrichOrder(order: OrderRecord, opts: { includePhotos: boolean } 
   const customer = (customerRes as any)?.data || null
   const address = (addressRes as any)?.data || null
 
+  // Reserved (حجز) orders freeze their price at reservation time but must
+  // reflect the price on the day of delivery/execution. Once scheduledDate
+  // has arrived, refresh + persist the snapshot before returning — scoped to
+  // this order's own product ids only (see refreshOrderItemPriceSnapshots).
+  let effectiveItemRows = itemRows as OrderItemRecord[]
+  if (isDueForPriceRefresh(order.orderStatus, (order as any).scheduledDate)) {
+    const orderSettingsForRefresh = await readOrderSettings()
+    effectiveItemRows = (await refreshOrderItemPriceSnapshots(
+      effectiveItemRows.map((i) => ({
+        id: i.id,
+        productId: i.productId,
+        basePriceSnapshot: (i as any).basePriceSnapshot,
+        offerPriceSnapshot: (i as any).offerPriceSnapshot,
+      })),
+      order.orderType,
+      orderSettingsForRefresh.catalogues || DEFAULT_CATALOGUES,
+    )) as unknown as OrderItemRecord[]
+  }
+
   // Products — only those actually referenced by this order's items, with a
   // slim column list.
-  const productIds = (itemRows as OrderItemRecord[])
+  const productIds = effectiveItemRows
     .map((i) => i.productId)
     .filter((v): v is string => Boolean(v))
   const productRows = await readProductsByIds(productIds, PRODUCT_COLUMNS)
   const productsById = new Map<string, any>()
   for (const p of productRows as any[]) productsById.set(p.id, p)
 
-  const items = (itemRows as OrderItemRecord[]).map((item) => {
+  const items = effectiveItemRows.map((item) => {
     const product = productsById.get(item.productId)
     return {
       ...item,
