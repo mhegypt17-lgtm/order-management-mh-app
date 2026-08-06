@@ -345,7 +345,11 @@ export default function CRMView({ role }: CRMViewProps) {
         toast.error(data?.error || 'تعذر إنشاء العميل')
         return
       }
-      toast.success('✅ تم إنشاء العميل')
+      if (data?.warning) {
+        toast.error(data.warning, { duration: 6000 })
+      } else {
+        toast.success('✅ تم إنشاء العميل')
+      }
       setShowAdd(false)
       resetAddForm()
       setReloadKey((k) => k + 1)
@@ -412,7 +416,11 @@ export default function CRMView({ role }: CRMViewProps) {
         toast.error(data?.error || 'تعذر حفظ التعديلات')
         return
       }
-      toast.success('✅ تم الحفظ')
+      if (data?.warning) {
+        toast.error(data.warning, { duration: 6000 })
+      } else {
+        toast.success('✅ تم الحفظ')
+      }
       setShowEdit(false)
       setReloadKey((k) => k + 1)
       loadProfile(profile.customer.id)

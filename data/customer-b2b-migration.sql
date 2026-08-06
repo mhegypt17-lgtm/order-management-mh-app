@@ -13,3 +13,10 @@ alter table public.customers
   add column if not exists "isB2B" boolean not null default false;
 
 create index if not exists customers_is_b2b_idx on public.customers ("isB2B");
+
+-- PostgREST (Supabase's API layer) caches the table schema and can keep
+-- returning "column not found in schema cache" (PGRST204) for a new column
+-- for a short while after this runs. This forces an immediate cache reload
+-- so the app doesn't silently fall back to skipping isB2B on save.
+notify pgrst, 'reload schema';
+
