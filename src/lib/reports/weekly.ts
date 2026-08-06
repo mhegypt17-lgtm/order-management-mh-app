@@ -7,7 +7,7 @@ import {
   formatCurrency,
   formatNumber,
 } from './format'
-import { ORDER_STATUS } from './daily'
+import { ORDER_STATUS, attachFirstOrderDetails, type NewCustomerDetail } from './daily'
 
 /**
  * Weekly ops digest — covers the 7 days ending "yesterday" (Cairo).
@@ -26,11 +26,16 @@ export interface WeeklyReportData {
   prevWeekEnd: string
 
   revenue: {
+    /** Total value of ALL orders placed this week (any status) — gross bookings. */
     totalSales: number
+    /** Net amount actually collected from customers on DELIVERED orders
+     *  (orderTotal minus discount/wallet, i.e. `netTotal`). */
+    revenueCollected: number
     ordersCount: number
     deliveredCount: number
     avgOrderValue: number
     salesPctChange: ReturnType<typeof pctChange>
+    revenueCollectedPctChange: ReturnType<typeof pctChange>
     ordersPctChange: ReturnType<typeof pctChange>
     aovPctChange: ReturnType<typeof pctChange>
   }
@@ -79,6 +84,9 @@ export interface WeeklyReportData {
     suspendedCount: number
     /** Top 5 buyers this week by revenue. */
     topBuyers: Array<{ customerName: string; ordersCount: number; revenue: number }>
+    /** Admin-only detail: each new customer this week, their acquisition
+     *  source (from their first order), and first-order revenue. */
+    newCustomersDetail: NewCustomerDetail[]
   }
 
   complaints: {
@@ -158,7 +166,7 @@ export async function getWeeklyReportData(
   const [
     { data: thisWeekOrders, error: thisWeekErr },
     { data: prevWeekOrders, error: prevWeekErr },
-    { count: newCustomersThis, error: newCustThisErr },
+    { data: newCustomerRowsThis, error: newCustThisErr },
     { count: newCustomersPrev, error: newCustPrevErr },
     { count: warningCount, error: warningErr },
     { count: suspendedCount, error: suspendedErr },
@@ -173,19 +181,19 @@ export async function getWeeklyReportData(
   ] = await Promise.all([
     supabase
       .from('orders')
-      .select('id,"orderStatus","orderTotal","orderDate","orderType","orderReceiver","customerId"')
+      .select('id,"orderStatus","orderTotal","netTotal","orderDate","orderType","orderReceiver","customerId"')
       .gte('orderDate', weekStart)
       .lte('orderDate', weekEnd),
 
     supabase
       .from('orders')
-      .select('id,"orderStatus","orderTotal","orderDate","orderType"')
+      .select('id,"orderStatus","orderTotal","netTotal","orderDate","orderType"')
       .gte('orderDate', prevWeekStart)
       .lte('orderDate', prevWeekEnd),
 
     supabase
       .from('customers')
-      .select('id', { count: 'exact', head: true })
+      .select('id,"customerName","createdAt"')
       .gte('createdAt', `${weekStart}T00:00:00+02:00`)
       .lte('createdAt', `${weekEnd}T23:59:59+02:00`),
 
@@ -277,23 +285,34 @@ export async function getWeeklyReportData(
   }
 
   // ─── Revenue + orders ─────────────────────────────────────
-  const totalRevenue = (thisWeekOrders ?? [])
+  // "Sales" = gross value of ALL orders placed this week, any status.
+  // "Revenue collected" = net amount actually collected (netTotal, falls
+  // back to orderTotal) — DELIVERED orders only.
+  const salesPlaced = (thisWeekOrders ?? []).reduce((s, o) => s + Number(o.orderTotal ?? 0), 0)
+  const deliveredGrossRevenue = (thisWeekOrders ?? [])
     .filter((o) => o.orderStatus === ORDER_STATUS.DELIVERED)
     .reduce((s, o) => s + Number(o.orderTotal ?? 0), 0)
+  const revenueCollected = (thisWeekOrders ?? [])
+    .filter((o) => o.orderStatus === ORDER_STATUS.DELIVERED)
+    .reduce((s, o) => s + Number((o as { netTotal?: number }).netTotal ?? o.orderTotal ?? 0), 0)
   const totalOrders = (thisWeekOrders ?? []).length
   const deliveredCount = (thisWeekOrders ?? []).filter(
     (o) => o.orderStatus === ORDER_STATUS.DELIVERED,
   ).length
-  const avgOrderValue = deliveredCount > 0 ? totalRevenue / deliveredCount : 0
+  const avgOrderValue = deliveredCount > 0 ? deliveredGrossRevenue / deliveredCount : 0
 
-  const prevRevenue = (prevWeekOrders ?? [])
+  const prevSalesPlaced = (prevWeekOrders ?? []).reduce((s, o) => s + Number(o.orderTotal ?? 0), 0)
+  const prevDeliveredGrossRevenue = (prevWeekOrders ?? [])
     .filter((o) => o.orderStatus === ORDER_STATUS.DELIVERED)
     .reduce((s, o) => s + Number(o.orderTotal ?? 0), 0)
+  const prevRevenueCollected = (prevWeekOrders ?? [])
+    .filter((o) => o.orderStatus === ORDER_STATUS.DELIVERED)
+    .reduce((s, o) => s + Number((o as { netTotal?: number }).netTotal ?? o.orderTotal ?? 0), 0)
   const prevOrders = (prevWeekOrders ?? []).length
   const prevDelivered = (prevWeekOrders ?? []).filter(
     (o) => o.orderStatus === ORDER_STATUS.DELIVERED,
   ).length
-  const prevAov = prevDelivered > 0 ? prevRevenue / prevDelivered : 0
+  const prevAov = prevDelivered > 0 ? prevDeliveredGrossRevenue / prevDelivered : 0
 
   const statuses = {
     total: totalOrders,
@@ -356,7 +375,7 @@ export async function getWeeklyReportData(
     entry.orders += 1
     if (o.orderStatus === ORDER_STATUS.DELIVERED) {
       entry.delivered += 1
-      entry.revenue += Number(o.orderTotal ?? 0)
+      entry.revenue += Number((o as { netTotal?: number }).netTotal ?? o.orderTotal ?? 0)
     }
     typeAgg.set(key, entry)
   }
@@ -364,7 +383,7 @@ export async function getWeeklyReportData(
   for (const o of prevWeekOrders ?? []) {
     if (o.orderStatus !== ORDER_STATUS.DELIVERED) continue
     const key = ((o as { orderType?: string }).orderType || '').trim() || 'غير محدد'
-    prevTypeRevenue.set(key, (prevTypeRevenue.get(key) ?? 0) + Number(o.orderTotal ?? 0))
+    prevTypeRevenue.set(key, (prevTypeRevenue.get(key) ?? 0) + Number((o as { netTotal?: number }).netTotal ?? o.orderTotal ?? 0))
   }
   const totalTypeRev = [...typeAgg.values()].reduce((s, v) => s + v.revenue, 0)
   const revenueByOrderType = [...typeAgg.entries()]
@@ -523,17 +542,21 @@ export async function getWeeklyReportData(
   const zeroSalesTotal = zeroSalesActive.length
   const zeroSalesProducts = zeroSalesActive.slice(0, 10)
 
+  const newCustomersDetail = await attachFirstOrderDetails(supabase, newCustomerRowsThis ?? [])
+
   return {
     weekStart,
     weekEnd,
     prevWeekStart,
     prevWeekEnd,
     revenue: {
-      totalSales: totalRevenue,
+      totalSales: salesPlaced,
+      revenueCollected,
       ordersCount: totalOrders,
       deliveredCount,
       avgOrderValue,
-      salesPctChange: pctChange(totalRevenue, prevRevenue),
+      salesPctChange: pctChange(salesPlaced, prevSalesPlaced),
+      revenueCollectedPctChange: pctChange(revenueCollected, prevRevenueCollected),
       ordersPctChange: pctChange(totalOrders, prevOrders),
       aovPctChange: pctChange(avgOrderValue, prevAov),
     },
@@ -542,11 +565,12 @@ export async function getWeeklyReportData(
     revenueByOrderType,
     topProducts,
     customers: {
-      newCustomers: newCustomersThis ?? 0,
-      newCustomersPctChange: pctChange(newCustomersThis ?? 0, newCustomersPrev ?? 0),
+      newCustomers: (newCustomerRowsThis ?? []).length,
+      newCustomersPctChange: pctChange((newCustomerRowsThis ?? []).length, newCustomersPrev ?? 0),
       warningCount: warningCount ?? 0,
       suspendedCount: suspendedCount ?? 0,
       topBuyers,
+      newCustomersDetail,
     },
     complaints: {
       opened: openedRows.length,

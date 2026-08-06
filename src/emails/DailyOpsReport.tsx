@@ -111,9 +111,16 @@ export default function DailyOpsReport({ data, browserUrl }: Props) {
             <Row>
               <Column>
                 <Metric
-                  label="Total Sales"
+                  label="Sales (orders placed)"
                   value={formatCurrency(revenue.totalSales)}
                   change={revenue.salesPctChange}
+                />
+              </Column>
+              <Column>
+                <Metric
+                  label="Revenue Collected"
+                  value={formatCurrency(revenue.revenueCollected)}
+                  change={revenue.revenueCollectedPctChange}
                 />
               </Column>
               <Column>
@@ -125,7 +132,7 @@ export default function DailyOpsReport({ data, browserUrl }: Props) {
               </Column>
             </Row>
             <Text style={{ ...subtleNote, marginTop: 12 }}>
-              Comparison uses same weekday last week (accounts for weekly seasonality).
+              Comparison uses same weekday last week (accounts for weekly seasonality). “Sales” = value of all orders placed regardless of status; “Revenue Collected” = net amount actually collected on delivered orders.
             </Text>
           </Section>
 
@@ -187,9 +194,28 @@ export default function DailyOpsReport({ data, browserUrl }: Props) {
           <Section style={sectionStyle}>
             <SectionHeading emoji="👥" label="Customers" />
             <Metric label="New Customers" value={formatNumber(customers.newCustomers)} />
-            <Text style={{ ...subtleNote, marginTop: 12 }}>
-              Coming soon: customer source breakdown
-            </Text>
+            {customers.newCustomersDetail.length === 0 ? (
+              <Text style={{ ...subtleNote, marginTop: 12 }}>No new customers yesterday.</Text>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 12 }}>
+                <thead>
+                  <tr>
+                    <th style={{ ...thStyle, textAlign: 'left' }}>Customer</th>
+                    <th style={{ ...thStyle, textAlign: 'left' }}>Source</th>
+                    <th style={thStyle}>1st Order Revenue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {customers.newCustomersDetail.map((c, i) => (
+                    <tr key={c.customerId} style={i % 2 === 1 ? { backgroundColor: colors.bg } : undefined}>
+                      <td style={{ ...tdStyle, textAlign: 'left', direction: 'rtl' }}>{c.customerName}</td>
+                      <td style={{ ...tdStyle, textAlign: 'left', direction: 'rtl' }}>{c.source}</td>
+                      <td style={tdStyle}>{c.firstOrderRevenue === null ? '—' : formatCurrency(c.firstOrderRevenue)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </Section>
 
           <Hr style={hrStyle} />

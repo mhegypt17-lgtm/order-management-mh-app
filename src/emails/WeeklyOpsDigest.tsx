@@ -96,7 +96,8 @@ export default function WeeklyOpsDigest({ data, browserUrl }: Props) {
                 </tr>
               </thead>
               <tbody>
-                <KpiRow label="Total Revenue" value={formatCurrency(revenue.totalSales)} change={revenue.salesPctChange} bold />
+                <KpiRow label="Total Sales (orders placed)" value={formatCurrency(revenue.totalSales)} change={revenue.salesPctChange} bold />
+                <KpiRow label="Revenue Collected" value={formatCurrency(revenue.revenueCollected)} change={revenue.revenueCollectedPctChange} bold />
                 <KpiRow label="Total Orders" value={formatNumber(revenue.ordersCount)} change={revenue.ordersPctChange} />
                 <KpiRow label="Delivered Orders" value={formatNumber(revenue.deliveredCount)} />
                 <KpiRow label="Avg Order Value" value={formatCurrency(revenue.avgOrderValue)} change={revenue.aovPctChange} />
@@ -247,6 +248,33 @@ export default function WeeklyOpsDigest({ data, browserUrl }: Props) {
                         <td style={{ ...tdStyle, textAlign: 'right', direction: 'rtl' }}>{b.customerName}</td>
                         <td style={tdStyle}>{formatNumber(b.ordersCount)}</td>
                         <td style={{ ...tdStyle, fontWeight: 600 }}>{formatCurrency(b.revenue)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
+            {customers.newCustomersDetail.length > 0 && (
+              <>
+                <Text style={{ margin: '16px 0 6px', fontSize: 13, fontWeight: 600, color: colors.text }}>
+                  New customers — date, source &amp; 1st order revenue
+                </Text>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={thStyle}>Date</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>Customer</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>Source</th>
+                      <th style={thStyle}>1st Order Revenue</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {customers.newCustomersDetail.map((c, i) => (
+                      <tr key={c.customerId} style={i % 2 === 1 ? { backgroundColor: colors.bg } : undefined}>
+                        <td style={tdStyle}>{c.createdAt.slice(0, 10)}</td>
+                        <td style={{ ...tdStyle, textAlign: 'right', direction: 'rtl' }}>{c.customerName}</td>
+                        <td style={{ ...tdStyle, textAlign: 'right', direction: 'rtl' }}>{c.source}</td>
+                        <td style={tdStyle}>{c.firstOrderRevenue === null ? '—' : formatCurrency(c.firstOrderRevenue)}</td>
                       </tr>
                     ))}
                   </tbody>

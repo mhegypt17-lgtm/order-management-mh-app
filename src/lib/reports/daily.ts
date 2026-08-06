@@ -20,6 +20,16 @@ export const ORDER_STATUS = {
   SCHEDULED: 'حجز',
 } as const
 
+export interface NewCustomerDetail {
+  customerId: string
+  customerName: string
+  createdAt: string
+  /** orders.customerSource of the customer's first-ever order, if any. */
+  source: string
+  /** orderTotal/netTotal of the customer's first-ever order, or null if they have none yet. */
+  firstOrderRevenue: number | null
+}
+
 export interface DailyReportData {
   /** Cairo YYYY-MM-DD the report covers (yesterday). */
   reportDate: string
@@ -27,9 +37,14 @@ export interface DailyReportData {
   comparisonDate: string
 
   revenue: {
+    /** Total value of ALL orders placed (any status) — gross bookings. */
     totalSales: number
+    /** Net amount actually collected from customers on DELIVERED orders
+     *  (orderTotal minus discount/wallet, i.e. `netTotal`). */
+    revenueCollected: number
     ordersCount: number
     salesPctChange: ReturnType<typeof pctChange>
+    revenueCollectedPctChange: ReturnType<typeof pctChange>
     ordersPctChange: ReturnType<typeof pctChange>
   }
 
@@ -44,6 +59,9 @@ export interface DailyReportData {
 
   customers: {
     newCustomers: number
+    /** Admin-only detail: each new customer this period, their acquisition
+     *  source (from their first order), and first-order revenue. */
+    newCustomersDetail: NewCustomerDetail[]
   }
 
   topProducts: Array<{
@@ -73,6 +91,54 @@ export interface DailyReportData {
 }
 
 /**
+ * Given rows of newly-created customers (id/customerName/createdAt), looks
+ * up each one's *first-ever* order to surface acquisition source
+ * (`orders.customerSource`) and first-order revenue. A single batched
+ * `.in('customerId', ids)` query keeps this to one extra round-trip no
+ * matter how many new customers there are (egress-friendly).
+ */
+export async function attachFirstOrderDetails(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  customerRows: Array<{ id: string; customerName?: string | null; createdAt: string }>,
+): Promise<NewCustomerDetail[]> {
+  if (customerRows.length === 0) return []
+  const ids = customerRows.map((c) => c.id)
+  const { data: firstOrders, error } = await supabase
+    .from('orders')
+    .select('"customerId","customerSource","orderTotal","netTotal","createdAt"')
+    .in('customerId', ids)
+    .order('createdAt', { ascending: true })
+  if (error) throw new Error(`Supabase query failed: ${error.message}`)
+
+  // Rows are ascending by createdAt, so the first hit per customerId is
+  // their earliest order.
+  const firstByCustomer = new Map<string, { source: string; revenue: number }>()
+  for (const o of firstOrders ?? []) {
+    const cid = (o as { customerId?: string }).customerId
+    if (!cid || firstByCustomer.has(cid)) continue
+    firstByCustomer.set(cid, {
+      source: (o as { customerSource?: string }).customerSource || 'غير محدد',
+      revenue: Number(
+        (o as { netTotal?: number }).netTotal ?? (o as { orderTotal?: number }).orderTotal ?? 0,
+      ),
+    })
+  }
+
+  return customerRows
+    .map((c) => {
+      const first = firstByCustomer.get(c.id)
+      return {
+        customerId: c.id,
+        customerName: c.customerName || '(بدون اسم)',
+        createdAt: c.createdAt,
+        source: first?.source ?? 'لا يوجد طلب بعد',
+        firstOrderRevenue: first ? first.revenue : null,
+      }
+    })
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+}
+
+/**
  * Runs the daily-report queries against Supabase and returns a shaped
  * result. This is the single source of truth for daily KPI values —
  * both the cron/email path and the /admin/reports/preview page call it.
@@ -90,7 +156,7 @@ export async function getDailyReportData(
   const [
     { data: reportOrders, error: reportOrdersErr },
     { data: comparisonOrders, error: comparisonOrdersErr },
-    { count: newCustomersCount, error: newCustomersErr },
+    { data: newCustomerRows, error: newCustomersErr },
     { count: openComplaintsCount, error: complaintsErr },
     { data: overdueOrders, error: overdueErr },
     { count: outOfStockCount, error: stockErr },
@@ -98,17 +164,17 @@ export async function getDailyReportData(
   ] = await Promise.all([
     supabase
       .from('orders')
-      .select('id,"orderStatus","orderTotal","orderDate","orderType"')
+      .select('id,"orderStatus","orderTotal","netTotal","orderDate","orderType"')
       .eq('orderDate', reportDate),
 
     supabase
       .from('orders')
-      .select('id,"orderStatus","orderTotal","orderDate"')
+      .select('id,"orderStatus","orderTotal","netTotal","orderDate"')
       .eq('orderDate', comparisonDate),
 
     supabase
       .from('customers')
-      .select('id', { count: 'exact', head: true })
+      .select('id,"customerName","createdAt"')
       .gte('createdAt', `${reportDate}T00:00:00+02:00`)
       .lte('createdAt', `${reportDate}T23:59:59+03:00`),
 
@@ -154,14 +220,31 @@ export async function getDailyReportData(
   }
 
   // ─── Revenue ────────────────────────────────────────────────
-  const yesterdayRevenue = (reportOrders ?? [])
+  // "Sales" = gross value of ALL orders placed yesterday, any status.
+  // "Revenue collected" = net amount actually collected (netTotal, falls
+  // back to orderTotal) — DELIVERED orders only.
+  const yesterdaySalesPlaced = (reportOrders ?? []).reduce(
+    (sum, o) => sum + Number(o.orderTotal ?? 0),
+    0,
+  )
+  const yesterdayRevenueCollected = (reportOrders ?? [])
     .filter((o) => o.orderStatus === ORDER_STATUS.DELIVERED)
-    .reduce((sum, o) => sum + Number(o.orderTotal ?? 0), 0)
+    .reduce(
+      (sum, o) => sum + Number((o as { netTotal?: number }).netTotal ?? o.orderTotal ?? 0),
+      0,
+    )
   const yesterdayOrders = (reportOrders ?? []).length
 
-  const lastWeekRevenue = (comparisonOrders ?? [])
+  const lastWeekSalesPlaced = (comparisonOrders ?? []).reduce(
+    (sum, o) => sum + Number(o.orderTotal ?? 0),
+    0,
+  )
+  const lastWeekRevenueCollected = (comparisonOrders ?? [])
     .filter((o) => o.orderStatus === ORDER_STATUS.DELIVERED)
-    .reduce((sum, o) => sum + Number(o.orderTotal ?? 0), 0)
+    .reduce(
+      (sum, o) => sum + Number((o as { netTotal?: number }).netTotal ?? o.orderTotal ?? 0),
+      0,
+    )
   const lastWeekOrders = (comparisonOrders ?? []).length
 
   // ─── Order status breakdown ─────────────────────────────────
@@ -246,7 +329,7 @@ export async function getDailyReportData(
     entry.count += 1
     if (o.orderStatus === ORDER_STATUS.DELIVERED) {
       entry.delivered += 1
-      entry.revenue += Number(o.orderTotal ?? 0)
+      entry.revenue += Number((o as { netTotal?: number }).netTotal ?? o.orderTotal ?? 0)
     }
     typeAgg.set(key, entry)
   }
@@ -261,18 +344,23 @@ export async function getDailyReportData(
     }))
     .sort((a, b) => b.revenue - a.revenue)
 
+  const newCustomersDetail = await attachFirstOrderDetails(supabase, newCustomerRows ?? [])
+
   return {
     reportDate,
     comparisonDate,
     revenue: {
-      totalSales: yesterdayRevenue,
+      totalSales: yesterdaySalesPlaced,
+      revenueCollected: yesterdayRevenueCollected,
       ordersCount: yesterdayOrders,
-      salesPctChange: pctChange(yesterdayRevenue, lastWeekRevenue),
+      salesPctChange: pctChange(yesterdaySalesPlaced, lastWeekSalesPlaced),
+      revenueCollectedPctChange: pctChange(yesterdayRevenueCollected, lastWeekRevenueCollected),
       ordersPctChange: pctChange(yesterdayOrders, lastWeekOrders),
     },
     orders: statuses,
     customers: {
-      newCustomers: newCustomersCount ?? 0,
+      newCustomers: (newCustomerRows ?? []).length,
+      newCustomersDetail,
     },
     topProducts,
     revenueByOrderType,
@@ -288,7 +376,8 @@ export async function getDailyReportData(
 /** Convenience formatter used by both email + preview page. */
 export function formatDailyReportSummary(d: DailyReportData): string {
   return [
-    `Revenue: ${formatCurrency(d.revenue.totalSales)} (${d.revenue.salesPctChange.text})`,
+    `Sales: ${formatCurrency(d.revenue.totalSales)} (${d.revenue.salesPctChange.text})`,
+    `Collected: ${formatCurrency(d.revenue.revenueCollected)} (${d.revenue.revenueCollectedPctChange.text})`,
     `Orders: ${formatNumber(d.orders.total)} (${d.revenue.ordersPctChange.text})`,
     `New customers: ${d.customers.newCustomers}`,
   ].join(' · ')
