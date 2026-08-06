@@ -32,6 +32,19 @@ function isWalletColumnMissing(err: any): boolean {
   return msg.includes('wallet') && (msg.includes('column') || msg.includes('schema cache'))
 }
 
+// Same idea for the manual "isB2B" flag (data/customer-b2b-migration.sql).
+// Checked BEFORE isWalletColumnMissing in the retry chain below since that
+// check matches on error code alone — requiring the column name in the
+// message here keeps the two fallbacks from misattributing each other's
+// missing column.
+function isIsB2BColumnMissing(err: any): boolean {
+  if (!err) return false
+  const code = String(err.code || '')
+  const msg = String(err.message || '').toLowerCase()
+  if (!msg.includes('isb2b')) return false
+  return code === 'PGRST204' || code === '42703' || msg.includes('column') || msg.includes('schema cache')
+}
+
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const { searchParams } = new URL(req.url)
@@ -219,12 +232,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     // Customer source (from first order)
     const customerSource = firstOrder?.customerSource || null
 
-    // B2B label — true if ANY of this customer's orders (all-time, not just
-    // the CS-visible 6-month window) was placed with orderType === 'B2B'.
-    // Derived live from order history rather than a manual admin flag so it
-    // never drifts out of sync and needs no extra column/migration — same
-    // approach used by GET /api/crm/customers (the sidebar list).
-    const isB2B = allCustOrders.some((o) => o.orderType === 'B2B')
+    // B2B label — true if the manual admin-set flag is on, OR any of this
+    // customer's orders (all-time, not just the CS-visible 6-month window)
+    // was placed with orderType === 'B2B'. The manual flag covers brand-new
+    // corporate accounts created before their first order exists; the
+    // order-derived check keeps existing customers correct automatically —
+    // same combined approach used by GET /api/crm/customers (sidebar list).
+    const isB2B = Boolean((customer as any).isB2B) || allCustOrders.some((o) => o.orderType === 'B2B')
 
     // Inactivity stage (30/60/90+ days since last order)
     let inactivityStage: 30 | 60 | 90 | null = null
@@ -404,6 +418,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       next.wallet = w
       updates.wallet = w
     }
+    if (body.isB2B !== undefined) {
+      next.isB2B = Boolean(body.isB2B)
+      updates.isB2B = next.isB2B
+    }
     // Retention controls
     if (body.doNotFollowUp !== undefined) {
       next.doNotFollowUp = Boolean(body.doNotFollowUp)
@@ -427,10 +445,22 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     updates.updatedAt = next.updatedAt
 
     let walletWarning: string | null = null
+    let isB2BWarning: string | null = null
     let { error } = await supabase
       .from('customers')
       .update(updates)
       .eq('id', params.id)
+
+    // Fallback: if the isB2B column is not yet migrated, retry without it.
+    if (error && 'isB2B' in updates && isIsB2BColumnMissing(error)) {
+      const { isB2B: _ignoredB2B, ...rest } = updates
+      const retry = await supabase
+        .from('customers')
+        .update(rest)
+        .eq('id', params.id)
+      error = retry.error
+      isB2BWarning = 'تعذر حفظ تصنيف B2B — يلزم تشغيل ملف الترحيل data/customer-b2b-migration.sql'
+    }
 
     // Fallback: if the wallet column is not yet migrated in Supabase, retry
     // without it so the rest of the edits still go through.
@@ -509,7 +539,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       }
     }
 
-    return NextResponse.json({ customer: next, warning: walletWarning || undefined })
+    return NextResponse.json({ customer: next, warning: walletWarning || isB2BWarning || undefined })
   } catch (err) {
     console.error('CRM customer update error:', err)
     return NextResponse.json({ error: 'تعذر تحديث بيانات العميل' }, { status: 500 })

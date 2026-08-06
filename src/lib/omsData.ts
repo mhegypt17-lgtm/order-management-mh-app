@@ -24,6 +24,10 @@ export interface CustomerRecord {
   // Retention controls (per-customer opt-out / snooze for auto follow-ups)
   doNotFollowUp?: boolean
   followUpSnoozeUntil?: string | null
+  // Manual B2B flag, set at creation or via the edit modal. The displayed
+  // badge is this OR'd with "any order placed with orderType === 'B2B'" —
+  // see GET /api/crm/customers and GET /api/crm/customers/[id].
+  isB2B?: boolean
 }
 
 export interface CustomerAddressRecord {

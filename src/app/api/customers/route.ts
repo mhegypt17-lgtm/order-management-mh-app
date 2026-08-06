@@ -26,6 +26,19 @@ function isWalletColumnMissing(err: any): boolean {
   return msg.includes('wallet') && (msg.includes('column') || msg.includes('schema cache'))
 }
 
+// Same idea for the manual "isB2B" flag (data/customer-b2b-migration.sql).
+// Checked BEFORE isWalletColumnMissing in the retry chain below since that
+// check matches on error code alone — requiring the column name in the
+// message here keeps the two fallbacks from misattributing each other's
+// missing column.
+function isIsB2BColumnMissing(err: any): boolean {
+  if (!err) return false
+  const code = String(err.code || '')
+  const msg = String(err.message || '').toLowerCase()
+  if (!msg.includes('isb2b')) return false
+  return code === 'PGRST204' || code === '42703' || msg.includes('column') || msg.includes('schema cache')
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
@@ -147,15 +160,17 @@ export async function POST(request: NextRequest) {
 
     const email = String(body?.email || '').trim()
     const notes = String(body?.notes || '').trim()
+    const isB2B = Boolean(body?.isB2B)
 
     const now = new Date().toISOString()
-    const newCustomer = {
+    const newCustomer: any = {
       id: generateId('cust'),
       phone,
       customerName,
       email,
       notes,
       wallet,
+      isB2B,
       createdAt: now,
       updatedAt: now,
     }
@@ -166,11 +181,13 @@ export async function POST(request: NextRequest) {
       .select()
       .single()
 
-    // Fallback: if the wallet column hasn't been migrated yet, retry without it
-    // so customer creation still succeeds. The wallet field is best-effort here.
+    // Fallback: if the isB2B or wallet columns haven't been migrated yet,
+    // retry without them so customer creation still succeeds.
     let walletWarning: string | null = null
-    if (error && isWalletColumnMissing(error)) {
-      const { wallet: _ignored, ...rest } = newCustomer as any
+    let isB2BWarning: string | null = null
+    if (error && isIsB2BColumnMissing(error) && 'isB2B' in newCustomer) {
+      const { isB2B: _ignoredB2B, ...rest } = newCustomer
+      isB2BWarning = 'تم إنشاء العميل بدون تصنيف B2B — يلزم تشغيل ملف الترحيل data/customer-b2b-migration.sql'
       const retry = await supabase
         .from('customers')
         .insert([rest])
@@ -178,7 +195,17 @@ export async function POST(request: NextRequest) {
         .single()
       data = retry.data as any
       error = retry.error as any
+    }
+    if (error && isWalletColumnMissing(error)) {
+      const { wallet: _ignored, ...rest } = newCustomer
       walletWarning = 'تم إنشاء العميل بدون رصيد المحفظة — يلزم تشغيل ملف الترحيل data/customer-wallet-migration.sql'
+      const retry = await supabase
+        .from('customers')
+        .insert([rest])
+        .select()
+        .single()
+      data = retry.data as any
+      error = retry.error as any
     }
 
     if (error) {
@@ -217,7 +244,7 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(
-      { customer: data || newCustomer, warning: walletWarning || undefined },
+      { customer: data || newCustomer, warning: walletWarning || isB2BWarning || undefined },
       { status: 201 }
     )
   } catch (err) {

@@ -59,7 +59,10 @@ export async function GET(req: NextRequest) {
           totalRevenue: loyaltyRevenue,
         })
         const tier = tierConfig.name
-        const isB2B = custOrders.some((o) => o.orderType === 'B2B')
+        // B2B if EITHER the manual admin-set flag is on, OR any order was
+        // placed with orderType === 'B2B' — manual flag covers brand-new
+        // corporate accounts that don't have order history yet.
+        const isB2B = Boolean((c as any).isB2B) || custOrders.some((o) => o.orderType === 'B2B')
 
         return {
           id: c.id,

@@ -137,6 +137,7 @@ interface CustomerProfile {
     notes?: string
     wallet?: number
     createdAt: string
+    isB2B?: boolean
   }
   addresses: Address[]
   orders: Order[]
@@ -221,6 +222,7 @@ export default function CRMView({ role }: CRMViewProps) {
   const [newEmail, setNewEmail] = useState('')
   const [newNotes, setNewNotes] = useState('')
   const [newWallet, setNewWallet] = useState('')
+  const [newIsB2B, setNewIsB2B] = useState(false)
   const [newAddrLabel, setNewAddrLabel] = useState('Home')
   const [newAddrArea, setNewAddrArea] = useState('')
   const [newAddrSubArea, setNewAddrSubArea] = useState('')
@@ -235,6 +237,7 @@ export default function CRMView({ role }: CRMViewProps) {
   const [editEmail, setEditEmail] = useState('')
   const [editNotes, setEditNotes] = useState('')
   const [editWallet, setEditWallet] = useState('')
+  const [editIsB2B, setEditIsB2B] = useState(false)
   const [editAddrLabel, setEditAddrLabel] = useState('Home')
   const [editAddrArea, setEditAddrArea] = useState('')
   const [editAddrSubArea, setEditAddrSubArea] = useState('')
@@ -305,6 +308,7 @@ export default function CRMView({ role }: CRMViewProps) {
     setNewEmail('')
     setNewNotes('')
     setNewWallet('')
+    setNewIsB2B(false)
     setNewAddrLabel('Home')
     setNewAddrArea('')
     setNewAddrSubArea('')
@@ -328,6 +332,7 @@ export default function CRMView({ role }: CRMViewProps) {
           email: newEmail.trim(),
           notes: newNotes.trim(),
           wallet: newWallet ? Number(newWallet) : 0,
+          isB2B: newIsB2B,
           addressLabel: newAddrLabel.trim() || 'Home',
           area: newAddrArea.trim(),
           subArea: newAddrSubArea.trim(),
@@ -366,6 +371,7 @@ export default function CRMView({ role }: CRMViewProps) {
         ? String(profile.customer.wallet)
         : ''
     )
+    setEditIsB2B(Boolean(profile.customer.isB2B))
     // Prefill primary (first) address into the edit modal.
     const primary = profile.addresses && profile.addresses.length > 0 ? profile.addresses[0] : null
     setEditAddrLabel(primary?.addressLabel || 'Home')
@@ -393,6 +399,7 @@ export default function CRMView({ role }: CRMViewProps) {
           email: editEmail.trim(),
           notes: editNotes.trim(),
           wallet: editWallet === '' ? undefined : Number(editWallet),
+          isB2B: editIsB2B,
           addressLabel: editAddrLabel.trim() || 'Home',
           area: editAddrArea.trim(),
           subArea: editAddrSubArea.trim(),
@@ -1445,6 +1452,17 @@ export default function CRMView({ role }: CRMViewProps) {
                 />
               </div>
 
+              <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer w-fit">
+                <input
+                  type="checkbox"
+                  checked={newIsB2B}
+                  onChange={(e) => setNewIsB2B(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                عميل B2B
+                <span className="text-xs text-gray-400 font-normal">(للحسابات التجارية قبل أول طلب — يُحسب تلقائياً بعد ذلك من نوع الطلبات)</span>
+              </label>
+
               <div className="border-t border-gray-200 pt-3">
                 <h4 className="text-sm font-bold text-gray-800 mb-2">📍 عنوان افتراضي (اختياري)</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1591,6 +1609,17 @@ export default function CRMView({ role }: CRMViewProps) {
                   rows={3}
                   className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
                 />
+              </div>
+              <div className="md:col-span-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer w-fit">
+                  <input
+                    type="checkbox"
+                    checked={editIsB2B}
+                    onChange={(e) => setEditIsB2B(e.target.checked)}
+                    className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  عميل B2B
+                </label>
               </div>
             </div>
 
