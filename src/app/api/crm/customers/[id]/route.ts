@@ -219,6 +219,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     // Customer source (from first order)
     const customerSource = firstOrder?.customerSource || null
 
+    // B2B label — true if ANY of this customer's orders (all-time, not just
+    // the CS-visible 6-month window) was placed with orderType === 'B2B'.
+    // Derived live from order history rather than a manual admin flag so it
+    // never drifts out of sync and needs no extra column/migration — same
+    // approach used by GET /api/crm/customers (the sidebar list).
+    const isB2B = allCustOrders.some((o) => o.orderType === 'B2B')
+
     // Inactivity stage (30/60/90+ days since last order)
     let inactivityStage: 30 | 60 | 90 | null = null
     if (daysSinceLastOrder != null) {
@@ -258,6 +265,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       customerSource,
       avgOrderValue: parseFloat(avgOrderValue.toFixed(2)),
       favoriteProduct,
+      isB2B,
     }
 
     // Enriched orders with items + their feedback (if any)

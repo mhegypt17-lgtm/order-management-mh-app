@@ -113,6 +113,7 @@ interface Insights {
   unorderedCategories: string[]
   customerSource: string | null
   avgOrderValue: number
+  isB2B: boolean
 }
 
 interface FeedbackStats {
@@ -773,6 +774,11 @@ export default function CRMView({ role }: CRMViewProps) {
                     <span className={`px-2 py-0.5 rounded-full text-sm font-bold ${TIER_COLORS[profile.insights.tier]}`}>
                       {profile.insights.tier}
                     </span>
+                    {profile.insights.isB2B && (
+                      <span className="px-2 py-0.5 rounded-full text-sm font-bold bg-indigo-100 text-indigo-700">
+                        B2B
+                      </span>
+                    )}
                     {(() => {
                       const s = ((profile.customer as any).status || 'active') as 'active' | 'warning' | 'suspended'
                       const cfg = {
