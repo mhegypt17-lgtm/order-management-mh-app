@@ -5,22 +5,29 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
 
-type ReportMode = 'daily' | 'weekly'
+type ReportMode = 'daily' | 'weekly' | 'monthly'
 
 const CONFIG = {
   daily: {
     title: '📊 معاينة تقرير العمليات اليومي',
     hint: 'نفس المحتوى اللي بيتبعت كل صباح ٦ ص القاهرة (٠٤:٠٠ UTC).',
     previewUrl: '/api/admin/reports/daily/preview',
-    sendUrl: '/api/admin/reports/daily/send-test',
+    sendUrl: '/api/admin/reports/daily/send-test' as string | null,
     confirmMsg: 'إرسال تقرير أمس على البريد فورًا لكل من في REPORT_RECIPIENTS؟',
   },
   weekly: {
     title: '📈 معاينة التقرير الأسبوعي',
     hint: 'التقرير الأسبوعي بيتبعت كل يوم أحد ٨ ص القاهرة (٠٦:٠٠ UTC) — بيغطي آخر ٧ أيام.',
     previewUrl: '/api/admin/reports/weekly/preview',
-    sendUrl: '/api/admin/reports/weekly/send-test',
+    sendUrl: '/api/admin/reports/weekly/send-test' as string | null,
     confirmMsg: 'إرسال التقرير الأسبوعي على البريد فورًا لكل من في REPORT_RECIPIENTS؟',
+  },
+  monthly: {
+    title: '🗓️ معاينة التقرير الشهري',
+    hint: 'قيد الإعداد — بيغطي آخر شهر ميلادي مكتمل. لسه مفيش إرسال تلقائي أو اختباري، ده معاينة للمحتوى بس.',
+    previewUrl: '/api/admin/reports/monthly/preview',
+    sendUrl: null as string | null,
+    confirmMsg: '',
   },
 } as const
 
@@ -69,10 +76,12 @@ export default function ReportPreviewPage() {
   }, [load, mode])
 
   const sendTest = async () => {
+    const sendUrl = CONFIG[mode].sendUrl
+    if (!sendUrl) return
     if (!confirm(CONFIG[mode].confirmMsg)) return
     setSending(true)
     try {
-      const res = await fetch(CONFIG[mode].sendUrl, {
+      const res = await fetch(sendUrl, {
         method: 'POST',
         headers: await authHeaders(),
       })
@@ -130,6 +139,16 @@ export default function ReportPreviewPage() {
               >
                 📈 أسبوعي
               </button>
+              <button
+                onClick={() => setMode('monthly')}
+                className={`px-3 py-2 text-sm font-medium ${
+                  mode === 'monthly'
+                    ? 'bg-red-700 text-white'
+                    : 'bg-white text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                🗓️ شهري
+              </button>
             </div>
             <button
               onClick={() => load(mode)}
@@ -138,13 +157,15 @@ export default function ReportPreviewPage() {
             >
               {loading ? '⏳ جارٍ التحميل...' : '🔄 تحديث المعاينة'}
             </button>
-            <button
-              onClick={sendTest}
-              disabled={sending}
-              className="px-4 py-2 bg-red-700 text-white rounded-lg hover:bg-red-800 disabled:opacity-50 font-semibold"
-            >
-              {sending ? '⏳ جارٍ الإرسال...' : '📤 إرسال اختباري'}
-            </button>
+            {CONFIG[mode].sendUrl && (
+              <button
+                onClick={sendTest}
+                disabled={sending}
+                className="px-4 py-2 bg-red-700 text-white rounded-lg hover:bg-red-800 disabled:opacity-50 font-semibold"
+              >
+                {sending ? '⏳ جارٍ الإرسال...' : '📤 إرسال اختباري'}
+              </button>
+            )}
             <Link
               href="/admin/settings"
               className="px-3 py-2 text-sm text-gray-600 hover:text-gray-900"
