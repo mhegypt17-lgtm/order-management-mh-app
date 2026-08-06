@@ -301,7 +301,16 @@ export interface ComplaintRecord {
   customerName: string | null
   customerPhone: string | null
   linkedOrderId: string | null
+  // `assignedTo` = متلقي الشكوى — the CS agent handling the ticket.
   assignedTo: string
+  // `complaintOwner` = المسؤول عن الشكوى — the department responsible for
+  // the underlying issue (فرع/مصنع/مبيعات/ديليفري). Distinct from
+  // `assignedTo`. Nullable so historical complaints stay valid. Options are
+  // admin-editable in Order Settings → المسؤول عن الشكوى.
+  complaintOwner?: string | null
+  // Recorded once the ticket is closed — one of the admin-editable options
+  // in Order Settings → إجراء إغلاق التذكرة (e.g. تم التعامل مع العميل).
+  closureAction?: string | null
   createdBy: string
   compensationAmount: number
   productIds: string[]
@@ -435,6 +444,8 @@ export interface OrderSettingsRecord {
   orderStatuses: LookupValueRecord[]
   complaintChannels: LookupValueRecord[]
   complaintReasons: LookupValueRecord[]
+  complaintOwners: LookupValueRecord[]
+  complaintClosureActions: LookupValueRecord[]
   monthlyCompensationBudget: number
   monthlyTargetedUnitsGoal: number
   slaHours: number
@@ -456,6 +467,8 @@ const DEFAULT_PAYMENT_METHODS = ['Instapay', 'Cash', 'Visa', 'Credit']
 // union below, both of which still include it for that reason).
 const DEFAULT_ORDER_STATUSES = ['تم', 'لاغي', 'حجز']
 const DEFAULT_COMPLAINT_CHANNELS = ['Instashop', 'App', 'Branch', 'Breadfast']
+const DEFAULT_COMPLAINT_OWNERS = ['فرع', 'مصنع', 'مبيعات', 'ديليفري']
+const DEFAULT_COMPLAINT_CLOSURE_ACTIONS = ['تم التعامل مع العميل', 'اعتراض العميل', 'تم تعويض العميل']
 
 // Default catalogues: Online+App share one price/stock list; Instashop and
 // B2B each get their own. Admin can rename, remap order types, or add more
@@ -593,6 +606,8 @@ function defaultOrderSettings(): OrderSettingsRecord {
     orderStatuses: defaultsToLookupRows(DEFAULT_ORDER_STATUSES),
     complaintChannels: defaultsToLookupRows(DEFAULT_COMPLAINT_CHANNELS),
     complaintReasons: defaultsToComplaintReasonTree(),
+    complaintOwners: defaultsToLookupRows(DEFAULT_COMPLAINT_OWNERS),
+    complaintClosureActions: defaultsToLookupRows(DEFAULT_COMPLAINT_CLOSURE_ACTIONS),
     monthlyCompensationBudget: 5000,
     monthlyTargetedUnitsGoal: 0,
     slaHours: 4,
@@ -815,7 +830,7 @@ export const COMPLAINT_COLUMNS = [
   'id', 'ticketNumber', 'channel', 'subject', 'description', 'reason', 'subReason',
   'status', 'priority',
   'customerId', 'customerName', 'customerPhone', 'linkedOrderId',
-  'assignedTo', 'createdBy', 'compensationAmount', 'productIds',
+  'assignedTo', 'complaintOwner', 'closureAction', 'createdBy', 'compensationAmount', 'productIds',
   'comments', 'openedAt', 'closedAt', 'createdAt', 'updatedAt',
 ].join(',')
 
@@ -1429,6 +1444,8 @@ export async function readOrderSettings(): Promise<OrderSettingsRecord> {
       orderStatuses: normalizeLookupRows(parsed.orderStatuses),
       complaintChannels: normalizeLookupRows(parsed.complaintChannels),
       complaintReasons: normalizeLookupRowsWithSubReasons((parsed as any).complaintReasons),
+      complaintOwners: normalizeLookupRows((parsed as any).complaintOwners),
+      complaintClosureActions: normalizeLookupRows((parsed as any).complaintClosureActions),
       monthlyCompensationBudget: Number(parsed.monthlyCompensationBudget) || 5000,
       monthlyTargetedUnitsGoal: Math.max(
         0,
@@ -1464,6 +1481,8 @@ export async function readOrderSettings(): Promise<OrderSettingsRecord> {
     if (normalized.orderStatuses.length === 0) normalized.orderStatuses = defaults.orderStatuses
     if (normalized.complaintChannels.length === 0) normalized.complaintChannels = defaults.complaintChannels
     if (normalized.complaintReasons.length === 0) normalized.complaintReasons = defaults.complaintReasons
+    if (normalized.complaintOwners.length === 0) normalized.complaintOwners = defaults.complaintOwners
+    if (normalized.complaintClosureActions.length === 0) normalized.complaintClosureActions = defaults.complaintClosureActions
 
     return normalized
   } catch (err) {
@@ -1579,14 +1598,17 @@ export async function createComplaint(
     updatedAt: new Date().toISOString(),
   }
   let { error } = await supabase.from('complaints').insert([newComplaint])
-  // If the DB hasn't had `complaint-sub-reason-migration.sql` applied yet,
-  // the `subReason` column won't exist and the INSERT fails. Fall back to
-  // an INSERT that drops the field so complaint creation keeps working
-  // until the admin runs the migration. Matches the csAttachments pattern.
-  if (error && /subReason|column .* does not exist/i.test(error.message || '')) {
-    const { subReason: _drop, ...withoutSubReason } = newComplaint
+  // If the DB hasn't had one of the optional-column migrations applied yet
+  // (subReason, complaintOwner, closureAction), the INSERT fails because
+  // that column doesn't exist. Fall back to an INSERT that drops all three
+  // optional fields so complaint creation keeps working until the admin
+  // runs the migration. Matches the csAttachments pattern.
+  if (error && /subReason|complaintOwner|closureAction|column .* does not exist|PGRST204/i.test(error.message || '')) {
+    const { subReason: _drop, complaintOwner: _drop2, closureAction: _drop3, ...withoutOptional } = newComplaint as any
     void _drop
-    const retry = await supabase.from('complaints').insert([withoutSubReason])
+    void _drop2
+    void _drop3
+    const retry = await supabase.from('complaints').insert([withoutOptional])
     error = retry.error
   }
   if (error) {
@@ -1607,14 +1629,16 @@ export async function updateComplaint(
     .select()
     .single()
 
-  // Same DB-migration fallback as createComplaint — retry without subReason
-  // if the column isn't there yet.
-  if (error && /subReason|column .* does not exist/i.test(error.message || '')) {
-    const { subReason: _drop, ...withoutSubReason } = updated as any
+  // Same DB-migration fallback as createComplaint — retry without the
+  // optional columns if they aren't there yet.
+  if (error && /subReason|complaintOwner|closureAction|column .* does not exist|PGRST204/i.test(error.message || '')) {
+    const { subReason: _drop, complaintOwner: _drop2, closureAction: _drop3, ...withoutOptional } = updated as any
     void _drop
+    void _drop2
+    void _drop3
     const retry = await supabase
       .from('complaints')
-      .update(withoutSubReason)
+      .update(withoutOptional)
       .eq('id', id)
       .select()
       .single()

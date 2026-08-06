@@ -18,6 +18,8 @@ type SectionKey =
   | 'orderStatuses'
   | 'complaintChannels'
   | 'complaintReasons'
+  | 'complaintOwners'
+  | 'complaintClosureActions'
 
 type AgentNotice = {
   message: string
@@ -66,6 +68,8 @@ const SECTION_META: { key: SectionKey; title: string; hint: string }[] = [
   { key: 'orderStatuses', title: 'حالات الطلب', hint: 'مثل تم و مؤجل و لاغي' },
   { key: 'complaintChannels', title: 'قنوات الشكاوى', hint: 'مثل App و Instashop و Branch' },
   { key: 'complaintReasons', title: 'أسباب الشكاوى', hint: 'مثل تأخير التوصيل أو جودة المنتج' },
+  { key: 'complaintOwners', title: 'المسؤول عن الشكوى', hint: 'الجهة المسؤولة عن الشكوى — مثل فرع أو مصنع أو مبيعات أو ديليفري' },
+  { key: 'complaintClosureActions', title: 'إجراء إغلاق التذكرة', hint: 'يظهر عند إغلاق الشكوى — مثل تم التعامل مع العميل أو تم تعويض العميل' },
 ]
 
 function normalizeItems(items: LookupItem[]): LookupItem[] {
@@ -124,6 +128,8 @@ export default function OrderSettingsView() {
     orderStatuses: [],
     complaintChannels: [],
     complaintReasons: [],
+    complaintOwners: [],
+    complaintClosureActions: [],
   })
   const [newValues, setNewValues] = useState<Record<SectionKey, string>>({
     orderReceivers: '',
@@ -134,6 +140,8 @@ export default function OrderSettingsView() {
     orderStatuses: '',
     complaintChannels: '',
     complaintReasons: '',
+    complaintOwners: '',
+    complaintClosureActions: '',
   })
 
   useEffect(() => {
@@ -152,6 +160,8 @@ export default function OrderSettingsView() {
           orderStatuses: Array.isArray(data.settings?.orderStatuses) ? data.settings.orderStatuses : [],
           complaintChannels: Array.isArray(data.settings?.complaintChannels) ? data.settings.complaintChannels : [],
           complaintReasons: Array.isArray(data.settings?.complaintReasons) ? data.settings.complaintReasons : [],
+          complaintOwners: Array.isArray(data.settings?.complaintOwners) ? data.settings.complaintOwners : [],
+          complaintClosureActions: Array.isArray(data.settings?.complaintClosureActions) ? data.settings.complaintClosureActions : [],
         })
 
         if (data.settings?.agentNotice) {
@@ -202,6 +212,8 @@ export default function OrderSettingsView() {
       orderStatuses: settings.orderStatuses.filter((x) => x.isActive).length,
       complaintChannels: settings.complaintChannels.filter((x) => x.isActive).length,
       complaintReasons: settings.complaintReasons.filter((x) => x.isActive).length,
+      complaintOwners: settings.complaintOwners.filter((x) => x.isActive).length,
+      complaintClosureActions: settings.complaintClosureActions.filter((x) => x.isActive).length,
     }),
     [settings]
   )
@@ -362,6 +374,8 @@ export default function OrderSettingsView() {
         orderStatuses: data.settings.orderStatuses,
         complaintChannels: data.settings.complaintChannels,
         complaintReasons: data.settings.complaintReasons,
+        complaintOwners: data.settings.complaintOwners,
+        complaintClosureActions: data.settings.complaintClosureActions,
       })
 
       toast.success('تم حفظ الإعدادات')

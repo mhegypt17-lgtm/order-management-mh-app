@@ -33,6 +33,8 @@ type OrderSettingsRecord = {
   orderStatuses: LookupValueRecord[]
   complaintChannels: LookupValueRecord[]
   complaintReasons: LookupValueRecord[]
+  complaintOwners: LookupValueRecord[]
+  complaintClosureActions: LookupValueRecord[]
   monthlyCompensationBudget: number
   monthlyTargetedUnitsGoal?: number
   slaHours: number
@@ -104,6 +106,8 @@ export async function GET() {
           orderStatuses: activeLabels(settings.orderStatuses),
           complaintChannels: activeLabels(settings.complaintChannels),
           complaintReasons: activeLabels((settings as any).complaintReasons || []),
+          complaintOwners: activeLabels((settings as any).complaintOwners || []),
+          complaintClosureActions: activeLabels((settings as any).complaintClosureActions || []),
           agentNotice: settings.agentNotice,
         },
       },
@@ -131,6 +135,8 @@ export async function PUT(request: NextRequest) {
         'orderStatuses',
         'complaintChannels',
         'complaintReasons',
+        'complaintOwners',
+        'complaintClosureActions',
       ].includes(section as string)
     ) {
       return NextResponse.json({ error: 'Invalid section' }, { status: 400 })

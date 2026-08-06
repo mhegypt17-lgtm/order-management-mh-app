@@ -110,6 +110,7 @@ export async function POST(request: NextRequest) {
       customerPhone: body.customerPhone || null,
       linkedOrderId: body.linkedOrderId || null,
       assignedTo: body.assignedTo,
+      complaintOwner: body.complaintOwner || null,
       createdBy: body.createdBy,
       compensationAmount: 0,
       productIds: Array.isArray(body.productIds) ? body.productIds.filter((id: any) => typeof id === 'string' && id) : [],
@@ -152,6 +153,12 @@ export async function PUT(request: NextRequest) {
       assignedTo: body.assignedTo,
       compensationAmount: Number(body.compensationAmount) || 0,
       closedAt: body.status === 'closed' && !body.closedAt ? new Date().toISOString() : body.closedAt,
+    }
+    if (body.complaintOwner !== undefined) {
+      updates.complaintOwner = body.complaintOwner || null
+    }
+    if (body.closureAction !== undefined) {
+      updates.closureAction = body.closureAction || null
     }
     if (body.subReason !== undefined) {
       updates.subReason =

@@ -20,6 +20,8 @@ interface Complaint {
   customerPhone: string | null
   linkedOrderId: string | null
   assignedTo: string
+  complaintOwner?: string | null
+  closureAction?: string | null
   createdBy: string
   compensationAmount: number
   productIds: string[]
@@ -98,6 +100,8 @@ export default function ComplaintsSection() {
     }>
   >([])
   const [agents, setAgents] = useState(['رنا', 'مى', 'ميرنا', 'أمل'])
+  const [complaintOwners, setComplaintOwners] = useState<string[]>([])
+  const [closureActions, setClosureActions] = useState<string[]>([])
   const [orders, setOrders] = useState<Order[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [products, setProducts] = useState<Product[]>([])
@@ -130,6 +134,7 @@ export default function ComplaintsSection() {
     customerSearch: '',
     orderSearch: '',
     assignedTo: '',
+    complaintOwner: '',
     productIds: [] as string[],
   })
 
@@ -200,6 +205,10 @@ export default function ComplaintsSection() {
         setChannels(Array.isArray(chans) ? chans : [])
         setReasons(Array.isArray(reasonsList) ? reasonsList : [])
         setReasonsTree(tree)
+        const owners = data.options?.complaintOwners || data.settings?.complaintOwners?.map((c: any) => c.label) || []
+        const closures = data.options?.complaintClosureActions || data.settings?.complaintClosureActions?.map((c: any) => c.label) || []
+        setComplaintOwners(Array.isArray(owners) ? owners : [])
+        setClosureActions(Array.isArray(closures) ? closures : [])
         // Load SLA hours from settings
         if (data.slaHours) {
           setSlaHours(data.slaHours)
@@ -230,6 +239,8 @@ export default function ComplaintsSection() {
       setChannels([])
       setReasons([])
       setReasonsTree([])
+      setComplaintOwners([])
+      setClosureActions([])
       setOrders([])
       setCustomers([])
       setProducts([])
@@ -273,6 +284,7 @@ export default function ComplaintsSection() {
           customerPhone: customerData?.phone || null,
           linkedOrderId: orderData?.id || null,
           assignedTo: formData.assignedTo,
+          complaintOwner: formData.complaintOwner || null,
           createdBy: user?.name || 'System',
           productIds: formData.productIds,
         }),
@@ -291,6 +303,7 @@ export default function ComplaintsSection() {
         customerSearch: '',
         orderSearch: '',
         assignedTo: user?.name || '',
+        complaintOwner: '',
         productIds: [],
       })
       setShowForm(false)
@@ -499,6 +512,7 @@ export default function ComplaintsSection() {
       customerSearch: customerData?.phone || '',
       orderSearch: order.appOrderNo,
       assignedTo: user?.name || '',
+      complaintOwner: '',
       productIds: orderProductIds,
     })
     setProductSearch('')
@@ -743,7 +757,7 @@ export default function ComplaintsSection() {
 
             {/* Assign To */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">المسؤول</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">متلقي الشكوى</label>
               <select
                 value={formData.assignedTo}
                 onChange={(e) => setFormData({ ...formData, assignedTo: e.target.value })}
@@ -752,6 +766,23 @@ export default function ComplaintsSection() {
                 {agents.map((a) => (
                   <option key={a} value={a}>
                     {a}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Complaint Owner (responsible department) */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">المسؤول عن الشكوى</label>
+              <select
+                value={formData.complaintOwner}
+                onChange={(e) => setFormData({ ...formData, complaintOwner: e.target.value })}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:border-red-600"
+              >
+                <option value="">-- اختر الجهة المسؤولة --</option>
+                {complaintOwners.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
                   </option>
                 ))}
               </select>
@@ -980,6 +1011,7 @@ export default function ComplaintsSection() {
                   customerSearch: '',
                   orderSearch: '',
                   assignedTo: user?.name || '',
+                  complaintOwner: '',
                   productIds: [],
                 })
                 setProductSearch('')
@@ -1130,6 +1162,8 @@ export default function ComplaintsSection() {
                     {complaint.customerPhone && <span>📱 {complaint.customerPhone}</span>}
                     {complaint.linkedOrderId && <span>🛒 الطلب: {complaint.linkedOrderId}</span>}
                     <span>👨‍💼 {complaint.assignedTo}</span>
+                    {complaint.complaintOwner && <span>🏢 {complaint.complaintOwner}</span>}
+                    <span>🕒 {formatCairoDateTime(complaint.openedAt, 'ar-EG')}</span>
                     <span>⏱️ {calculateSLA(complaint)}</span>
                   </div>
                 </div>
@@ -1203,7 +1237,7 @@ export default function ComplaintsSection() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">المسؤول</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">متلقي الشكوى</label>
                   <select
                     value={editedComplaint?.assignedTo ?? selectedComplaint.assignedTo}
                     onChange={(e) => handleEditChange('assignedTo', e.target.value)}
@@ -1217,6 +1251,42 @@ export default function ComplaintsSection() {
                   </select>
                 </div>
               </div>
+
+              {/* Complaint owner (responsible department) */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">المسؤول عن الشكوى</label>
+                <select
+                  value={editedComplaint?.complaintOwner ?? selectedComplaint.complaintOwner ?? ''}
+                  onChange={(e) => handleEditChange('complaintOwner', e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:border-red-600"
+                >
+                  <option value="">-- اختر الجهة المسؤولة --</option>
+                  {complaintOwners.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Closure action — only relevant once the ticket is (or is being) closed */}
+              {(editedComplaint?.status ?? selectedComplaint.status) === 'closed' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">إجراء إغلاق التذكرة</label>
+                  <select
+                    value={editedComplaint?.closureAction ?? selectedComplaint.closureAction ?? ''}
+                    onChange={(e) => handleEditChange('closureAction', e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:border-red-600"
+                  >
+                    <option value="">-- اختر الإجراء --</option>
+                    {closureActions.map((a) => (
+                      <option key={a} value={a}>
+                        {a}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {/* Compensation */}
               <div>
@@ -1255,6 +1325,16 @@ export default function ComplaintsSection() {
                 <p>
                   <strong className="text-gray-700">الوقت المستغرق:</strong> <span className="text-gray-600">{calculateSLA(selectedComplaint)}</span>
                 </p>
+                <p>
+                  <strong className="text-gray-700">تاريخ الفتح:</strong>{' '}
+                  <span className="text-gray-600">{formatCairoDateTime(selectedComplaint.openedAt, 'ar-EG')}</span>
+                </p>
+                {selectedComplaint.closedAt && (
+                  <p>
+                    <strong className="text-gray-700">تاريخ الإغلاق:</strong>{' '}
+                    <span className="text-gray-600">{formatCairoDateTime(selectedComplaint.closedAt, 'ar-EG')}</span>
+                  </p>
+                )}
                 {selectedComplaint.customerName && (
                   <p>
                     <strong className="text-gray-700">العميل:</strong> <span className="text-gray-600">{selectedComplaint.customerName}</span>
