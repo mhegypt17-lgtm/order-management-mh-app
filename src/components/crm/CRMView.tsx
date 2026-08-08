@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
+import TopCustomersByProductModal from './TopCustomersByProductModal'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -217,6 +218,7 @@ export default function CRMView({ role }: CRMViewProps) {
 
   // Add-customer modal state
   const [showAdd, setShowAdd] = useState(false)
+  const [showTopByProduct, setShowTopByProduct] = useState(false)
   const [newName, setNewName] = useState('')
   const [newPhone, setNewPhone] = useState('')
   const [newEmail, setNewEmail] = useState('')
@@ -679,14 +681,24 @@ export default function CRMView({ role }: CRMViewProps) {
         <div className="p-3 border-b border-gray-200">
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-base font-bold text-gray-800">👥 قاعدة العملاء</h2>
-            <button
-              type="button"
-              onClick={() => setShowAdd(true)}
-              className="text-xs bg-red-600 hover:bg-red-700 text-white font-bold px-2 py-1 rounded"
-              title="إضافة عميل جديد"
-            >
-              + إضافة
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setShowTopByProduct(true)}
+                className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold px-2 py-1 rounded"
+                title="أفضل العملاء لمنتج معين"
+              >
+                📦 حسب المنتج
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowAdd(true)}
+                className="text-xs bg-red-600 hover:bg-red-700 text-white font-bold px-2 py-1 rounded"
+                title="إضافة عميل جديد"
+              >
+                + إضافة
+              </button>
+            </div>
           </div>
           <input
             type="text"
@@ -1958,6 +1970,12 @@ export default function CRMView({ role }: CRMViewProps) {
           </div>
         </div>
       )}
+
+      <TopCustomersByProductModal
+        open={showTopByProduct}
+        onClose={() => setShowTopByProduct(false)}
+        onSelectCustomer={handleSelectCustomer}
+      />
     </div>
   )
 }
