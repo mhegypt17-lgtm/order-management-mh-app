@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
 
     let query = supabase
       .from('product_order_customers_v1')
-      .select('orderId, quantity, orderDate, customerId, customerName, customerPhone')
+      .select('orderId, quantity, orderDate, customerId, customerName, customerPhone, customerEmail')
       .eq('productId', productId)
 
     if (from) query = query.gte('orderDate', from)
@@ -56,6 +56,7 @@ export async function GET(req: NextRequest) {
       customerId: string
       customerName: string
       customerPhone: string
+      customerEmail: string
       totalQuantity: number
       orderIds: Set<string>
     }
@@ -68,6 +69,7 @@ export async function GET(req: NextRequest) {
           customerId: row.customerId,
           customerName: row.customerName || '(محذوف)',
           customerPhone: row.customerPhone || '',
+          customerEmail: row.customerEmail || '',
           totalQuantity: 0,
           orderIds: new Set(),
         }

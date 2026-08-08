@@ -31,7 +31,8 @@ select
   o."orderDate",
   o."customerId",
   c."customerName",
-  c.phone as "customerPhone"
+  c.phone as "customerPhone",
+  c.email as "customerEmail"
 from public.order_items oi
 join public.orders o on o.id = oi."orderId"
 left join public.order_delivery d on d."orderId" = o.id

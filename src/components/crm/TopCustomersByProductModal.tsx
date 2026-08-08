@@ -13,6 +13,7 @@ interface ResultRow {
   customerId: string
   customerName: string
   customerPhone: string
+  customerEmail: string
   orderCount: number
   totalQuantity: number
 }
@@ -89,11 +90,17 @@ export default function TopCustomersByProductModal({ open, onClose, onSelectCust
 
   const exportCsv = () => {
     if (!rows || !selectedProduct) return
-    const headers = ['العميل', 'الهاتف', 'عدد الطلبات', 'الكمية الإجمالية']
+    const headers = ['العميل', 'الهاتف', 'البريد الإلكتروني', 'عدد الطلبات', 'الكمية الإجمالية']
     const lines = [headers.join(',')]
     for (const r of rows) {
       lines.push(
-        [r.customerName.replace(/,/g, ' '), r.customerPhone, r.orderCount, r.totalQuantity].join(','),
+        [
+          r.customerName.replace(/,/g, ' '),
+          r.customerPhone,
+          (r.customerEmail || '').replace(/,/g, ' '),
+          r.orderCount,
+          r.totalQuantity,
+        ].join(','),
       )
     }
     const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
@@ -212,6 +219,7 @@ export default function TopCustomersByProductModal({ open, onClose, onSelectCust
                     <tr>
                       <th className="text-right px-3 py-2 font-semibold text-gray-600">العميل</th>
                       <th className="text-right px-3 py-2 font-semibold text-gray-600">الهاتف</th>
+                      <th className="text-right px-3 py-2 font-semibold text-gray-600">البريد الإلكتروني</th>
                       <th className="text-right px-3 py-2 font-semibold text-gray-600">عدد الطلبات</th>
                       <th className="text-right px-3 py-2 font-semibold text-gray-600">الكمية</th>
                     </tr>
@@ -228,6 +236,7 @@ export default function TopCustomersByProductModal({ open, onClose, onSelectCust
                       >
                         <td className="px-3 py-2 font-medium text-gray-900">{r.customerName}</td>
                         <td className="px-3 py-2 text-gray-600">{r.customerPhone}</td>
+                        <td className="px-3 py-2 text-gray-600">{r.customerEmail || '—'}</td>
                         <td className="px-3 py-2 font-bold text-red-700">{fmt(r.orderCount)}</td>
                         <td className="px-3 py-2 text-gray-600">{fmt(r.totalQuantity)}</td>
                       </tr>
