@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { unstable_noStore as noStore } from 'next/cache'
 import { supabase } from '@/lib/supabase'
 import {
   AgentNoticeRecord,
@@ -120,6 +121,12 @@ export async function GET() {
 
 export async function PUT(request: NextRequest) {
   try {
+    // This handler reads current settings, merges in one section, then
+    // upserts the whole row — a stale read (revalidate = 600 below, no
+    // `dynamic`) would silently overwrite any other section edited in the
+    // last up-to-10-minutes. noStore() forces this specific read fresh
+    // without losing the 10-min cache for the far more frequent GETs.
+    noStore()
     const body = await request.json()
     const section = body.section as SectionKey
     const items = body.items as unknown
@@ -165,6 +172,8 @@ export async function PUT(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    // Same read-modify-write risk as PUT above — force a fresh read.
+    noStore()
     const body = await request.json()
     const settings = await readOrderSettings()
 

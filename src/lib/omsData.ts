@@ -1,3 +1,4 @@
+import { unstable_noStore as noStore } from 'next/cache'
 import { supabase } from '@/lib/supabase'
 import { cairoDateString } from '@/lib/cairoTime'
 import {
@@ -1658,6 +1659,11 @@ export async function addComplaintComment(
   authorName: string,
   text: string
 ): Promise<ComplaintRecord | null> {
+  // Read-modify-write on the comments array — the caller (/api/complaints)
+  // has `revalidate = 60` with no `dynamic`, which would otherwise let this
+  // SELECT serve a cached (pre-existing-comments) snapshot. Two comments
+  // added within the same cache window would silently drop the earlier one.
+  noStore()
   const comment: ComplaintCommentRecord = {
     id: generateId('comment'),
     authorName,

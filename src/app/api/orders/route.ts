@@ -32,10 +32,16 @@ import {
   foldPricesEmbed,
 } from '@/lib/catalogue'
 
-// Short server-side cache — a burst of dashboard loaders in the same minute
-// share one DB read. Individual mutations (POST/PUT) don't need this route
-// to be fresh instantly; the client already refetches after edits.
-export const revalidate = 60
+// This file's POST handler snapshots CURRENT product prices onto each new
+// order item (basePriceSnapshot/offerPriceSnapshot). A `revalidate` value
+// without `dynamic = 'force-dynamic'` silently caches every internal
+// fetch() in this module — including the products read used for that
+// snapshot — so a price change could take far longer than expected to show
+// up in newly created orders even though the customer-facing total (built
+// from the client-supplied unitPrice) stayed correct. Found 2026-08-09 via
+// order 060826app1 (انتركوت/بفتيك snapshot stuck at pre-2026-08-01 prices).
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 function generateTextId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`

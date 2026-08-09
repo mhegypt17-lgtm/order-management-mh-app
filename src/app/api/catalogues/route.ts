@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { unstable_noStore as noStore } from 'next/cache'
 import { supabase } from '@/lib/supabase'
 import { readOrderSettings, CatalogueRecord } from '@/lib/omsData'
 import { ONLINE_CATALOGUE_KEY } from '@/lib/catalogue'
@@ -43,6 +44,10 @@ export async function GET() {
  */
 export async function POST(request: NextRequest) {
   try {
+    // Read-modify-write on the catalogues list (revalidate = 600 below, no
+    // `dynamic`) — force this specific read fresh so a rapid second edit
+    // can't silently overwrite the first one from a stale cached list.
+    noStore()
     const body = await request.json().catch(() => ({}))
     if (String(body?.role || '') !== 'admin') {
       return NextResponse.json({ error: 'forbidden' }, { status: 403 })
@@ -84,6 +89,8 @@ export async function POST(request: NextRequest) {
 /** PATCH — rename / remap order types / enable-disable an existing catalogue. */
 export async function PATCH(request: NextRequest) {
   try {
+    // Same read-modify-write risk as POST above — force a fresh read.
+    noStore()
     const body = await request.json().catch(() => ({}))
     if (String(body?.role || '') !== 'admin') {
       return NextResponse.json({ error: 'forbidden' }, { status: 403 })

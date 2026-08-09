@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { unstable_noStore as noStore } from 'next/cache'
 import { supabase } from '@/lib/supabase'
 import { PRODUCT_CATEGORY_ORDER } from '@/lib/omsData'
 
@@ -90,6 +91,10 @@ export async function GET(req: NextRequest) {
 // still uses the category name (caller decides whether to reassign first).
 export async function PUT(request: Request) {
   try {
+    // Bulk-diffs against the CURRENT category list (revalidate = 300 below,
+    // no `dynamic`) to decide inserts/updates/deletes — a stale read here
+    // could resurrect a just-deleted category or drop a just-added one.
+    noStore()
     const body = await request.json()
     const incoming = Array.isArray(body?.categories) ? body.categories : []
 
