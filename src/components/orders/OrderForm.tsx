@@ -1049,7 +1049,14 @@ export default function OrderForm({ mode, orderId }: Props) {
     }
 
     const isWeight = selected.pricingMode === 'weight'
-    const pricePerUnit = Number(selected.offerPrice ?? selected.basePrice ?? 0)
+    // B2B always starts from the main (non-discounted) price — the
+    // discounted/offer price is only ever a floor the price can't go below
+    // (see the unit-price input's min handling), never the auto-filled
+    // default like it is for Online/App/Instashop.
+    const isB2B = form.orderType === 'B2B'
+    const pricePerUnit = isB2B
+      ? Number(selected.basePrice ?? 0)
+      : Number(selected.offerPrice ?? selected.basePrice ?? 0)
     // For weight products, basePrice is price-per-kg. Use the product's
     // configured estimated weight (or default to 1000g) and compute the
     // per-piece price = pricePerKg * estimatedKg.
@@ -1618,7 +1625,14 @@ export default function OrderForm({ mode, orderId }: Props) {
                   : (selectedProduct?.offerPrice != null ? Number(selectedProduct.offerPrice) : null)
                 const hasValidOffer =
                   displayOffer != null && displayOffer > 0 && displayBase > 0 && displayOffer < displayBase
-                const pricePerKg = isWeightMode ? Number(selectedProduct?.offerPrice ?? selectedProduct?.basePrice ?? 0) : 0
+                const isB2B = form.orderType === 'B2B'
+                // B2B floor: the price can be raised with no ceiling, but
+                // can't be dropped below the discounted/offer price (or the
+                // base price when there's no active offer).
+                const minUnitPrice = isB2B && selectedProduct && !isWeightMode
+                  ? (hasValidOffer ? (displayOffer as number) : displayBase)
+                  : null
+                const pricePerKg = isWeightMode ? Number((isB2B ? selectedProduct?.basePrice : (selectedProduct?.offerPrice ?? selectedProduct?.basePrice)) ?? 0) : 0
                 const stockRaw = String((selectedProduct?.stockStatus as any) || 'available').toLowerCase().trim()
                 const stockQty = selectedProduct?.stockQuantity
                 // Quantity is an OPTIONAL, informational-only field on the
@@ -1777,10 +1791,22 @@ export default function OrderForm({ mode, orderId }: Props) {
                     <td className="p-2">
                       <input
                         type="number"
+                        min={minUnitPrice ?? undefined}
                         value={item.unitPrice}
                         onChange={(e) => updateItem(index, { unitPrice: Number(e.target.value) || 0 })}
+                        onBlur={() => {
+                          if (minUnitPrice != null && Number(item.unitPrice) < minUnitPrice) {
+                            updateItem(index, { unitPrice: minUnitPrice })
+                          }
+                        }}
                         readOnly={isWeightMode}
-                        title={isWeightMode ? 'يُحتسب تلقائياً: سعر الكيلو × الوزن المقدر' : undefined}
+                        title={
+                          isWeightMode
+                            ? 'يُحتسب تلقائياً: سعر الكيلو × الوزن المقدر'
+                            : minUnitPrice != null
+                            ? `لا يمكن أن يقل عن ${minUnitPrice.toLocaleString()} ج.م (السعر بعد الخصم)`
+                            : undefined
+                        }
                         className={`w-24 px-2 py-1 border rounded text-left ${isWeightMode ? 'bg-gray-50 text-gray-700' : ''}`}
                         dir="ltr"
                       />
@@ -1795,8 +1821,13 @@ export default function OrderForm({ mode, orderId }: Props) {
                       unitPrice, no adjustment needed). Recomputes unitPrice
                       live off the reference price (offer if active, else
                       base) and requires a reason once a non-zero pct is set
-                      — an audit trail for CS price overrides. */}
-                  {selectedProduct && !isWeightMode && (
+                      — an audit trail for CS price overrides. Not offered
+                      for B2B — the unit price itself is already freely
+                      editable there (up with no limit, down to the
+                      discounted price), so a separate %-shortcut is
+                      redundant/confusing alongside the B2B negotiated-
+                      discount box. */}
+                  {selectedProduct && !isWeightMode && !isB2B && (
                     <tr className={rowCls}>
                       <td colSpan={8} className="p-2 pt-0">
                         <div className="flex flex-col sm:flex-row sm:items-center gap-2">
@@ -1865,9 +1896,11 @@ export default function OrderForm({ mode, orderId }: Props) {
           <button type="button" onClick={addItem} className="px-4 py-2 rounded-lg bg-red-100 text-red-700 hover:bg-red-200">
             + إضافة عنصر
           </button>
-          <button type="button" onClick={addCustomItem} className="px-4 py-2 rounded-lg bg-purple-100 text-purple-700 hover:bg-purple-200">
-            ➕ صنف مخصص
-          </button>
+          {form.orderType !== 'B2B' && (
+            <button type="button" onClick={addCustomItem} className="px-4 py-2 rounded-lg bg-purple-100 text-purple-700 hover:bg-purple-200">
+              ➕ صنف مخصص
+            </button>
+          )}
         </div>
 
         <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
