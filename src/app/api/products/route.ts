@@ -135,7 +135,13 @@ export async function POST(request: NextRequest) {
     // NULL primary-key constraint (surfacing as "خطأ في حفظ المنتج").
     // `catalogueKey` is UI-only (which tab was active when "Add Product" was
     // clicked) — never persisted on the products row itself.
-    const { id: _incomingId, catalogueKey, ...fields } = body
+    // `prices` is a virtual, GET-only field (per-catalogue rows folded from
+    // `product_prices` — see foldPricesEmbed). It is never a real column on
+    // `products`; if a caller ever sends it back (e.g. duplicating a product
+    // from an already-fetched row), passing it to `.insert()` makes Supabase
+    // reject the whole write with a "Could not find the 'prices' column"
+    // schema-cache error. Always strip it here.
+    const { id: _incomingId, catalogueKey, prices: _prices, ...fields } = body
     const scopedCatalogueKey =
       typeof catalogueKey === 'string' && catalogueKey.trim() ? catalogueKey.trim() : null
 
@@ -159,7 +165,7 @@ export async function POST(request: NextRequest) {
     if (error) {
       console.error('Error creating product:', error)
       return NextResponse.json(
-        { error: error.message || 'Failed to create product' },
+        { error: error.message || 'Failed to create product', details: error.message },
         { status: 500 }
       )
     }
@@ -215,11 +221,23 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Product not found' }, { status: 404 })
     }
 
+    // `prices` is a virtual, GET-only field (per-catalogue rows folded from
+    // `product_prices` — see foldPricesEmbed) that the client re-embeds onto
+    // every product it fetches. Several UI call sites (targeted/active-status
+    // toggles, the inline price cell, the edit modal while the Online tab is
+    // active) round-trip that whole product object back into a PUT body, so
+    // it can carry `prices` right along with it. Passing it to `.update()`
+    // makes Supabase reject the ENTIRE write with a "Could not find the
+    // 'prices' column of 'products' in the schema cache" error — surfaced to
+    // the admin as a generic, unhelpful "Failed to update product" toast.
+    // Always strip it here so no caller can accidentally break a save this way.
+    const { prices: _prices, ...bodyFields } = body
+
     const updated = {
       ...existing,
-      ...body,
-      productCategory: body.productCategory || existing.productCategory || 'غير محدد',
-      packagingType: body.packagingType || existing.packagingType || 'غير محدد',
+      ...bodyFields,
+      productCategory: bodyFields.productCategory || existing.productCategory || 'غير محدد',
+      packagingType: bodyFields.packagingType || existing.packagingType || 'غير محدد',
     }
 
     const { data: result, error } = await supabase
@@ -232,7 +250,7 @@ export async function PUT(request: NextRequest) {
     if (error) {
       console.error('Error updating product:', error)
       return NextResponse.json(
-        { error: 'Failed to update product' },
+        { error: error.message || 'Failed to update product', details: error.message },
         { status: 500 }
       )
     }
