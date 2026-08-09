@@ -1628,9 +1628,14 @@ export default function OrderForm({ mode, orderId }: Props) {
                 const isB2B = form.orderType === 'B2B'
                 // B2B floor: the price can be raised with no ceiling, but
                 // can't be dropped below the discounted/offer price (or the
-                // base price when there's no active offer).
-                const minUnitPrice = isB2B && selectedProduct && !isWeightMode
-                  ? (hasValidOffer ? (displayOffer as number) : displayBase)
+                // base price when there's no active offer). For weight-mode
+                // items displayBase/displayOffer are per-kg, so scale the
+                // floor by the item's current estimated weight.
+                const refFloorPerUnit = hasValidOffer ? (displayOffer as number) : displayBase
+                const minUnitPrice = isB2B && selectedProduct
+                  ? (isWeightMode
+                      ? Math.round(refFloorPerUnit * (Number(item.weightGrams || 0) / 1000) * 100) / 100
+                      : refFloorPerUnit)
                   : null
                 const pricePerKg = isWeightMode ? Number((isB2B ? selectedProduct?.basePrice : (selectedProduct?.offerPrice ?? selectedProduct?.basePrice)) ?? 0) : 0
                 const stockRaw = String((selectedProduct?.stockStatus as any) || 'available').toLowerCase().trim()
@@ -1799,15 +1804,15 @@ export default function OrderForm({ mode, orderId }: Props) {
                             updateItem(index, { unitPrice: minUnitPrice })
                           }
                         }}
-                        readOnly={isWeightMode}
+                        readOnly={isWeightMode && !isB2B}
                         title={
-                          isWeightMode
+                          isWeightMode && !isB2B
                             ? 'يُحتسب تلقائياً: سعر الكيلو × الوزن المقدر'
                             : minUnitPrice != null
                             ? `لا يمكن أن يقل عن ${minUnitPrice.toLocaleString()} ج.م (السعر بعد الخصم)`
                             : undefined
                         }
-                        className={`w-24 px-2 py-1 border rounded text-left ${isWeightMode ? 'bg-gray-50 text-gray-700' : ''}`}
+                        className={`w-24 px-2 py-1 border rounded text-left ${isWeightMode && !isB2B ? 'bg-gray-50 text-gray-700' : ''}`}
                         dir="ltr"
                       />
                     </td>
