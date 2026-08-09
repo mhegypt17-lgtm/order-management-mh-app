@@ -90,6 +90,19 @@ export interface OrderRecord {
    */
   walletUsed?: number | null
   /**
+   * B2B negotiated/manual discount — a CS/sales-entered override (percent
+   * or fixed EGP amount) applied on top of orderTotal, independent of any
+   * promo/voucher discountCode. `manualDiscountAmount` is the resolved EGP
+   * value (already capped to orderTotal) actually subtracted into netTotal:
+   * `netTotal = max(0, orderTotal - discountAmount - manualDiscountAmount - walletUsed)`.
+   * `manualDiscountReason` is a required-in-UI free-text audit note (e.g.
+   * "اتفاق تفاوضي مع العميل").
+   */
+  manualDiscountType?: 'percent' | 'fixed' | null
+  manualDiscountValue?: number | null
+  manualDiscountAmount?: number | null
+  manualDiscountReason?: string | null
+  /**
    * Optional CS-side attachments (proof of payment screenshots, ID copies,
    * bank-transfer receipts, etc.). Each entry is a base64 data URL with a
    * short caption, captured by the CS agent on the order form.
@@ -140,6 +153,27 @@ export interface OrderItemRecord {
    * placement. `null` when the product had no offer, or on pre-migration rows.
    */
   offerPriceSnapshot?: number | null
+  /**
+   * True for a one-off, per-order line with no catalog product behind it
+   * (e.g. a bespoke cut or a favor requested by a specific customer). Never
+   * write these back into `products` — they exist ONLY on this order.
+   * `productId` is null for these rows (column made nullable by
+   * data/custom-items-and-manual-discount-migration.sql).
+   */
+  isCustomItem?: boolean | null
+  /** Free-text name for a custom item (required when isCustomItem is true). */
+  customItemName?: string | null
+  /**
+   * Optional CS quick-adjust percentage applied on top of the catalogue
+   * price for a REGULAR (non-custom) line — e.g. +10 for a 10% surcharge,
+   * -5 for a small negotiated discount on that one line. Purely a display/
+   * audit-trail record: the actual `unitPrice` already reflects the
+   * adjusted price (computed client-side); this field lets CS/Admin see
+   * WHY a line's price differs from the catalogue price.
+   */
+  priceAdjustmentPct?: number | null
+  /** Required-in-UI free-text reason when priceAdjustmentPct is set. */
+  priceAdjustmentReason?: string | null
 }
 
 export interface OrderDeliveryRecord {
@@ -765,6 +799,7 @@ export const ORDER_COLUMNS = [
   'isScheduled', 'scheduledDate', 'scheduledTimeSlot', 'scheduledSpecificTime',
   'isPriority', 'priorityReason',
   'discountCode', 'discountAmount', 'netTotal', 'walletUsed',
+  'manualDiscountType', 'manualDiscountValue', 'manualDiscountAmount', 'manualDiscountReason',
   'csAttachments',
 ].join(',')
 
@@ -782,6 +817,7 @@ export const ORDER_COLUMNS_LIST = [
   'isScheduled', 'scheduledDate', 'scheduledTimeSlot', 'scheduledSpecificTime',
   'isPriority', 'priorityReason',
   'discountCode', 'discountAmount', 'netTotal', 'walletUsed',
+  'manualDiscountType', 'manualDiscountValue', 'manualDiscountAmount', 'manualDiscountReason',
 ].join(',')
 
 export const CUSTOMER_COLUMNS = [
@@ -804,6 +840,13 @@ export const ORDER_ITEM_COLUMNS = [
 // readOrderItemsByOrderIds() (which retries on missing-column errors) rather
 // than passing this directly to fetchRowsIn — pre-migration DBs will error.
 export const ORDER_ITEM_SNAPSHOT_COLUMNS = 'basePriceSnapshot,offerPriceSnapshot'
+
+// Custom-item + price-adjustment columns added by
+// data/custom-items-and-manual-discount-migration.sql. Fetched the same
+// defensive way as ORDER_ITEM_SNAPSHOT_COLUMNS (separate best-effort query,
+// merged by id) so a pre-migration DB still returns every base line item —
+// it just won't have these extra fields yet.
+export const ORDER_ITEM_CUSTOM_COLUMNS = 'isCustomItem,customItemName,priceAdjustmentPct,priceAdjustmentReason'
 
 // Delivery columns — the "list" variant excludes the heavy productPhotos +
 // invoicePhoto base64 fields. Only single-order detail views should ask for
@@ -904,11 +947,13 @@ export async function readOrderItemsByOrderIds(
   // If caller asked for a custom column set we assume they know what they
   // want and don't add snapshots on top.
   if (columns !== ORDER_ITEM_COLUMNS) return baseRows
+  const ids = baseRows.map((r) => r.id).filter(Boolean)
+  if (ids.length === 0) return baseRows
+  const chunkSize = 200
+
+  let rows = baseRows
   try {
-    const ids = baseRows.map((r) => r.id).filter(Boolean)
-    if (ids.length === 0) return baseRows
     const snapshotMap = new Map<string, { basePriceSnapshot: number | null; offerPriceSnapshot: number | null }>()
-    const chunkSize = 200
     for (let i = 0; i < ids.length; i += chunkSize) {
       const chunk = ids.slice(i, i + chunkSize)
       const { data, error } = await supabase
@@ -918,7 +963,8 @@ export async function readOrderItemsByOrderIds(
       if (error) {
         // Column not yet migrated (or any other error) — silently give up
         // on snapshots for the WHOLE call. Never let this affect base rows.
-        return baseRows
+        rows = baseRows
+        throw error
       }
       for (const row of (data || []) as any[]) {
         if (row?.id) {
@@ -929,12 +975,48 @@ export async function readOrderItemsByOrderIds(
         }
       }
     }
-    return baseRows.map((r) => {
+    rows = baseRows.map((r) => {
       const snap = snapshotMap.get(r.id)
       return snap ? { ...r, ...snap } : r
     })
   } catch {
-    return baseRows
+    rows = baseRows
+  }
+
+  // Separate best-effort merge for the custom-item/price-adjustment columns
+  // (independent migration from the snapshot columns above) — same
+  // never-fail-the-base-rows guarantee.
+  try {
+    const customMap = new Map<string, {
+      isCustomItem: boolean | null
+      customItemName: string | null
+      priceAdjustmentPct: number | null
+      priceAdjustmentReason: string | null
+    }>()
+    for (let i = 0; i < ids.length; i += chunkSize) {
+      const chunk = ids.slice(i, i + chunkSize)
+      const { data, error } = await supabase
+        .from('order_items')
+        .select(`id,${ORDER_ITEM_CUSTOM_COLUMNS}`)
+        .in('id', chunk)
+      if (error) throw error
+      for (const row of (data || []) as any[]) {
+        if (row?.id) {
+          customMap.set(row.id, {
+            isCustomItem: row.isCustomItem ?? null,
+            customItemName: row.customItemName ?? null,
+            priceAdjustmentPct: row.priceAdjustmentPct != null ? Number(row.priceAdjustmentPct) : null,
+            priceAdjustmentReason: row.priceAdjustmentReason ?? null,
+          })
+        }
+      }
+    }
+    return rows.map((r) => {
+      const extra = customMap.get(r.id)
+      return extra ? { ...r, ...extra } : r
+    })
+  } catch {
+    return rows
   }
 }
 
@@ -1030,7 +1112,11 @@ export async function refreshOrderItemPriceSnapshots(
   }> = []
   const refreshed = orderItemsForOrder.map((item) => {
     const product = productById.get(item.productId)
-    // Deleted/missing product — keep the last known snapshot + price.
+    // Deleted/missing product — keep the last known snapshot + price. This
+    // also naturally covers custom (catalog-less) items: their productId is
+    // null/empty, so productIds.filter(Boolean) above never looked them up
+    // and product is always undefined here — their manually-entered price
+    // is never touched by a catalogue refresh.
     if (!product) return item
 
     const nextBase = catalogueKey === ONLINE_CATALOGUE_KEY
@@ -1085,19 +1171,52 @@ export async function refreshOrderItemPriceSnapshots(
  * whatever the last explicit Save set them to; only the price-driven totals
  * move. discountAmount is re-capped against the new orderTotal in case a
  * price refresh brought the total below what a previously-applied voucher
- * assumed. */
+ * assumed. `manualDiscountAmount` (B2B negotiated discount, optional,
+ * defaults to 0 for existing callers) stacks on top of discountAmount and is
+ * capped the same way. */
 export function computeOrderTotals(
   lineTotals: Array<number | null | undefined>,
   deliveryFee: number,
   discountAmount: number,
   walletUsed: number,
+  manualDiscountAmount: number = 0,
 ): { subtotal: number; orderTotal: number; netTotal: number } {
   const subtotal = lineTotals.reduce((sum: number, v) => sum + (Number(v) || 0), 0)
   const orderTotal = subtotal + (Number(deliveryFee) || 0)
   const cappedDiscount = Math.min(Number(discountAmount) || 0, orderTotal)
-  const afterVoucher = Math.max(0, orderTotal - cappedDiscount)
+  const cappedManualDiscount = Math.min(Number(manualDiscountAmount) || 0, Math.max(0, orderTotal - cappedDiscount))
+  const afterVoucher = Math.max(0, orderTotal - cappedDiscount - cappedManualDiscount)
   const netTotal = Math.max(0, afterVoucher - (Number(walletUsed) || 0))
   return { subtotal, orderTotal, netTotal }
+}
+
+/**
+ * Validate + resolve a B2B negotiated/manual discount from raw request
+ * input against the order's gross total. Server-side re-validation mirrors
+ * the discount-code path — the client only supplies type/value/reason, the
+ * actual EGP amount is always computed here so a tampered client payload
+ * can't claim an arbitrary discount.
+ *  - 'percent': value clamped to 0-100.
+ *  - 'fixed': value clamped to 0-orderTotal.
+ * Returns nulls/zeros when type is missing/invalid or value <= 0.
+ */
+export function resolveManualDiscount(
+  orderTotal: number,
+  rawType: unknown,
+  rawValue: unknown,
+  rawReason: unknown,
+): { type: 'percent' | 'fixed' | null; value: number; amount: number; reason: string | null } {
+  const type = rawType === 'percent' || rawType === 'fixed' ? rawType : null
+  const value = Math.max(0, Number(rawValue) || 0)
+  const reason = String(rawReason || '').trim() || null
+  if (!type || value <= 0) {
+    return { type: null, value: 0, amount: 0, reason: null }
+  }
+  const clampedValue = type === 'percent' ? Math.min(value, 100) : Math.min(value, orderTotal)
+  const amount = type === 'percent'
+    ? Math.round(orderTotal * (clampedValue / 100) * 100) / 100
+    : clampedValue
+  return { type, value: clampedValue, amount: Math.min(amount, orderTotal), reason }
 }
 
 // Windowed orders fetch — applies the column allowlist + optional date filter.

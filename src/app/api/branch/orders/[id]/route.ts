@@ -189,7 +189,7 @@ async function enrich(orderId: string, opts: { includePhotos: boolean }) {
 
     return {
       ...item,
-      productName: product?.productName || 'منتج محذوف',
+      productName: product?.productName || (item as any).customItemName || 'منتج محذوف',
       pricingMode,
       pricePerKg,
       basePrice: effectiveBase,
@@ -470,7 +470,7 @@ export async function PUT(
 
         branchLineDetails.push({
           itemId: updatedItem.id,
-          productName: product?.productName || '?',
+          productName: product?.productName || (existingItem as any).customItemName || '?',
           pricingMode,
           qtyChange: qtyChanged
             ? { from: existingItem.quantity, to: updatedItem.quantity }

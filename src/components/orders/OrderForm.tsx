@@ -78,6 +78,21 @@ type OrderItemForm = {
   basePriceSnapshot?: number | null
   /** Frozen offer price at order placement. null when no offer was active. */
   offerPriceSnapshot?: number | null
+  /**
+   * True for a one-off custom line with no catalog product behind it
+   * (free-text name typed by CS instead of picking from the catalogue).
+   * When true, `productNameInput` IS the custom item's name and `unitPrice`
+   * is fully free-entry.
+   */
+  isCustomItem?: boolean
+  /**
+   * Optional CS quick-adjust percentage applied on top of the catalogue
+   * price (e.g. +10 for a 10% surcharge). Purely an audit-trail record —
+   * `unitPrice` already reflects the adjusted price.
+   */
+  priceAdjustmentPct?: number | null
+  /** Required-in-UI free-text reason when priceAdjustmentPct is set. */
+  priceAdjustmentReason?: string | null
 }
 
 const normalizeProductName = (value: string) =>
@@ -199,6 +214,9 @@ const emptyItem = (): OrderItemForm => ({
   originalWeightGrams: null,
   basePriceSnapshot: null,
   offerPriceSnapshot: null,
+  isCustomItem: false,
+  priceAdjustmentPct: null,
+  priceAdjustmentReason: '',
 })
 
 /**
@@ -318,6 +336,11 @@ export default function OrderForm({ mode, orderId }: Props) {
   const [walletUsedInput, setWalletUsedInput] = useState<string>('')
   const [discountCodeInput, setDiscountCodeInput] = useState('')
   const [appliedDiscount, setAppliedDiscount] = useState<{ code: string; amount: number; type: 'percent' | 'value'; value: number } | null>(null)
+  // B2B negotiated/manual discount — a separate, parallel path alongside the
+  // promo/voucher discount above. Only shown/sent when orderType === 'B2B'.
+  const [manualDiscountType, setManualDiscountType] = useState<'' | 'percent' | 'fixed'>('')
+  const [manualDiscountValueInput, setManualDiscountValueInput] = useState('')
+  const [manualDiscountReason, setManualDiscountReason] = useState('')
   const [isCheckingDiscount, setIsCheckingDiscount] = useState(false)
   // Full-screen image preview (reuses already-loaded src — no extra egress).
   const [lightbox, setLightbox] = useState<{ src: string; alt?: string } | null>(null)
@@ -524,6 +547,9 @@ export default function OrderForm({ mode, orderId }: Props) {
             originalWeightGrams: item.originalWeightGrams ?? null,
             basePriceSnapshot: item.basePriceSnapshot ?? null,
             offerPriceSnapshot: item.offerPriceSnapshot ?? null,
+            isCustomItem: item.isCustomItem ?? false,
+            priceAdjustmentPct: item.priceAdjustmentPct ?? null,
+            priceAdjustmentReason: item.priceAdjustmentReason || '',
           }))
 
           setItems(mappedItems.length > 0 ? mappedItems : [emptyItem()])
@@ -546,6 +572,17 @@ export default function OrderForm({ mode, orderId }: Props) {
           } else {
             setAppliedDiscount(null)
             setDiscountCodeInput('')
+          }
+
+          // Restore the negotiated/manual (B2B) discount, if any.
+          if (order.manualDiscountType && Number(order.manualDiscountAmount) > 0) {
+            setManualDiscountType(order.manualDiscountType)
+            setManualDiscountValueInput(String(order.manualDiscountValue ?? ''))
+            setManualDiscountReason(order.manualDiscountReason || '')
+          } else {
+            setManualDiscountType('')
+            setManualDiscountValueInput('')
+            setManualDiscountReason('')
           }
 
           // Restore previously-applied wallet usage (if any) so editing
@@ -704,12 +741,22 @@ export default function OrderForm({ mode, orderId }: Props) {
 
   // Voucher / discount-code applied to the gross total
   const discountAmount = appliedDiscount ? Math.min(appliedDiscount.amount, orderTotal) : 0
+  // B2B negotiated/manual discount — stacks on top of the voucher discount
+  // above. Mirrors the server's resolveManualDiscount() so the on-screen
+  // preview matches what will actually be persisted.
+  const manualDiscountBase = Math.max(0, orderTotal - discountAmount)
+  const manualDiscountValueRaw = Math.max(0, Number(manualDiscountValueInput) || 0)
+  const manualDiscountAmount = !manualDiscountType || manualDiscountValueRaw <= 0
+    ? 0
+    : manualDiscountType === 'percent'
+      ? Math.min(Math.round(manualDiscountBase * (Math.min(manualDiscountValueRaw, 100) / 100) * 100) / 100, manualDiscountBase)
+      : Math.min(manualDiscountValueRaw, manualDiscountBase)
   // Wallet credit applied on top of the voucher. We cap the wallet
   // application to (a) what the customer actually has + whatever was
   // already debited on this order in edit mode — so editing a saved order
   // doesn't artificially shrink the cap — and (b) what's still owed after
   // the voucher is taken off, so the customer is never charged below 0.
-  const afterVoucher = Math.max(0, orderTotal - discountAmount)
+  const afterVoucher = Math.max(0, orderTotal - discountAmount - manualDiscountAmount)
   const walletAvailable = Math.max(0, (customerWalletBalance ?? 0) + previousWalletUsed)
   const walletUsedRaw = Number(walletUsedInput) || 0
   const walletUsed = Math.max(0, Math.min(walletUsedRaw, walletAvailable, afterVoucher))
@@ -1023,6 +1070,10 @@ export default function OrderForm({ mode, orderId }: Props) {
     setDirtyFlag(true)
     setItems((prev) => [...prev, emptyItem()])
   }
+  const addCustomItem = () => {
+    setDirtyFlag(true)
+    setItems((prev) => [...prev, { ...emptyItem(), isCustomItem: true }])
+  }
   const removeItem = (index: number) => {
     setDirtyFlag(true)
     setItems((prev) => {
@@ -1138,6 +1189,14 @@ export default function OrderForm({ mode, orderId }: Props) {
 
     const normalizedItems = items
       .map((i) => {
+        if (i.isCustomItem) {
+          return {
+            ...i,
+            productId: '',
+            weightGrams: Number(i.weightGrams) || 0,
+            unitPrice: Number(i.unitPrice) || 0,
+          }
+        }
         const productByName = findProductByName(catalogueProducts, i.productNameInput)
 
         return {
@@ -1147,10 +1206,14 @@ export default function OrderForm({ mode, orderId }: Props) {
           unitPrice: Number(i.unitPrice) || Number(productByName?.offerPrice ?? productByName?.basePrice ?? 0),
         }
       })
-      .filter((i) => i.productId && i.quantity > 0 && i.productNameInput.trim())
+      .filter((i) => (i.isCustomItem ? i.productNameInput.trim() : i.productId) && i.quantity > 0 && i.productNameInput.trim())
 
     const validItems = normalizedItems
     if (validItems.length === 0) return toast.error('أضف منتجاً واحداً على الأقل')
+
+    if (manualDiscountType && !manualDiscountReason.trim()) {
+      return toast.error('أدخل سبب الخصم التفاوضي')
+    }
 
     // Stock checks: surface as non-blocking warnings so CS can still place the
     // order (e.g. customer wants to wait for restock, or branch has stock not
@@ -1228,6 +1291,9 @@ export default function OrderForm({ mode, orderId }: Props) {
         deliverySubArea: form.deliverySubArea || '',
         items: validItems,
         discountCode: appliedDiscount?.code || null,
+        manualDiscountType: manualDiscountType || null,
+        manualDiscountValue: manualDiscountType ? manualDiscountValueRaw : null,
+        manualDiscountReason: manualDiscountType ? manualDiscountReason.trim() : null,
         walletUsed,
         createdBy: user?.name || user?.id || 'unknown',
         role: user?.role || '',
@@ -1528,7 +1594,7 @@ export default function OrderForm({ mode, orderId }: Props) {
             </thead>
             <tbody>
               {items.map((item, index) => {
-                const selectedProduct = findProductByName(catalogueProducts, item.productNameInput)
+                const selectedProduct = item.isCustomItem ? null : findProductByName(catalogueProducts, item.productNameInput)
                 const lineTotal = (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0)
                 const isWeightMode = selectedProduct?.pricingMode === 'weight'
                 // Frozen-price display resolution — everything else on this
@@ -1581,14 +1647,32 @@ export default function OrderForm({ mode, orderId }: Props) {
                   <tr className={rowCls}>
                     <td className="p-2 align-top">
                       <div className="flex items-center gap-1">
-                        <input
-                          list={`products-${index}`}
-                          value={item.productNameInput}
-                          onChange={(e) => onProductNameChange(index, e.target.value)}
-                          className={`flex-1 px-2 py-1 border rounded ${selectedProduct?.isTargeted ? 'border-amber-400 bg-amber-50' : ''}`}
-                          placeholder="ابحث عن منتج"
-                          dir="rtl"
-                        />
+                        {item.isCustomItem ? (
+                          <input
+                            value={item.productNameInput}
+                            onChange={(e) => updateItem(index, { productNameInput: e.target.value })}
+                            className="flex-1 px-2 py-1 border rounded border-purple-300 bg-purple-50"
+                            placeholder="اسم الصنف المخصص"
+                            dir="rtl"
+                          />
+                        ) : (
+                          <input
+                            list={`products-${index}`}
+                            value={item.productNameInput}
+                            onChange={(e) => onProductNameChange(index, e.target.value)}
+                            className={`flex-1 px-2 py-1 border rounded ${selectedProduct?.isTargeted ? 'border-amber-400 bg-amber-50' : ''}`}
+                            placeholder="ابحث عن منتج"
+                            dir="rtl"
+                          />
+                        )}
+                        {item.isCustomItem && (
+                          <span
+                            className="shrink-0 px-1.5 py-0.5 rounded bg-purple-500 text-white text-[10px] font-bold"
+                            title="صنف مخصص خارج الكتالوج"
+                          >
+                            مخصص
+                          </span>
+                        )}
                         {selectedProduct?.isTargeted && (
                           <span
                             className="shrink-0 px-1.5 py-0.5 rounded bg-amber-500 text-white text-[10px] font-bold"
@@ -1620,11 +1704,13 @@ export default function OrderForm({ mode, orderId }: Props) {
                             : `⚠️ مخزون منخفض${selectedProduct.stockQuantity != null ? ` — متبقي ${selectedProduct.stockQuantity}` : ''}`}
                         </div>
                       )}
-                      <datalist id={`products-${index}`}>
-                        {catalogueProducts.map((p) => (
-                          <option key={p.id} value={p.productName} />
-                        ))}
-                      </datalist>
+                      {!item.isCustomItem && (
+                        <datalist id={`products-${index}`}>
+                          {catalogueProducts.map((p) => (
+                            <option key={p.id} value={p.productName} />
+                          ))}
+                        </datalist>
+                      )}
                     </td>
                     <td className="p-2 text-sm text-gray-700 whitespace-nowrap">
                       {selectedProduct
@@ -1704,6 +1790,47 @@ export default function OrderForm({ mode, orderId }: Props) {
                       <button type="button" onClick={() => removeItem(index)} className="px-2 py-1 rounded bg-red-100 text-red-700">✖</button>
                     </td>
                   </tr>
+                  {/* Quick "+X%" price-adjustment shortcut for catalogue
+                      items only (custom items already have a fully free
+                      unitPrice, no adjustment needed). Recomputes unitPrice
+                      live off the reference price (offer if active, else
+                      base) and requires a reason once a non-zero pct is set
+                      — an audit trail for CS price overrides. */}
+                  {selectedProduct && !isWeightMode && (
+                    <tr className={rowCls}>
+                      <td colSpan={8} className="p-2 pt-0">
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                          <label className="text-xs font-semibold text-gray-700 whitespace-nowrap">
+                            ⚡ تعديل سريع %{item.priceAdjustmentPct ? ' ✅' : ''}
+                          </label>
+                          <input
+                            type="number"
+                            value={item.priceAdjustmentPct ?? ''}
+                            onChange={(e) => {
+                              const raw = e.target.value
+                              const pct = raw === '' ? null : Number(raw)
+                              const refBase = hasValidOffer ? (displayOffer as number) : displayBase
+                              const nextUnit = pct == null ? refBase : Math.round(refBase * (1 + pct / 100) * 100) / 100
+                              updateItem(index, { priceAdjustmentPct: pct, unitPrice: nextUnit })
+                            }}
+                            placeholder="مثال: 10 أو -5"
+                            className="w-24 px-2 py-1 border rounded text-left"
+                            dir="ltr"
+                          />
+                          {item.priceAdjustmentPct != null && item.priceAdjustmentPct !== 0 && (
+                            <input
+                              type="text"
+                              value={item.priceAdjustmentReason || ''}
+                              onChange={(e) => updateItem(index, { priceAdjustmentReason: e.target.value })}
+                              placeholder="سبب التعديل (مطلوب)"
+                              className="flex-1 px-2 py-1 border rounded"
+                              dir="rtl"
+                            />
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                   {/* Special-instructions row — full-width so it stays visible
                       on mobile without horizontal scrolling. Renders as a
                       multiline textarea with a clear label + highlight when
@@ -1734,9 +1861,12 @@ export default function OrderForm({ mode, orderId }: Props) {
           </table>
         </div>
 
-        <div className="mt-3">
+        <div className="mt-3 flex flex-wrap gap-2">
           <button type="button" onClick={addItem} className="px-4 py-2 rounded-lg bg-red-100 text-red-700 hover:bg-red-200">
             + إضافة عنصر
+          </button>
+          <button type="button" onClick={addCustomItem} className="px-4 py-2 rounded-lg bg-purple-100 text-purple-700 hover:bg-purple-200">
+            ➕ صنف مخصص
           </button>
         </div>
 
@@ -1802,6 +1932,59 @@ export default function OrderForm({ mode, orderId }: Props) {
               </div>
             )}
           </div>
+
+        {form.orderType === 'B2B' && (
+          <div className="mt-3 rounded-lg border-2 border-sky-200 bg-sky-50 p-3">
+            <div className="text-sm font-semibold text-sky-900 mb-2">🤝 خصم بالتفاوض (B2B)</div>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <select
+                value={manualDiscountType}
+                onChange={(e) => {
+                  const next = e.target.value as '' | 'percent' | 'fixed'
+                  setManualDiscountType(next)
+                  if (!next) {
+                    setManualDiscountValueInput('')
+                    setManualDiscountReason('')
+                  }
+                }}
+                className="sm:w-40 px-3 py-2 border border-sky-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-sky-400"
+              >
+                <option value="">بدون خصم تفاوضي</option>
+                <option value="percent">نسبة %</option>
+                <option value="fixed">مبلغ ثابت (ج.م)</option>
+              </select>
+              {manualDiscountType && (
+                <input
+                  type="number"
+                  min={0}
+                  max={manualDiscountType === 'percent' ? 100 : undefined}
+                  step="1"
+                  value={manualDiscountValueInput}
+                  onChange={(e) => setManualDiscountValueInput(e.target.value)}
+                  placeholder={manualDiscountType === 'percent' ? 'مثال: 10' : 'مثال: 100'}
+                  className="flex-1 px-3 py-2 border border-sky-300 rounded-lg text-left bg-white focus:outline-none focus:ring-2 focus:ring-sky-400"
+                  dir="ltr"
+                />
+              )}
+            </div>
+            {manualDiscountType && (
+              <>
+                <input
+                  type="text"
+                  value={manualDiscountReason}
+                  onChange={(e) => setManualDiscountReason(e.target.value)}
+                  placeholder="سبب الخصم (مطلوب)"
+                  className="mt-2 w-full px-3 py-2 border border-sky-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-sky-400"
+                />
+                {manualDiscountAmount > 0 && (
+                  <p className="mt-1 text-xs text-sky-800">
+                    قيمة الخصم التفاوضي: <span className="font-bold">{manualDiscountAmount.toLocaleString()} ج.م</span>
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        )}
 
         {selectedZone && freeDeliveryValue > 0 && (
           <p className="mt-2 text-xs text-gray-600 text-right">

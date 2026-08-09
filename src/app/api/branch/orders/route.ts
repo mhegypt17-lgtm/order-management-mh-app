@@ -83,7 +83,7 @@ async function enrichOrderForBranch(order: OrderRecord) {
       const product = products.find((p: any) => p.id === item.productId)
       return {
         ...item,
-        productName: product?.productName || 'منتج محذوف',
+        productName: product?.productName || (item as any).customItemName || 'منتج محذوف',
       }
     })
 
@@ -231,7 +231,7 @@ export async function GET(request: NextRequest) {
         const product = productById.get(item.productId)
         return {
           ...item,
-          productName: product?.productName || 'منتج محذوف',
+          productName: product?.productName || (item as any).customItemName || 'منتج محذوف',
         }
       })
       return {

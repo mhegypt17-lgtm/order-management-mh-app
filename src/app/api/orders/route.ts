@@ -21,6 +21,7 @@ import {
   readProductsByIds,
   readOrdersWindow,
   readOrderSettings,
+  resolveManualDiscount,
   DELIVERY_COLUMNS_LIST,
   ORDER_COLUMNS_LIST,
 } from '@/lib/omsData'
@@ -54,6 +55,11 @@ type OrderInputItem = {
   weightGrams: number
   unitPrice: number
   specialInstructions: string
+  /** True for a one-off custom line with no catalog product behind it. */
+  isCustomItem?: boolean
+  /** Optional CS quick-adjust % audit note for a regular catalog line. */
+  priceAdjustmentPct?: number | null
+  priceAdjustmentReason?: string | null
 }
 
 function normalizeProductName(value: string) {
@@ -126,7 +132,7 @@ async function enrichOrder(
     const product = ctx.productsById.get(item.productId)
     return {
       ...item,
-      productName: product?.productName || 'منتج محذوف',
+      productName: product?.productName || (item as any).customItemName || 'منتج محذوف',
     }
   })
 
@@ -468,10 +474,12 @@ export async function POST(request: NextRequest) {
         const matchedProduct = findMatchedProduct(products, i.productNameInput)
         return {
           ...i,
-          productId: i.productId || matchedProduct?.id || '',
+          productId: i.isCustomItem ? '' : (i.productId || matchedProduct?.id || ''),
         }
       })
-      .filter((i) => i.productId && Number(i.quantity) > 0)
+      // Custom (catalog-less) lines are valid with just a name + qty; regular
+      // lines still require a matched/selected catalog product.
+      .filter((i) => (i.isCustomItem ? String(i.productNameInput || '').trim() : i.productId) && Number(i.quantity) > 0)
       .map((i) => {
         const quantity = Number(i.quantity) || 1
         const unitPrice = Number(i.unitPrice) || 0
@@ -505,7 +513,16 @@ export async function POST(request: NextRequest) {
         discountAmount = Math.min(Number(evald.discount) || 0, orderTotal)
       }
     }
-    const afterVoucher = Math.max(0, orderTotal - discountAmount)
+
+    // B2B negotiated/manual discount — re-validated server-side the same
+    // way as the promo code above, stacked on top of it.
+    const manualDiscount = resolveManualDiscount(
+      Math.max(0, orderTotal - discountAmount),
+      body.manualDiscountType,
+      body.manualDiscountValue,
+      body.manualDiscountReason,
+    )
+    const afterVoucher = Math.max(0, orderTotal - discountAmount - manualDiscount.amount)
 
     // Wallet-credit re-validation: cap to (a) the customer's available
     // wallet and (b) the amount still owed after the voucher, so we never
@@ -523,6 +540,7 @@ export async function POST(request: NextRequest) {
       walletUsed = Math.max(0, Math.min(Number(body.walletUsed), available, afterVoucher))
     }
     const netTotal = Math.max(0, afterVoucher - walletUsed)
+
 
     // Get existing orders for that same date+type only (cheap & accurate)
     const dateKey = (() => {
@@ -576,6 +594,10 @@ export async function POST(request: NextRequest) {
       orderTotal,
       discountCode,
       discountAmount,
+      manualDiscountType: manualDiscount.type,
+      manualDiscountValue: manualDiscount.value,
+      manualDiscountAmount: manualDiscount.amount,
+      manualDiscountReason: manualDiscount.reason,
       netTotal,
       walletUsed,
       csAttachments: Array.isArray(body.csAttachments) ? body.csAttachments : [],
@@ -651,6 +673,22 @@ export async function POST(request: NextRequest) {
       finalError = retry.error
     }
 
+    // Fallback: DB may not yet have the manual (B2B negotiated) discount
+    // columns from data/custom-items-and-manual-discount-migration.sql.
+    if (finalError && errorMentions(finalError, 'manualDiscountType', 'manualDiscountValue', 'manualDiscountAmount', 'manualDiscountReason')) {
+      console.warn('[orders POST] manual discount columns missing in DB, retrying without them')
+      const {
+        manualDiscountType: _mdt,
+        manualDiscountValue: _mdv,
+        manualDiscountAmount: _mda,
+        manualDiscountReason: _mdr,
+        ...orderSafe
+      } = order as any
+      const retry = await supabase.from('orders').insert([orderSafe]).select().single()
+      finalOrder = retry.data
+      finalError = retry.error
+    }
+
     // Fallback: DB may not yet have the csAttachments column.
     if (finalError && errorMentions(finalError, 'csAttachments')) {
       console.warn('[orders POST] csAttachments column missing in DB, retrying without it')
@@ -692,15 +730,20 @@ export async function POST(request: NextRequest) {
     const orderSettings = await readOrderSettings()
     const catalogueKey = resolveCatalogueKey(body.orderType, orderSettings.catalogues)
     const productById = new Map<string, any>((products as any[]).map((p) => [p.id, p]))
+    // Custom (catalog-less) lines: productId stays null (requires
+    // data/custom-items-and-manual-discount-migration.sql to have relaxed
+    // the NOT NULL constraint — pre-migration, inserting one of these will
+    // fail the items insert while the order itself still succeeds), and
+    // there's no catalogue price to snapshot.
     const newItems: any[] = normalizedItems.map((i) => {
-      const p = productById.get(i.productId)
+      const p = i.isCustomItem ? null : productById.get(i.productId)
       const base = p ? catalogueBasePrice(p, catalogueKey) : null
       const offerRaw = p ? catalogueOfferPrice(p, catalogueKey) : null
       const offer = offerRaw != null && offerRaw > 0 ? offerRaw : null
       return {
         id: generateTextId('item'),
         orderId: orderId,
-        productId: i.productId,
+        productId: i.isCustomItem ? null : i.productId,
         quantity: i.quantity,
         weightGrams: i.weightGrams,
         unitPrice: i.unitPrice,
@@ -709,6 +752,10 @@ export async function POST(request: NextRequest) {
         createdAt: now,
         basePriceSnapshot: base,
         offerPriceSnapshot: offer,
+        isCustomItem: Boolean(i.isCustomItem),
+        customItemName: i.isCustomItem ? (String(i.productNameInput || '').trim() || null) : null,
+        priceAdjustmentPct: i.priceAdjustmentPct != null ? Number(i.priceAdjustmentPct) : null,
+        priceAdjustmentReason: i.priceAdjustmentReason ? String(i.priceAdjustmentReason).trim() || null : null,
       }
     })
 
@@ -717,17 +764,26 @@ export async function POST(request: NextRequest) {
         .from('order_items')
         .insert(newItems)
 
-      // Bulletproof fallback: if the FIRST insert (which includes snapshot
-      // columns) fails for ANY reason, retry once with the snapshot columns
-      // stripped. Supabase returns two DIFFERENT error shapes for a missing
-      // column — Postgres `42703 column X does not exist` AND PostgREST
-      // `PGRST204 Could not find the '…' column of '…' in the schema cache`
-      // — and matching only one causes silent data loss. Losing the
-      // snapshot enrichment is acceptable; losing the whole line item is
-      // not. If the retry ALSO fails we surface that as the real error.
+      // Bulletproof fallback: if the FIRST insert (which includes snapshot +
+      // custom-item columns) fails for ANY reason, retry once with all of
+      // those additive columns stripped. Supabase returns two DIFFERENT
+      // error shapes for a missing column — Postgres `42703 column X does
+      // not exist` AND PostgREST `PGRST204 Could not find the '…' column of
+      // '…' in the schema cache` — and matching only one causes silent data
+      // loss. Losing the snapshot/custom-item enrichment is acceptable;
+      // losing the whole line item is not. If the retry ALSO fails we
+      // surface that as the real error.
       if (itemsError) {
         const stripped = newItems.map((n) => {
-          const { basePriceSnapshot: _b, offerPriceSnapshot: _o, ...rest } = n
+          const {
+            basePriceSnapshot: _b,
+            offerPriceSnapshot: _o,
+            isCustomItem: _ici,
+            customItemName: _cin,
+            priceAdjustmentPct: _pap,
+            priceAdjustmentReason: _par,
+            ...rest
+          } = n
           return rest
         })
         const retry = await supabase.from('order_items').insert(stripped)

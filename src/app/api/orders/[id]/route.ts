@@ -21,6 +21,7 @@ import {
   isDueForPriceRefresh,
   refreshOrderItemPriceSnapshots,
   computeOrderTotals,
+  resolveManualDiscount,
   ORDER_COLUMNS,
   ORDER_COLUMNS_LIST,
   CUSTOMER_COLUMNS,
@@ -45,6 +46,11 @@ type OrderUpdateItem = {
   weightGrams: number
   unitPrice: number
   specialInstructions: string
+  /** True for a one-off custom line with no catalog product behind it. */
+  isCustomItem?: boolean
+  /** Optional CS quick-adjust % audit note for a regular catalog line. */
+  priceAdjustmentPct?: number | null
+  priceAdjustmentReason?: string | null
 }
 
 function normalizeProductName(value: string) {
@@ -147,6 +153,7 @@ async function enrichOrder(order: OrderRecord, opts: { includePhotos: boolean } 
       (order as any).deliveryFee,
       (order as any).discountAmount,
       (order as any).walletUsed,
+      (order as any).manualDiscountAmount,
     )
     await supabase
       .from('orders')
@@ -170,7 +177,7 @@ async function enrichOrder(order: OrderRecord, opts: { includePhotos: boolean } 
     const product = productsById.get(item.productId)
     return {
       ...item,
-      productName: product?.productName || 'منتج محذوف',
+      productName: product?.productName || (item as any).customItemName || 'منتج محذوف',
     }
   })
 
@@ -504,10 +511,12 @@ export async function PUT(
         const matchedProduct = findMatchedProduct(products, i.productNameInput)
         return {
           ...i,
-          productId: i.productId || (matchedProduct ? matchedProduct.id : ''),
+          productId: i.isCustomItem ? '' : (i.productId || (matchedProduct ? matchedProduct.id : '')),
         }
       })
-      .filter((i) => i.productId && Number(i.quantity) > 0)
+      // Custom (catalog-less) lines are valid with just a name + qty; regular
+      // lines still require a matched/selected catalog product.
+      .filter((i) => (i.isCustomItem ? String(i.productNameInput || '').trim() : i.productId) && Number(i.quantity) > 0)
       .map((i) => {
         const quantity = Number(i.quantity) || 1
         const unitPrice = Number(i.unitPrice) || 0
@@ -565,6 +574,30 @@ export async function PUT(
     }
     const afterVoucher = Math.max(0, orderTotal - nextDiscountAmount)
 
+    // B2B negotiated/manual discount — same partial-PUT semantics as the
+    // discount code above: only re-evaluate when the client explicitly sent
+    // manualDiscountType/Value, otherwise keep whatever was previously
+    // saved (re-capped against the new gross in case the basket shifted).
+    let nextManualDiscountType = (existing as any).manualDiscountType ?? null
+    let nextManualDiscountValue = Number((existing as any).manualDiscountValue) || 0
+    let nextManualDiscountAmount = Number((existing as any).manualDiscountAmount) || 0
+    let nextManualDiscountReason = (existing as any).manualDiscountReason ?? null
+    if (
+      Object.prototype.hasOwnProperty.call(body, 'manualDiscountType') ||
+      Object.prototype.hasOwnProperty.call(body, 'manualDiscountValue')
+    ) {
+      const resolved = resolveManualDiscount(afterVoucher, body.manualDiscountType, body.manualDiscountValue, body.manualDiscountReason)
+      nextManualDiscountType = resolved.type
+      nextManualDiscountValue = resolved.value
+      nextManualDiscountAmount = resolved.amount
+      nextManualDiscountReason = resolved.reason
+    } else if (nextManualDiscountType) {
+      // Unchanged by the client but re-cap against the new gross.
+      const resolved = resolveManualDiscount(afterVoucher, nextManualDiscountType, nextManualDiscountValue, nextManualDiscountReason)
+      nextManualDiscountAmount = resolved.amount
+    }
+    const afterManualDiscount = Math.max(0, afterVoucher - nextManualDiscountAmount)
+
     // Wallet-credit handling on edit. We treat the incoming walletUsed as
     // a *target* and reconcile against (a) what was previously debited on
     // this same order and (b) the customer's current balance. The customer's
@@ -581,15 +614,15 @@ export async function PUT(
       const currentBalance = Math.max(0, Number(walletRow?.wallet) || 0)
       // Customer can spend at most (currentBalance + previousWalletUsed),
       // because the previousWalletUsed amount has already been debited.
-      const cap = Math.min(currentBalance + previousWalletUsed, afterVoucher)
+      const cap = Math.min(currentBalance + previousWalletUsed, afterManualDiscount)
       nextWalletUsed = Math.max(0, Math.min(requested, cap))
     } else {
       // Client didn't send walletUsed at all (partial PUT). Keep whatever
       // was saved, but clamp it to the new owed amount so we never debit
       // more than the customer actually has to pay.
-      nextWalletUsed = Math.min(previousWalletUsed, afterVoucher)
+      nextWalletUsed = Math.min(previousWalletUsed, afterManualDiscount)
     }
-    const nextNetTotal = Math.max(0, afterVoucher - nextWalletUsed)
+    const nextNetTotal = Math.max(0, afterManualDiscount - nextWalletUsed)
 
     const changedFields: string[] = []
     if (existing.orderStatus !== body.orderStatus) changedFields.push('orderStatus')
@@ -601,9 +634,17 @@ export async function PUT(
 
     const remainingItems = orderItems.filter((i) => i.orderId !== params.id)
     // Existing items for this order, used to preserve branch-amend snapshots
-    // (originalQuantity / originalWeightGrams) across a CS save. We match
-    // surviving lines by productId since CS regenerates item ids on save.
+    // (originalQuantity / originalWeightGrams) across a CS save. Regular
+    // lines are matched by productId; custom (catalog-less) lines have no
+    // productId so they're matched by isCustomItem + customItemName instead
+    // (otherwise every custom line would collide on productId === '').
     const existingForOrder = orderItems.filter((i) => i.orderId === params.id)
+    const findPriorItem = (i: (typeof normalizedItems)[number]) =>
+      i.isCustomItem
+        ? existingForOrder.find(
+            (p: any) => p.isCustomItem && p.customItemName === String(i.productNameInput || '').trim(),
+          )
+        : existingForOrder.find((p) => p.productId === i.productId)
     const productById = new Map<string, any>((products as any[]).map((p) => [p.id, p]))
     // Catalogue-aware pricing for brand-new lines — must mirror orders/
     // route.ts's POST handler, otherwise a new line added while editing a
@@ -616,7 +657,7 @@ export async function PUT(
     const newLineProductIds = [
       ...new Set(
         normalizedItems
-          .filter((i) => !existingForOrder.some((p) => p.productId === i.productId))
+          .filter((i) => !i.isCustomItem && !existingForOrder.some((p) => p.productId === i.productId))
           .map((i) => i.productId),
       ),
     ]
@@ -637,7 +678,7 @@ export async function PUT(
       }
     }
     const rewrittenItems: any[] = normalizedItems.map((i) => {
-      const prior = existingForOrder.find((p) => p.productId === i.productId)
+      const prior = findPriorItem(i)
       // Price-snapshot preservation rule:
       //   • If this productId already existed on the order, keep the prior
       //     snapshot EXACTLY — including null. We never retroactively
@@ -646,16 +687,19 @@ export async function PUT(
       //     current product's catalogue-specific base/offer price as the
       //     new snapshot (resolved via the order's own catalogue, not the
       //     legacy online columns).
+      //   • Custom (catalog-less) lines never get a catalogue snapshot —
+      //     productId is empty so productNow/nonOnlinePrice lookups above
+      //     always miss, leaving both null.
       const isExistingLine = !!prior
-      const productNow = productById.get(i.productId)
-      const nonOnlinePrice = nonOnlinePricesById.get(i.productId)
+      const productNow = i.isCustomItem ? null : productById.get(i.productId)
+      const nonOnlinePrice = i.isCustomItem ? null : nonOnlinePricesById.get(i.productId)
       const basePriceSnapshot = isExistingLine
-        ? (prior!.basePriceSnapshot ?? null)
+        ? ((prior as any)!.basePriceSnapshot ?? null)
         : catalogueKeyForEdit === ONLINE_CATALOGUE_KEY
         ? (productNow?.basePrice != null ? Number(productNow.basePrice) : null)
         : (nonOnlinePrice?.basePrice ?? null)
       const offerRaw = isExistingLine
-        ? (prior!.offerPriceSnapshot ?? null)
+        ? ((prior as any)!.offerPriceSnapshot ?? null)
         : catalogueKeyForEdit === ONLINE_CATALOGUE_KEY
         ? (productNow?.offerPrice != null ? Number(productNow.offerPrice) : null)
         : (nonOnlinePrice?.offerPrice ?? null)
@@ -663,7 +707,7 @@ export async function PUT(
       return {
         id: generateId('item'),
         orderId: params.id,
-        productId: i.productId,
+        productId: i.isCustomItem ? null : i.productId,
         quantity: i.quantity,
         weightGrams: i.weightGrams,
         unitPrice: i.unitPrice,
@@ -672,11 +716,15 @@ export async function PUT(
         createdAt: now,
         // Preserve branch's "original CS value" snapshot if branch had
         // amended this line before — otherwise stay null.
-        originalQuantity: prior?.originalQuantity ?? null,
-        originalWeightGrams: prior?.originalWeightGrams ?? null,
+        originalQuantity: (prior as any)?.originalQuantity ?? null,
+        originalWeightGrams: (prior as any)?.originalWeightGrams ?? null,
         // Frozen price at order placement (null on pre-migration rows).
         basePriceSnapshot,
         offerPriceSnapshot,
+        isCustomItem: Boolean(i.isCustomItem),
+        customItemName: i.isCustomItem ? (String(i.productNameInput || '').trim() || null) : null,
+        priceAdjustmentPct: i.priceAdjustmentPct != null ? Number(i.priceAdjustmentPct) : null,
+        priceAdjustmentReason: i.priceAdjustmentReason ? String(i.priceAdjustmentReason).trim() || null : null,
       }
     })
 
@@ -706,6 +754,10 @@ export async function PUT(
       orderTotal,
       discountCode: nextDiscountCode,
       discountAmount: nextDiscountAmount,
+      manualDiscountType: nextManualDiscountType,
+      manualDiscountValue: nextManualDiscountValue,
+      manualDiscountAmount: nextManualDiscountAmount,
+      manualDiscountReason: nextManualDiscountReason,
       netTotal: nextNetTotal,
       walletUsed: nextWalletUsed,
       csAttachments: Array.isArray(body.csAttachments)
@@ -725,7 +777,7 @@ export async function PUT(
     // error — not the original — so the next fallback only fires when
     // there really is more work to do.
     let lastError = updRes.error
-    const stripped = { scheduled: false, discount: false, csAttachments: false, walletUsed: false }
+    const stripped = { scheduled: false, discount: false, manualDiscount: false, csAttachments: false, walletUsed: false }
 
     const errorMentions = (err: any, ...names: string[]) => {
       if (!err) return false
@@ -747,6 +799,19 @@ export async function PUT(
       const retry = await supabase.from('orders').update(safe).eq('id', params.id)
       lastError = retry.error
       stripped.discount = true
+    }
+    if (lastError && errorMentions(lastError, 'manualDiscountType', 'manualDiscountValue', 'manualDiscountAmount', 'manualDiscountReason')) {
+      console.warn('[orders PUT] manual discount columns missing, retrying without them')
+      const {
+        manualDiscountType: _mdt,
+        manualDiscountValue: _mdv,
+        manualDiscountAmount: _mda,
+        manualDiscountReason: _mdr,
+        ...safe
+      } = updatedOrder as any
+      const retry = await supabase.from('orders').update(safe).eq('id', params.id)
+      lastError = retry.error
+      stripped.manualDiscount = true
     }
     if (lastError && errorMentions(lastError, 'csAttachments')) {
       // csAttachments column hasn't been added yet — retry without it.
@@ -792,7 +857,15 @@ export async function PUT(
       // product re-price.
       if (insErr) {
         const stripped = rewrittenItems.map((r) => {
-          const { basePriceSnapshot: _b, offerPriceSnapshot: _o, ...rest } = r
+          const {
+            basePriceSnapshot: _b,
+            offerPriceSnapshot: _o,
+            isCustomItem: _ici,
+            customItemName: _cin,
+            priceAdjustmentPct: _pap,
+            priceAdjustmentReason: _par,
+            ...rest
+          } = r
           return rest
         })
         const retry = await supabase.from('order_items').insert(stripped)
