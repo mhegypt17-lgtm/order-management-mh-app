@@ -1061,15 +1061,24 @@ export default function OrderForm({ mode, orderId }: Props) {
     // configured estimated weight (or default to 1000g) and compute the
     // per-piece price = pricePerKg * estimatedKg.
     const estimatedGrams = Number(selected.weightGrams) > 0 ? Number(selected.weightGrams) : 1000
-    const unitPrice = isWeight
+    let unitPrice = isWeight
       ? Math.round(pricePerUnit * (estimatedGrams / 1000) * 100) / 100
       : pricePerUnit
+
+    // Online/App (non-weight items only) default to a +10% customization/
+    // service charge on top of the catalogue price — CS can freely change
+    // or clear it per item via the "⚡ تعديل سريع %" row.
+    const defaultAdjustmentPct = !isWeight && (form.orderType === 'Online' || form.orderType === 'App') ? 10 : null
+    if (defaultAdjustmentPct) {
+      unitPrice = Math.round(unitPrice * (1 + defaultAdjustmentPct / 100) * 100) / 100
+    }
 
     updateItem(index, {
       productNameInput: productName,
       productId: selected.id,
       weightGrams: isWeight ? estimatedGrams : Number(selected.weightGrams) || 0,
       unitPrice,
+      priceAdjustmentPct: defaultAdjustmentPct,
     })
   }
 
@@ -1671,7 +1680,7 @@ export default function OrderForm({ mode, orderId }: Props) {
                             value={item.productNameInput}
                             onChange={(e) => updateItem(index, { productNameInput: e.target.value })}
                             className="flex-1 px-2 py-1 border rounded border-purple-300 bg-purple-50"
-                            placeholder="اسم الصنف المخصص"
+                            placeholder="وصف رسوم الخدمة"
                             dir="rtl"
                           />
                         ) : (
@@ -1687,9 +1696,9 @@ export default function OrderForm({ mode, orderId }: Props) {
                         {item.isCustomItem && (
                           <span
                             className="shrink-0 px-1.5 py-0.5 rounded bg-purple-500 text-white text-[10px] font-bold"
-                            title="صنف مخصص خارج الكتالوج"
+                            title="رسوم خدمة — أي وصف وأي قيمة"
                           >
-                            مخصص
+                            رسوم خدمة
                           </span>
                         )}
                         {selectedProduct?.isTargeted && (
@@ -1822,17 +1831,18 @@ export default function OrderForm({ mode, orderId }: Props) {
                     </td>
                   </tr>
                   {/* Quick "+X%" price-adjustment shortcut for catalogue
-                      items only (custom items already have a fully free
-                      unitPrice, no adjustment needed). Recomputes unitPrice
-                      live off the reference price (offer if active, else
-                      base) and requires a reason once a non-zero pct is set
-                      — an audit trail for CS price overrides. Not offered
-                      for B2B — the unit price itself is already freely
-                      editable there (up with no limit, down to the
-                      discounted price), so a separate %-shortcut is
-                      redundant/confusing alongside the B2B negotiated-
-                      discount box. */}
-                  {selectedProduct && !isWeightMode && !isB2B && (
+                      items only, Online/App orders only (custom items
+                      already have a fully free unitPrice, no adjustment
+                      needed; Instashop and B2B don't offer this control).
+                      Recomputes unitPrice live off the reference price
+                      (offer if active, else base) and defaults to +10% (our
+                      standard customization/service charge) — CS can freely
+                      change or clear it per item. Not offered for B2B — the
+                      unit price itself is already freely editable there (up
+                      with no limit, down to the discounted price), so a
+                      separate %-shortcut is redundant/confusing alongside
+                      the B2B negotiated-discount box. */}
+                  {selectedProduct && !isWeightMode && (form.orderType === 'Online' || form.orderType === 'App') && (
                     <tr className={rowCls}>
                       <td colSpan={8} className="p-2 pt-0">
                         <div className="flex flex-col sm:flex-row sm:items-center gap-2">
@@ -1879,7 +1889,7 @@ export default function OrderForm({ mode, orderId }: Props) {
                       <textarea
                         value={item.specialInstructions}
                         onChange={(e) => updateItem(index, { specialInstructions: e.target.value })}
-                        placeholder="أضف ملاحظات للمطبخ أو الفرع (اختياري)"
+                        placeholder="أضف ملاحظات للمصنع أو الفرع (اختياري)"
                         rows={2}
                         className={`w-full px-3 py-2 border-2 rounded-lg text-sm resize-y min-h-[56px] ${
                           item.specialInstructions
@@ -1901,9 +1911,9 @@ export default function OrderForm({ mode, orderId }: Props) {
           <button type="button" onClick={addItem} className="px-4 py-2 rounded-lg bg-red-100 text-red-700 hover:bg-red-200">
             + إضافة عنصر
           </button>
-          {form.orderType !== 'B2B' && (
+          {(form.orderType === 'Online' || form.orderType === 'App') && (
             <button type="button" onClick={addCustomItem} className="px-4 py-2 rounded-lg bg-purple-100 text-purple-700 hover:bg-purple-200">
-              ➕ صنف مخصص
+              ➕ إضافة رسوم خدمة
             </button>
           )}
         </div>
