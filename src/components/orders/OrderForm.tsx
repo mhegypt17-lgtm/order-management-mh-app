@@ -1061,24 +1061,15 @@ export default function OrderForm({ mode, orderId }: Props) {
     // configured estimated weight (or default to 1000g) and compute the
     // per-piece price = pricePerKg * estimatedKg.
     const estimatedGrams = Number(selected.weightGrams) > 0 ? Number(selected.weightGrams) : 1000
-    let unitPrice = isWeight
+    const unitPrice = isWeight
       ? Math.round(pricePerUnit * (estimatedGrams / 1000) * 100) / 100
       : pricePerUnit
-
-    // Online/App (non-weight items only) default to a +10% customization/
-    // service charge on top of the catalogue price — CS can freely change
-    // or clear it per item via the "⚡ تعديل سريع %" row.
-    const defaultAdjustmentPct = !isWeight && (form.orderType === 'Online' || form.orderType === 'App') ? 10 : null
-    if (defaultAdjustmentPct) {
-      unitPrice = Math.round(unitPrice * (1 + defaultAdjustmentPct / 100) * 100) / 100
-    }
 
     updateItem(index, {
       productNameInput: productName,
       productId: selected.id,
       weightGrams: isWeight ? estimatedGrams : Number(selected.weightGrams) || 0,
       unitPrice,
-      priceAdjustmentPct: defaultAdjustmentPct,
     })
   }
 
@@ -1830,53 +1821,6 @@ export default function OrderForm({ mode, orderId }: Props) {
                       <button type="button" onClick={() => removeItem(index)} className="px-2 py-1 rounded bg-red-100 text-red-700">✖</button>
                     </td>
                   </tr>
-                  {/* Quick "+X%" price-adjustment shortcut for catalogue
-                      items only, Online/App orders only (custom items
-                      already have a fully free unitPrice, no adjustment
-                      needed; Instashop and B2B don't offer this control).
-                      Recomputes unitPrice live off the reference price
-                      (offer if active, else base) and defaults to +10% (our
-                      standard customization/service charge) — CS can freely
-                      change or clear it per item. Not offered for B2B — the
-                      unit price itself is already freely editable there (up
-                      with no limit, down to the discounted price), so a
-                      separate %-shortcut is redundant/confusing alongside
-                      the B2B negotiated-discount box. */}
-                  {selectedProduct && !isWeightMode && (form.orderType === 'Online' || form.orderType === 'App') && (
-                    <tr className={rowCls}>
-                      <td colSpan={8} className="p-2 pt-0">
-                        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                          <label className="text-xs font-semibold text-gray-700 whitespace-nowrap">
-                            ⚡ تعديل سريع %{item.priceAdjustmentPct ? ' ✅' : ''}
-                          </label>
-                          <input
-                            type="number"
-                            value={item.priceAdjustmentPct ?? ''}
-                            onChange={(e) => {
-                              const raw = e.target.value
-                              const pct = raw === '' ? null : Number(raw)
-                              const refBase = hasValidOffer ? (displayOffer as number) : displayBase
-                              const nextUnit = pct == null ? refBase : Math.round(refBase * (1 + pct / 100) * 100) / 100
-                              updateItem(index, { priceAdjustmentPct: pct, unitPrice: nextUnit })
-                            }}
-                            placeholder="مثال: 10 أو -5"
-                            className="w-24 px-2 py-1 border rounded text-left"
-                            dir="ltr"
-                          />
-                          {item.priceAdjustmentPct != null && item.priceAdjustmentPct !== 0 && (
-                            <input
-                              type="text"
-                              value={item.priceAdjustmentReason || ''}
-                              onChange={(e) => updateItem(index, { priceAdjustmentReason: e.target.value })}
-                              placeholder="سبب التعديل (مطلوب)"
-                              className="flex-1 px-2 py-1 border rounded"
-                              dir="rtl"
-                            />
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )}
                   {/* Special-instructions row — full-width so it stays visible
                       on mobile without horizontal scrolling. Renders as a
                       multiline textarea with a clear label + highlight when
