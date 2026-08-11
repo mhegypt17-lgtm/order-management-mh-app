@@ -5,6 +5,18 @@
 -- `o.*` was silently paying to ship base64 CS attachments on every
 -- dashboard poll — 40 orders × 3 MB = 120 MB of egress you never rendered.
 --
+-- 2026-08-11 update: added manualDiscountType/Value/Amount/Reason columns.
+-- These were added to `orders` by custom-items-and-manual-discount-migration.sql
+-- and to ORDER_COLUMNS_LIST in src/lib/omsData.ts, but this view was never
+-- updated to match — every /api/orders GET was silently failing the view
+-- query ("column orders_dashboard_v1.manualDiscountType does not exist")
+-- and falling back to the slower 4-round-trip path, which is the prime
+-- suspect behind the egress spike on 10 Aug 2026. If re-running this file
+-- from scratch (drop+recreate), this is already included. For patching an
+-- already-live view without downtime, use
+-- orders-dashboard-v1-add-manual-discount-columns.sql instead (adds columns
+-- via `create or replace view`, no drop needed).
+--
 -- The API layer already selects an explicit column list from this view
 -- (see ORDER_COLUMNS_LIST in src/lib/omsData.ts + the destructure guard
 -- in /api/orders/route.ts::tryReadDashboardWindow), so this SQL change is
@@ -65,6 +77,10 @@ select
   o."discountAmount",
   o."netTotal",
   o."walletUsed",
+  o."manualDiscountType",
+  o."manualDiscountValue",
+  o."manualDiscountAmount",
+  o."manualDiscountReason",
 
   -- Customer (allowlist matches CUSTOMER_COLUMNS in src/lib/omsData.ts)
   case when c.id is not null then jsonb_build_object(
