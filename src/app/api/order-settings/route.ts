@@ -4,9 +4,11 @@ import { supabase } from '@/lib/supabase'
 import {
   AgentNoticeRecord,
   LookupValueRecord,
+  ORDER_SETTINGS_CACHE_KEY,
   readOrderSettings,
   RetentionConfig,
 } from '@/lib/omsData'
+import { invalidateCache } from '@/lib/serverCache'
 
 // Order settings change rarely (only when an admin edits a lookup list in the
 // settings screen) but are read on nearly every page load and by several
@@ -127,6 +129,7 @@ export async function PUT(request: NextRequest) {
     // last up-to-10-minutes. noStore() forces this specific read fresh
     // without losing the 10-min cache for the far more frequent GETs.
     noStore()
+    invalidateCache(ORDER_SETTINGS_CACHE_KEY)
     const body = await request.json()
     const section = body.section as SectionKey
     const items = body.items as unknown
@@ -163,6 +166,7 @@ export async function PUT(request: NextRequest) {
     await supabase
       .from('order_settings')
       .upsert({ id: 'singleton', ...nextSettings })
+    invalidateCache(ORDER_SETTINGS_CACHE_KEY)
 
     return NextResponse.json({ settings: nextSettings }, { status: 200 })
   } catch {
@@ -174,6 +178,7 @@ export async function PATCH(request: NextRequest) {
   try {
     // Same read-modify-write risk as PUT above — force a fresh read.
     noStore()
+    invalidateCache(ORDER_SETTINGS_CACHE_KEY)
     const body = await request.json()
     const settings = await readOrderSettings()
 
@@ -186,6 +191,7 @@ export async function PATCH(request: NextRequest) {
       await supabase
         .from('order_settings')
         .upsert({ id: 'singleton', ...nextSettings })
+      invalidateCache(ORDER_SETTINGS_CACHE_KEY)
       return NextResponse.json({ slaHours: parsedSla }, { status: 200 })
     }
 
@@ -263,6 +269,7 @@ export async function PATCH(request: NextRequest) {
         { status: 500 }
       )
     }
+    invalidateCache(ORDER_SETTINGS_CACHE_KEY)
 
     return NextResponse.json(
       {

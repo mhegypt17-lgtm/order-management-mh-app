@@ -9,6 +9,7 @@ import {
 } from '@/lib/omsData'
 import { supabase } from '@/lib/supabase'
 import { cairoDateString, addDays } from '@/lib/cairoTime'
+import { getCached } from '@/lib/serverCache'
 
 // Make this endpoint short-cached at the edge so a burst of bell pollers
 // in the same role share one DB read.
@@ -25,6 +26,20 @@ const ORDER_COLS = 'id,appOrderNo,orderStatus,customerId,createdBy,createdAt,upd
 const ORDER_INACTIVITY_COLS = 'id,customerId,orderStatus,createdAt'
 const CUSTOMER_COLS = 'id,customerName,phone,doNotFollowUp,followUpSnoozeUntil'
 const HISTORY_COLS = 'id,entityType,entityId,orderId,action,changedBy,changedAt,details'
+
+// Egress: this was a full, unfiltered `customers` table read on every single
+// call to this endpoint — i.e. on nearly every page navigation. The data
+// (name/phone/do-not-follow-up flags) barely changes minute to minute, so a
+// short cache collapses repeat reads within the window into one DB call.
+const NOTIF_CUSTOMERS_CACHE_KEY = 'notifications:customers'
+const NOTIF_CUSTOMERS_CACHE_TTL_MS = 60_000
+
+async function readNotificationCustomers(): Promise<{ data: unknown; error: { message: string } | null }> {
+  return getCached(NOTIF_CUSTOMERS_CACHE_KEY, NOTIF_CUSTOMERS_CACHE_TTL_MS, async () => {
+    const res = await supabase.from('customers').select(CUSTOMER_COLS)
+    return { data: res.data, error: res.error ? { message: res.error.message } : null }
+  })
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 export type NotificationType =
@@ -180,7 +195,7 @@ export async function GET(req: NextRequest) {
       supabase.from('orders').select(ORDER_COLS).eq('isScheduled', true).in('scheduledDate', [todayCairo, tomorrowCairo]),
       // Trimmed projection for inactivity computation — only need id+customerId+status+date.
       supabase.from('orders').select(ORDER_INACTIVITY_COLS).gte('createdAt', inactivityCutoffISO).not('customerId', 'is', null),
-      supabase.from('customers').select(CUSTOMER_COLS),
+      readNotificationCustomers(),
       // Edit history is the worst offender — was reading up to 100k rows
       // every poll. Now filtered to 7 days + only status_changed action.
       supabase.from('edit_history').select(HISTORY_COLS).eq('action', 'status_changed').gte('changedAt', cutoffISO),

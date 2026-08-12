@@ -1,6 +1,7 @@
 import { unstable_noStore as noStore } from 'next/cache'
 import { supabase } from '@/lib/supabase'
 import { cairoDateString } from '@/lib/cairoTime'
+import { getCached } from '@/lib/serverCache'
 import {
   CatalogueEntry,
   ONLINE_CATALOGUE_KEY,
@@ -1539,7 +1540,19 @@ export async function writeProducts(_data: ProductRecord[]): Promise<void> {
 
 // ─── Order Settings ───────────────────────────────────────────────────────────
 
+// Egress: this singleton row is read on nearly every page load and by the
+// notifications bundle on every navigation, but only ever changes when an
+// admin edits a settings screen. A short in-process cache collapses those
+// repeat reads; the settings API route invalidates it immediately on write
+// (see order-settings/route.ts) so admin edits are never stale for long.
+export const ORDER_SETTINGS_CACHE_KEY = 'order-settings:singleton'
+const ORDER_SETTINGS_CACHE_TTL_MS = 60_000
+
 export async function readOrderSettings(): Promise<OrderSettingsRecord> {
+  return getCached(ORDER_SETTINGS_CACHE_KEY, ORDER_SETTINGS_CACHE_TTL_MS, readOrderSettingsUncached)
+}
+
+async function readOrderSettingsUncached(): Promise<OrderSettingsRecord> {
   const { data, error } = await supabase
     .from('order_settings')
     .select('*')
@@ -1862,7 +1875,17 @@ export interface DiscountCodeRecord {
   updatedAt: string
 }
 
+// Egress: small table, but was being re-read in full on every discount-codes
+// admin page load. Cache invalidates immediately on create/update (see
+// api/discount-codes routes) so edits are never stale.
+export const DISCOUNT_CODES_CACHE_KEY = 'discount-codes:all'
+const DISCOUNT_CODES_CACHE_TTL_MS = 60_000
+
 export async function readDiscountCodes(): Promise<DiscountCodeRecord[]> {
+  return getCached(DISCOUNT_CODES_CACHE_KEY, DISCOUNT_CODES_CACHE_TTL_MS, readDiscountCodesUncached)
+}
+
+async function readDiscountCodesUncached(): Promise<DiscountCodeRecord[]> {
   const { data, error } = await supabase.from('discount_codes').select('*')
   if (error) {
     console.error('Error reading discount codes:', error)
