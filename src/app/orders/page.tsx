@@ -29,6 +29,12 @@ export default function OrdersPage() {
   const [scheduleFilter, setScheduleFilter] = useState<'all' | 'today' | 'scheduled'>('all')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  // Bug fix: this dropdown used to be a hardcoded <option> list that had
+  // drifted from the admin-configured order statuses (Settings → حالات الطلب)
+  // — e.g. still offering 'مؤجل' after an admin deactivated it, while the
+  // /branch view's equivalent list was separately missing 'ساري'. Now fetched
+  // from the same source OrderForm.tsx already uses, so both stay in sync.
+  const [orderStatusOptions, setOrderStatusOptions] = useState<string[]>(['تم', 'لاغي', 'حجز'])
 
   const clearFilters = () => {
     setSearchTerm('')
@@ -52,6 +58,16 @@ export default function OrdersPage() {
 
   useEffect(() => {
     fetchOrders()
+  }, [])
+
+  useEffect(() => {
+    fetch('/api/order-settings', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((d) => {
+        const statuses = Array.isArray(d?.options?.orderStatuses) ? d.options.orderStatuses : []
+        if (statuses.length > 0) setOrderStatusOptions(statuses)
+      })
+      .catch(() => {/* keep fallback list */})
   }, [])
 
   useEffect(() => {
@@ -216,11 +232,12 @@ export default function OrdersPage() {
           dir="rtl"
         >
           <option value="all">كل الحالات</option>
-          <option value="ساري">ساري</option>
-          <option value="مؤجل">مؤجل</option>
-          <option value="حجز">حجز</option>
-          <option value="تم">تم</option>
-          <option value="لاغي">لاغي</option>
+          {(orderStatusOptions.includes(statusFilter) || statusFilter === 'all'
+            ? orderStatusOptions
+            : [statusFilter, ...orderStatusOptions]
+          ).map((status) => (
+            <option key={status} value={status}>{status}</option>
+          ))}
         </select>
 
         <select

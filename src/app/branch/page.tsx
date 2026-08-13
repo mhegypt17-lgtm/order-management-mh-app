@@ -57,6 +57,12 @@ export default function BranchPage() {
   const [orderTypeFilter, setOrderTypeFilter] = useState('all')
   const [orderStatusFilter, setOrderStatusFilter] = useState('all')
   const [deliveryFilter, setDeliveryFilter] = useState<'all' | DeliveryStatus>('all')
+  // Bug fix: this list was a hardcoded <option> set that had drifted from
+  // the admin-configured order statuses (Settings → حالات الطلب) — it was
+  // missing 'ساري' (present in the /orders CS view) while still offering
+  // 'مؤجل' after an admin deactivated it. Fetched from the same source
+  // OrderForm.tsx already uses, so both views stay in sync automatically.
+  const [orderStatusOptions, setOrderStatusOptions] = useState<string[]>(['تم', 'لاغي', 'حجز'])
 
   const setPreset = (preset: 'today' | 'week' | 'month' | 'all') => {
     if (preset === 'today') {
@@ -98,6 +104,16 @@ export default function BranchPage() {
   useEffect(() => {
     fetchOrders()
   }, [fromDate, toDate, deliveryFilter])
+
+  useEffect(() => {
+    fetch('/api/order-settings', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((d) => {
+        const statuses = Array.isArray(d?.options?.orderStatuses) ? d.options.orderStatuses : []
+        if (statuses.length > 0) setOrderStatusOptions(statuses)
+      })
+      .catch(() => {/* keep fallback list */})
+  }, [])
 
   const filteredOrders = useMemo(() => {
     const term = searchTerm.trim().toLowerCase()
@@ -181,10 +197,12 @@ export default function BranchPage() {
             dir="rtl"
           >
             <option value="all">كل الحالات</option>
-            <option value="تم">تم</option>
-            <option value="مؤجل">مؤجل</option>
-            <option value="لاغي">لاغي</option>
-            <option value="حجز">حجز</option>
+            {(orderStatusOptions.includes(orderStatusFilter) || orderStatusFilter === 'all'
+              ? orderStatusOptions
+              : [orderStatusFilter, ...orderStatusOptions]
+            ).map((status) => (
+              <option key={status} value={status}>{status}</option>
+            ))}
           </select>
 
           <select
