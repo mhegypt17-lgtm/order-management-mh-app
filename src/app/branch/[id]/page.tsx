@@ -144,6 +144,79 @@ export default function BranchOrderDetailPage() {
     load()
   }, [params.id])
 
+  // 2026-08 — this page only ever fetched the order ONCE, on mount. If a
+  // branch employee opens an order (e.g. a حجز/reserved order previewed
+  // ahead of its scheduled date) and leaves the tab open, any CS edit made
+  // afterwards — most notably a per-product "تعليمات خاصة" comment — never
+  // appears until the page happens to be re-fetched for some other reason
+  // (e.g. saving a delivery-status change, whose response also carries the
+  // fresh order and gets set into state). Seen on 090826online5: the comment
+  // only showed up after a status change, a day after CS wrote it.
+  //
+  // Fix: re-fetch on focus/visibility-regain (the moment staleness would
+  // otherwise bite) and merge in only the CS-owned/read-only fields —
+  // notes, items' names/special instructions/pricing, customer/address/
+  // discount info. Deliberately does NOT touch deliveryStatus,
+  // branchComments, productPhotos/invoicePhoto, or itemEdits (the branch's
+  // own draft quantity/weight edits) so an in-progress branch edit is never
+  // silently clobbered by a background refresh.
+  useEffect(() => {
+    let cancelled = false
+    const refreshCsOwnedFields = async () => {
+      try {
+        const res = await fetch(`/api/branch/orders/${params.id}`, { cache: 'no-store' })
+        if (!res.ok || cancelled) return
+        const data = await res.json()
+        const fresh = data.order as OrderDetail
+        setOrder((prev) => {
+          if (!prev) return prev
+          const freshItemsById = new Map(fresh.items.map((i) => [i.id, i]))
+          return {
+            ...prev,
+            notes: fresh.notes,
+            customer: fresh.customer,
+            address: fresh.address,
+            subtotal: fresh.subtotal,
+            deliveryFee: fresh.deliveryFee,
+            orderTotal: fresh.orderTotal,
+            discountCode: fresh.discountCode,
+            discountAmount: fresh.discountAmount,
+            netTotal: fresh.netTotal,
+            items: prev.items.map((item) => {
+              const freshItem = freshItemsById.get(item.id)
+              if (!freshItem) return item
+              return {
+                ...item,
+                productName: freshItem.productName,
+                specialInstructions: freshItem.specialInstructions,
+                unitPrice: freshItem.unitPrice,
+                lineTotal: freshItem.lineTotal,
+                pricingMode: freshItem.pricingMode,
+                pricePerKg: freshItem.pricePerKg,
+                basePrice: freshItem.basePrice,
+                offerPrice: freshItem.offerPrice,
+              }
+            }),
+          }
+        })
+      } catch (err) {
+        console.warn('[branch order] background refresh failed', err)
+      }
+    }
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshCsOwnedFields()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    window.addEventListener('focus', refreshCsOwnedFields)
+
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      window.removeEventListener('focus', refreshCsOwnedFields)
+    }
+  }, [params.id])
+
   // Phase 2H — user clicks the "view saved photos" button. Fetch the photos
   // bytes on demand from /photos and hydrate state. Idempotent; a second click
   // is a no-op after the first success.
