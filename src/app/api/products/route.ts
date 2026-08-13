@@ -55,6 +55,35 @@ async function mirrorOnlineCataloguePrice(product: {
 
 export async function GET(request: NextRequest) {
   try {
+    // Single-product, always-fresh lookup (`?id=`) — used by OrderForm to
+    // re-verify a product's live price the instant it's picked for a line,
+    // instead of trusting the in-memory list from mount. Deliberately
+    // bypasses the `?columns=lite` edge cache below (worst case 35 min
+    // stale) since this is one tiny row, not the whole catalogue, and
+    // pricing correctness at the moment of commitment matters more than
+    // the egress saved by caching it.
+    const singleId = request.nextUrl.searchParams.get('id')
+    if (singleId) {
+      let single = await supabase
+        .from('products')
+        .select(withPricesEmbed('*'))
+        .eq('id', singleId)
+        .maybeSingle()
+      if (single.error && /relationship|schema cache|does not exist|42703/i.test(single.error.message || '')) {
+        single = await supabase.from('products').select('*').eq('id', singleId).maybeSingle()
+      }
+      if (single.error || !single.data) {
+        return NextResponse.json({ product: null }, { status: 200, headers: { 'Cache-Control': 'no-store' } })
+      }
+      const product = {
+        ...foldPricesEmbed(single.data as any),
+        productCategory: (single.data as any).productCategory || 'غير محدد',
+        packagingType: (single.data as any).packagingType || 'غير محدد',
+        isTargeted: Boolean((single.data as any).isTargeted),
+      }
+      return NextResponse.json({ product }, { status: 200, headers: { 'Cache-Control': 'no-store' } })
+    }
+
     const isLite = request.nextUrl.searchParams.get('columns') === 'lite'
     const baseCols: string = isLite ? PRODUCT_LITE_COLUMNS : '*'
     let products: any[] | null = null

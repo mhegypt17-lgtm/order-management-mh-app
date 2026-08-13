@@ -607,6 +607,49 @@ export default function OrderForm({ mode, orderId }: Props) {
     loadBase()
   }, [mode, orderId])
 
+  // Keep the in-memory product prices/stock from going stale on a
+  // long-open "New Order" tab. `products`/`catalogueProducts` above are
+  // otherwise only ever fetched once on mount, so if an admin changes a
+  // price while a CS agent's tab has been open for a while, every item
+  // added from that point on would silently use the old price (the order
+  // is submitted with whatever `unitPrice` the client computed — see the
+  // 2026-08 "290 instead of 285" bug). The visibility/focus listeners do
+  // the real work here (refetch the instant an agent alt-tabs back or
+  // restores a minimized window — exactly the moment staleness would
+  // otherwise bite). The interval is just a safety net for a tab that
+  // stays continuously visible/focused for hours without ever blurring;
+  // prices only change ~once/day in practice, so this is kept long
+  // (60 min) to avoid adding needless Supabase egress across every open
+  // order-form tab.
+  useEffect(() => {
+    let cancelled = false
+    const refreshProducts = async () => {
+      try {
+        const res = await fetch('/api/products?columns=lite')
+        if (!res.ok || cancelled) return
+        const data = await res.json()
+        const activeProducts = (data.products || []).filter((p: Product) => p.isActive)
+        if (!cancelled) setProducts(activeProducts)
+      } catch (err) {
+        console.warn('[OrderForm] periodic product refresh failed', err)
+      }
+    }
+
+    const intervalId = window.setInterval(refreshProducts, 60 * 60 * 1000)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshProducts()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    window.addEventListener('focus', refreshProducts)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      window.removeEventListener('focus', refreshProducts)
+    }
+  }, [])
+
   // Prefill from URL when launching new order from a customer profile.
   // Supports ?phone=...&name=...&customerId=...
   useEffect(() => {
@@ -1039,6 +1082,21 @@ export default function OrderForm({ mode, orderId }: Props) {
     setItems((prev) => prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item)))
   }
 
+  // Shared by the optimistic (in-memory list) fill-in and the live
+  // re-verification below — same B2B/weight-per-kg rules either way.
+  const computeUnitPriceFields = (product: { basePrice?: number | null; offerPrice?: number | null; pricingMode?: string; weightGrams?: number }) => {
+    const isWeight = product.pricingMode === 'weight'
+    const isB2B = form.orderType === 'B2B'
+    const pricePerUnit = isB2B
+      ? Number(product.basePrice ?? 0)
+      : Number(product.offerPrice ?? product.basePrice ?? 0)
+    const estimatedGrams = Number(product.weightGrams) > 0 ? Number(product.weightGrams) : 1000
+    const unitPrice = isWeight
+      ? Math.round(pricePerUnit * (estimatedGrams / 1000) * 100) / 100
+      : pricePerUnit
+    return { unitPrice, weightGrams: isWeight ? estimatedGrams : Number(product.weightGrams) || 0 }
+  }
+
   const onProductNameChange = (index: number, productName: string) => {
     setDirtyFlag(true)
     const selected = findProductByName(catalogueProducts, productName)
@@ -1048,29 +1106,39 @@ export default function OrderForm({ mode, orderId }: Props) {
       return
     }
 
-    const isWeight = selected.pricingMode === 'weight'
-    // B2B always starts from the main (non-discounted) price — the
-    // discounted/offer price is only ever a floor the price can't go below
-    // (see the unit-price input's min handling), never the auto-filled
-    // default like it is for Online/App/Instashop.
-    const isB2B = form.orderType === 'B2B'
-    const pricePerUnit = isB2B
-      ? Number(selected.basePrice ?? 0)
-      : Number(selected.offerPrice ?? selected.basePrice ?? 0)
-    // For weight products, basePrice is price-per-kg. Use the product's
-    // configured estimated weight (or default to 1000g) and compute the
-    // per-piece price = pricePerKg * estimatedKg.
-    const estimatedGrams = Number(selected.weightGrams) > 0 ? Number(selected.weightGrams) : 1000
-    const unitPrice = isWeight
-      ? Math.round(pricePerUnit * (estimatedGrams / 1000) * 100) / 100
-      : pricePerUnit
-
+    // Optimistic fill from the in-memory (possibly stale) list — keeps the
+    // UI instant. Corrected below by a live, no-store lookup.
+    const optimistic = computeUnitPriceFields(selected)
     updateItem(index, {
       productNameInput: productName,
       productId: selected.id,
-      weightGrams: isWeight ? estimatedGrams : Number(selected.weightGrams) || 0,
-      unitPrice,
+      weightGrams: optimistic.weightGrams,
+      unitPrice: optimistic.unitPrice,
     })
+
+    // Re-verify against the DB right now, bypassing both the in-memory list
+    // and the `?columns=lite` edge cache (see 2026-08 "290 instead of 285"
+    // bug — a price change while a "New Order" tab was open silently used
+    // the stale price). Only correct the row if it's still the same product
+    // (agent may have changed the selection again before this resolves).
+    fetch(`/api/products?id=${encodeURIComponent(selected.id)}`, { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        const fresh = data?.product
+        if (!fresh) return
+        const corrected = computeUnitPriceFields({
+          basePrice: catalogueBasePrice(fresh, catalogueKey),
+          offerPrice: catalogueOfferPrice(fresh, catalogueKey),
+          pricingMode: fresh.pricingMode,
+          weightGrams: fresh.weightGrams,
+        })
+        setItems((prev) =>
+          prev.map((item, idx) =>
+            idx === index && item.productId === selected.id ? { ...item, unitPrice: corrected.unitPrice, weightGrams: corrected.weightGrams } : item,
+          ),
+        )
+      })
+      .catch((err) => console.warn('[OrderForm] live price re-check failed', err))
   }
 
   const addItem = () => {

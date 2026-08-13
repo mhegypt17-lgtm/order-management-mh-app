@@ -1,0 +1,3 @@
+productId,catalogueKey,basePrice,offerPrice,stockStatus,stockQuantity
+p_b2b_0001,b2b,110,,available,
+p_b2b_0002,b2b,270,250,available,50

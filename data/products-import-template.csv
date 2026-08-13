@@ -1,0 +1,3 @@
+id,productName,productCategory,packagingType,weightGrams,basePrice,offerPrice,pricingMode,productCondition,isActive,isTargeted,stockStatus,stockQuantity,onlineEnabled,productDescription,bestRecipes,fatRatioComments,isStandardPackage,hasDailyPriceChange,isByReservation
+p_b2b_0001,صدور فراخ,دواجن,فاكيوم,1000,120,,unit,فريش,TRUE,FALSE,available,,FALSE,,,,,FALSE,FALSE
+p_b2b_0002,لحم بقري مفروم,لحوم,كيلو,1000,280,260,weight,مبردة,TRUE,FALSE,available,50,FALSE,,,,,FALSE,FALSE
