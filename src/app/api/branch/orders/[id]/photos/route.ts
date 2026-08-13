@@ -18,6 +18,15 @@ import { supabase } from '@/lib/supabase'
 //
 // Errors return 404 { error } if the order doesn't exist; other failures
 // return 500. Missing optional csAttachments column is tolerated.
+//
+// 2026-08 — this was one of two order-related routes missing the
+// force-dynamic/no-cache directive every sibling route has (see the CS-side
+// twin at /api/orders/[id]/photos for the full incident writeup: a cached
+// stale response here gets trusted and re-saved, permanently wiping an
+// attachment that had actually persisted fine). Must always read the live DB row.
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: { id: string } }

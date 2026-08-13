@@ -15,6 +15,16 @@ import { supabase } from '@/lib/supabase'
 //   invoicePhoto:  string        // base64 data URL, empty string if none
 //   csAttachments: any[]         // { id, name, dataUrl, ... } records
 // }
+//
+// 2026-08 — this was the ONE order-related route missing the
+// force-dynamic/no-cache directive every sibling route has. Without it, a
+// just-saved attachment could be served stale from Next's cache on the very
+// next "عرض المرفقات" fetch; the OrderForm then trusted that stale (missing)
+// list as authoritative and re-saved it, permanently wiping the attachment
+// that had actually persisted fine. Must always read the live DB row.
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: { id: string } }
