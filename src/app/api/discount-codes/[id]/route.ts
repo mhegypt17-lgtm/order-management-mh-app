@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidateTag } from 'next/cache'
 import { supabase } from '@/lib/supabase'
-import { readDiscountCodes, DISCOUNT_CODES_CACHE_KEY } from '@/lib/omsData'
-import { invalidateCache } from '@/lib/serverCache'
+import { readDiscountCodes, DISCOUNT_CODES_CACHE_TAG } from '@/lib/omsData'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -49,7 +49,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       console.error('Error updating discount code:', updateErr)
       return NextResponse.json({ error: 'تعذر تحديث الكود' }, { status: 500 })
     }
-    invalidateCache(DISCOUNT_CODES_CACHE_KEY)
+    revalidateTag(DISCOUNT_CODES_CACHE_TAG)
     return NextResponse.json(next)
   } catch {
     return NextResponse.json({ error: 'تعذر تحديث الكود' }, { status: 500 })
@@ -66,7 +66,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
       console.error('Error deleting discount code:', deleteErr)
       return NextResponse.json({ error: 'تعذر حذف الكود' }, { status: 500 })
     }
-    invalidateCache(DISCOUNT_CODES_CACHE_KEY)
+    revalidateTag(DISCOUNT_CODES_CACHE_TAG)
     return NextResponse.json({ ok: true })
   } catch {
     return NextResponse.json({ error: 'تعذر حذف الكود' }, { status: 500 })

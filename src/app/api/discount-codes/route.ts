@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidateTag } from 'next/cache'
 import { supabase } from '@/lib/supabase'
 import {
   generateId,
   readDiscountCodes,
-  DISCOUNT_CODES_CACHE_KEY,
+  DISCOUNT_CODES_CACHE_TAG,
   type DiscountCodeRecord,
 } from '@/lib/omsData'
-import { invalidateCache } from '@/lib/serverCache'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
       console.error('Error inserting discount code:', insertErr)
       return NextResponse.json({ error: 'تعذر حفظ الكود' }, { status: 500 })
     }
-    invalidateCache(DISCOUNT_CODES_CACHE_KEY)
+    revalidateTag(DISCOUNT_CODES_CACHE_TAG)
     return NextResponse.json(record, { status: 201 })
   } catch {
     return NextResponse.json({ error: 'تعذر إنشاء الكود' }, { status: 500 })

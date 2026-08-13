@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidateTag } from 'next/cache'
 import {
   readCustomers,
   readAddresses,
@@ -478,6 +479,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       console.error('Supabase update error:', error)
       return NextResponse.json({ error: 'تعذر تحديث بيانات العميل', details: error.message }, { status: 500 })
     }
+    // Keep the notifications endpoint's cached customer snapshot (name/phone/
+    // doNotFollowUp/followUpSnoozeUntil) from serving stale data after an edit.
+    revalidateTag('notifications-customers')
 
     // Optional: update (or create) the customer's primary address with the
     // address fields shipped from the Edit modal. We only touch the address

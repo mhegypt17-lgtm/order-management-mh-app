@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { unstable_cache } from 'next/cache'
 import {
   createTask,
   readOrderSettings,
@@ -9,7 +10,6 @@ import {
 } from '@/lib/omsData'
 import { supabase } from '@/lib/supabase'
 import { cairoDateString, addDays } from '@/lib/cairoTime'
-import { getCached } from '@/lib/serverCache'
 
 // Make this endpoint short-cached at the edge so a burst of bell pollers
 // in the same role share one DB read.
@@ -30,15 +30,24 @@ const HISTORY_COLS = 'id,entityType,entityId,orderId,action,changedBy,changedAt,
 // Egress: this was a full, unfiltered `customers` table read on every single
 // call to this endpoint — i.e. on nearly every page navigation. The data
 // (name/phone/do-not-follow-up flags) barely changes minute to minute, so a
-// short cache collapses repeat reads within the window into one DB call.
-const NOTIF_CUSTOMERS_CACHE_KEY = 'notifications:customers'
-const NOTIF_CUSTOMERS_CACHE_TTL_MS = 60_000
+// cache collapses repeat reads within the window into one DB call. Uses
+// `unstable_cache` (Vercel's shared Data Cache) rather than an in-process
+// Map, since this app's low/sporadic traffic means requests routinely land
+// on a fresh serverless instance where a process-local cache never hits.
+// Invalidated immediately on customer edits (see api/crm/customers/[id]).
+export const NOTIF_CUSTOMERS_CACHE_TAG = 'notifications-customers'
 
-async function readNotificationCustomers(): Promise<{ data: unknown; error: { message: string } | null }> {
-  return getCached(NOTIF_CUSTOMERS_CACHE_KEY, NOTIF_CUSTOMERS_CACHE_TTL_MS, async () => {
+const readNotificationCustomersCached = unstable_cache(
+  async (): Promise<{ data: unknown; error: { message: string } | null }> => {
     const res = await supabase.from('customers').select(CUSTOMER_COLS)
     return { data: res.data, error: res.error ? { message: res.error.message } : null }
-  })
+  },
+  ['notifications-customers'],
+  { revalidate: 60, tags: [NOTIF_CUSTOMERS_CACHE_TAG] }
+)
+
+async function readNotificationCustomers(): Promise<{ data: unknown; error: { message: string } | null }> {
+  return readNotificationCustomersCached()
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────

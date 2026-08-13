@@ -89,6 +89,21 @@ function formatRelative(iso: string): string {
   return `قبل ${d} يوم`
 }
 
+// Egress fix (Round 3, #3): `<NotificationBell>` is rendered inside `Navbar`,
+// which is duplicated across four separate top-level layouts (dashboard,
+// orders, branch, admin). Because each is a distinct Next.js layout subtree,
+// navigating between them (e.g. dashboard → orders) fully unmounts and
+// remounts NotificationBell — and the effect below used to call
+// `fetchNotifications()` (the full ~15-query bundle) on EVERY such mount.
+// Log analysis showed this firing every ~20-90s for a single active user,
+// i.e. on ~every click, not just every 180s poll or genuine Realtime change.
+//
+// Module-level (not per-instance) state lets a fresh mount reuse a very
+// recent fetch instead of re-running the whole bundle. Naturally reset on a
+// full page reload since that creates a new JS module instance.
+let sharedNotifCache: { items: NotificationItem[]; fetchedAt: number } | null = null
+const MIN_REFETCH_INTERVAL_MS = 30_000
+
 export default function NotificationBell({ user }: NotificationBellProps) {
   const router = useRouter()
   const [items, setItems] = useState<NotificationItem[]>([])
@@ -183,13 +198,24 @@ export default function NotificationBell({ user }: NotificationBellProps) {
     }
   }, [])
 
-  const fetchNotifications = useCallback(async () => {
+  const fetchNotifications = useCallback(async (force = false) => {
     try {
+      // Reuse a very recent fetch (from this or a just-unmounted instance)
+      // instead of re-running the full bundle — see module-level comment
+      // above. Realtime callers pass force=true since those mean something
+      // genuinely changed and must not be skipped.
+      if (!force && sharedNotifCache && Date.now() - sharedNotifCache.fetchedAt < MIN_REFETCH_INTERVAL_MS) {
+        setItems(sharedNotifCache.items)
+        knownIdsRef.current = new Set(sharedNotifCache.items.map((n) => n.id))
+        initialLoadRef.current = false
+        return
+      }
       const params = new URLSearchParams({ role: user.role, user: user.name })
       const res = await fetch(`/api/notifications?${params.toString()}`, { cache: 'no-store' })
       if (!res.ok) return
       const data = await res.json()
       const next: NotificationItem[] = Array.isArray(data.items) ? data.items : []
+      sharedNotifCache = { items: next, fetchedAt: Date.now() }
       setItems(next)
 
       // Detect newly arrived items (ids we haven't seen this session)
@@ -254,7 +280,7 @@ export default function NotificationBell({ user }: NotificationBellProps) {
       if (document.visibilityState !== 'visible') return // skip while hidden
       if (isUserIdle(IDLE_MS)) return // skip while user is AFK
       if (debounceTimer) clearTimeout(debounceTimer)
-      debounceTimer = setTimeout(() => fetchNotifications(), REALTIME_DEBOUNCE_MS)
+      debounceTimer = setTimeout(() => fetchNotifications(true), REALTIME_DEBOUNCE_MS)
     }
 
     const channel = supabase
