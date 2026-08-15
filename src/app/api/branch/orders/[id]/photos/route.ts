@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { unstable_cache } from 'next/cache'
 import { supabase } from '@/lib/supabase'
+import { orderPhotosTag } from '@/lib/photosCache'
 
 // Phase 2H — On-demand photo fetch for a single order.
 //
@@ -19,21 +21,16 @@ import { supabase } from '@/lib/supabase'
 // Errors return 404 { error } if the order doesn't exist; other failures
 // return 500. Missing optional csAttachments column is tolerated.
 //
-// 2026-08 — this was one of two order-related routes missing the
-// force-dynamic/no-cache directive every sibling route has (see the CS-side
-// twin at /api/orders/[id]/photos for the full incident writeup: a cached
-// stale response here gets trusted and re-saved, permanently wiping an
-// attachment that had actually persisted fine). Must always read the live DB row.
+// See the CS-side twin at /api/orders/[id]/photos for the full incident
+// writeup (2026-08-09 stale-cache/lost-attachment bug, 2026-08-14 egress
+// regression from the blanket no-store fix) — this route mirrors that same
+// tag-based cache + explicit revalidateTag-on-save pattern, sharing the same
+// `order-photos-${orderId}` tag so a save from either surface invalidates
+// both.
 export const dynamic = 'force-dynamic'
-export const revalidate = 0
 
-export async function GET(
-  _request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  try {
-    const orderId = params.id
-
+const getPhotos = unstable_cache(
+  async (orderId: string) => {
     // Photos live on order_delivery; csAttachments lives on orders. Fire both
     // in parallel — each returns only the photo columns so total payload is
     // exactly the bytes the user asked for.
@@ -70,8 +67,26 @@ export async function GET(
       csAttachments = (orderRes.data as any).csAttachments
     }
 
+    return { productPhotos, invoicePhoto, csAttachments }
+  },
+  ['branch-order-photos'],
+  { revalidate: false },
+)
+
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const orderId = params.id
+    const cached = unstable_cache(() => getPhotos(orderId), ['branch-order-photos', orderId], {
+      tags: [orderPhotosTag(orderId)],
+      revalidate: false,
+    })
+    const data = await cached()
+
     return NextResponse.json(
-      { productPhotos, invoicePhoto, csAttachments },
+      data,
       { status: 200 },
     )
   } catch (e) {

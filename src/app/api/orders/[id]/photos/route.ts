@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { unstable_cache } from 'next/cache'
 import { supabase } from '@/lib/supabase'
+import { orderPhotosTag } from '@/lib/photosCache'
 
 // Phase 2H — On-demand photo fetch for a single order (CS side).
 //
@@ -16,22 +18,29 @@ import { supabase } from '@/lib/supabase'
 //   csAttachments: any[]         // { id, name, dataUrl, ... } records
 // }
 //
-// 2026-08 — this was the ONE order-related route missing the
+// 2026-08-09 — this was the ONE order-related route missing the
 // force-dynamic/no-cache directive every sibling route has. Without it, a
 // just-saved attachment could be served stale from Next's cache on the very
 // next "عرض المرفقات" fetch; the OrderForm then trusted that stale (missing)
 // list as authoritative and re-saved it, permanently wiping the attachment
-// that had actually persisted fine. Must always read the live DB row.
+// that had actually persisted fine. Fixed by forcing this route fully
+// dynamic/no-store.
+//
+// 2026-08-14 — that blanket no-store made EVERY "عرض المرفقات" click re-pull
+// the full base64 photo/attachment payload from Supabase with zero caching,
+// which is exactly the multi-MB cost this whole lazy-load design (Phase 2H)
+// was built to avoid paying repeatedly. This landed same-day as a real
+// egress spike. Fix: cache the read indefinitely, keyed per order, and
+// explicitly bust that one order's cache entry (`revalidateTag`) from every
+// write path that can touch these fields (orders/[id] PUT — both the normal
+// and attachmentsOnly branches — and branch/orders/[id] PUT). This keeps
+// the exact same freshness guarantee (a fresh save always invalidates before
+// the next read) while letting repeat views of an untouched order be served
+// from cache instead of re-hitting Supabase every time.
 export const dynamic = 'force-dynamic'
-export const revalidate = 0
 
-export async function GET(
-  _request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  try {
-    const orderId = params.id
-
+const getPhotos = unstable_cache(
+  async (orderId: string) => {
     const [deliveryRes, orderRes] = await Promise.all([
       supabase
         .from('order_delivery')
@@ -64,10 +73,24 @@ export async function GET(
       csAttachments = (orderRes.data as any).csAttachments
     }
 
-    return NextResponse.json(
-      { productPhotos, invoicePhoto, csAttachments },
-      { status: 200 },
-    )
+    return { productPhotos, invoicePhoto, csAttachments }
+  },
+  ['order-photos'],
+  { revalidate: false },
+)
+
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const orderId = params.id
+    const cached = unstable_cache(() => getPhotos(orderId), ['order-photos', orderId], {
+      tags: [orderPhotosTag(orderId)],
+      revalidate: false,
+    })
+    const data = await cached()
+    return NextResponse.json(data, { status: 200 })
   } catch (e) {
     console.error('[orders/photos] failed:', e)
     return NextResponse.json({ error: 'Failed to fetch photos' }, { status: 500 })

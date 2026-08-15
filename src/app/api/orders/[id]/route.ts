@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidateTag } from 'next/cache'
 import { supabase } from '@/lib/supabase'
+import { orderPhotosTag } from '@/lib/photosCache'
 import {
   CustomerAddressRecord,
   OrderDeliveryRecord,
@@ -396,6 +398,10 @@ export async function PUT(
               { status: 500 },
             )
           }
+          // Bust the shared photos/attachments cache tag so the very next
+          // "عرض المرفقات" fetch (CS or branch) reads this fresh write —
+          // see photosCache.ts for why this must happen on every save.
+          revalidateTag(orderPhotosTag(params.id))
           await appendEditHistory({
             entityType: 'order',
             entityId: params.id,
@@ -842,6 +848,10 @@ export async function PUT(
         { status: 500 },
       )
     }
+
+    // Bust the shared photos/attachments cache tag — this branch can also
+    // change csAttachments (see photosCache.ts).
+    revalidateTag(orderPhotosTag(params.id))
 
     // Replace order items: delete old, insert new
     await supabase.from('order_items').delete().eq('orderId', params.id)

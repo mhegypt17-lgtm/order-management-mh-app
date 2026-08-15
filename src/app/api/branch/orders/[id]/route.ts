@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidateTag } from 'next/cache'
 import { supabase } from '@/lib/supabase'
+import { orderPhotosTag } from '@/lib/photosCache'
 import {
   OrderDeliveryRecord,
   OrderItemRecord,
@@ -633,6 +635,11 @@ export async function PUT(
         await supabase.from('order_delivery').insert([safe])
       }
     }
+
+    // Bust the shared photos/attachments cache tag — this write can change
+    // productPhotos/invoicePhoto (see photosCache.ts for why this must
+    // happen on every save, from both the CS and branch sides).
+    revalidateTag(orderPhotosTag(params.id))
 
     await appendEditHistory({
       entityType: 'delivery',
