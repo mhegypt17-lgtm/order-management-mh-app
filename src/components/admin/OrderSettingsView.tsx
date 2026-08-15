@@ -766,10 +766,10 @@ export default function OrderSettingsView() {
       <section className="bg-white border-2 border-purple-300 rounded-xl p-4">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">💎 حد الطلب الضخم (Mega Order)</h2>
+            <h2 className="text-lg font-semibold text-gray-900">💎 حد طلب ميجا (Mega Order)</h2>
             <p className="text-xs text-gray-500">
               أي طلب تم توصيله وقيمته (بعد خصم الكوبونات/الخصم اليدوي، بدون خصم رصيد المحفظة، وبدون رسوم
-              التوصيل) أكبر من أو تساوي هذه القيمة يُحتسب طلب ضخم في جدول &quot;الطلبات الضخمة&quot; أسفل صفحة التقارير.
+              التوصيل) أكبر من أو تساوي هذه القيمة يُحتسب طلب ميجا في جدول &quot;طلبات ميجا&quot; أسفل صفحة التقارير.
             </p>
           </div>
         </div>
@@ -801,9 +801,9 @@ export default function OrderSettingsView() {
                   })
 
                   if (!res.ok) throw new Error()
-                  toast.success('تم حفظ حد الطلب الضخم')
+                  toast.success('تم حفظ حد طلب ميجا')
                 } catch {
-                  toast.error('تعذر حفظ حد الطلب الضخم')
+                  toast.error('تعذر حفظ حد طلب ميجا')
                 } finally {
                   setSavingMegaOrderThreshold(false)
                 }

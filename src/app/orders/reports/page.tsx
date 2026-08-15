@@ -739,7 +739,7 @@ export default function ReportsPage() {
           <section className="bg-white rounded-lg border border-gray-200 p-4">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
               <div>
-                <h2 className="font-bold text-gray-900">💎 الطلبات الضخمة (Mega Orders)</h2>
+                <h2 className="font-bold text-gray-900">💎 طلبات ميجا (Mega Orders)</h2>
                 <p className="text-xs text-gray-500">
                   عدد الطلبات المُوصّلة لكل وكيل تجاوزت قيمتها (بعد الخصومات، بدون رصيد المحفظة، وبدون رسوم
                   التوصيل) الحد المحدد في الإعدادات{megaOrders ? ` (${megaOrders.threshold.toLocaleString()} ج.م)` : ''}.
@@ -752,12 +752,12 @@ export default function ReportsPage() {
                 disabled={megaOrdersLoading}
                 className="px-4 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 font-semibold whitespace-nowrap"
               >
-                {megaOrdersLoading ? 'جاري الحساب...' : '📐 احسب الطلبات الضخمة'}
+                {megaOrdersLoading ? 'جاري الحساب...' : '📐 احسب طلبات ميجا'}
               </button>
             </div>
 
             {megaOrdersError && (
-              <div className="p-3 text-center text-red-600 text-sm">تعذر حساب الطلبات الضخمة، حاول مرة أخرى</div>
+              <div className="p-3 text-center text-red-600 text-sm">تعذر حساب طلبات ميجا، حاول مرة أخرى</div>
             )}
 
             {megaOrders && !megaOrdersError && (
@@ -765,12 +765,12 @@ export default function ReportsPage() {
                 <ReportTable
                   title={`الشهر الحالي — ${megaOrders.currentMonth.label}`}
                   rows={megaOrders.currentMonth.rows.map((r) => ({ name: r.agent, value: r.count }))}
-                  emptyLabel="لا توجد طلبات ضخمة هذا الشهر"
+                  emptyLabel="لا توجد طلبات ميجا هذا الشهر"
                 />
                 <ReportTable
                   title={`الشهر السابق — ${megaOrders.previousMonth.label}`}
                   rows={megaOrders.previousMonth.rows.map((r) => ({ name: r.agent, value: r.count }))}
-                  emptyLabel="لا توجد طلبات ضخمة الشهر السابق"
+                  emptyLabel="لا توجد طلبات ميجا الشهر السابق"
                 />
               </div>
             )}
