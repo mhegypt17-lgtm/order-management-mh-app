@@ -490,6 +490,15 @@ export interface OrderSettingsRecord {
   autoActivateThreshold?: number
   autoActivateEnabled?: boolean
   catalogues?: CatalogueRecord[]
+  /**
+   * "Mega Order" reporting threshold (EGP). An order counts as mega when its
+   * value net of discounts (voucher `discountAmount` + B2B
+   * `manualDiscountAmount`) but NOT wallet credit, and excluding
+   * `deliveryFee`, is >= this threshold. See `get_mega_orders_summary`
+   * Postgres function (data/mega-orders-migration.sql) which implements the
+   * exact formula server-side for the /api/reports/mega-orders endpoint.
+   */
+  megaOrderThreshold?: number
 }
 
 const DEFAULT_ORDER_RECEIVERS = ['رنا', 'مى', 'ميرنا', 'أمل']
@@ -655,6 +664,7 @@ function defaultOrderSettings(): OrderSettingsRecord {
     retention: DEFAULT_RETENTION_CONFIG,
     autoActivateThreshold: 3,
     autoActivateEnabled: true,
+    megaOrderThreshold: 3000,
     catalogues: DEFAULT_CATALOGUES,
   }
 }
@@ -1607,6 +1617,7 @@ async function readOrderSettingsUncached(): Promise<OrderSettingsRecord> {
       retention: (parsed as any).retention || DEFAULT_RETENTION_CONFIG,
       autoActivateThreshold: Math.max(1, Number((parsed as any).autoActivateThreshold) || 3),
       autoActivateEnabled: (parsed as any).autoActivateEnabled !== false,
+      megaOrderThreshold: Math.max(1, Number((parsed as any).megaOrderThreshold) || 3000),
       catalogues:
         Array.isArray((parsed as any).catalogues) && (parsed as any).catalogues.length > 0
           ? (parsed as any).catalogues

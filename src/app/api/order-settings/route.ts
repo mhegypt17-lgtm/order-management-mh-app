@@ -44,6 +44,7 @@ type OrderSettingsRecord = {
   autoActivateThreshold?: number
   autoActivateEnabled?: boolean
   retention?: RetentionConfig
+  megaOrderThreshold?: number
 }
 
 type SectionKey = keyof OrderSettingsRecord
@@ -224,6 +225,12 @@ export async function PATCH(request: NextRequest) {
       nextSettings.autoActivateEnabled = Boolean(body.autoActivateEnabled)
     }
 
+    // Handle Mega Order threshold (EGP). Used by /api/reports/mega-orders.
+    if (body.megaOrderThreshold !== undefined) {
+      const t = Math.max(1, Math.floor(Number(body.megaOrderThreshold) || 0))
+      nextSettings.megaOrderThreshold = t
+    }
+
     // Handle retention (inactive customer follow-up) configuration.
     // Persisted as JSON in the `retention` column of `order_settings`.
     if (body.retention && typeof body.retention === 'object') {
@@ -279,6 +286,7 @@ export async function PATCH(request: NextRequest) {
         autoActivateThreshold: nextSettings.autoActivateThreshold,
         autoActivateEnabled: nextSettings.autoActivateEnabled,
         retention: nextSettings.retention,
+        megaOrderThreshold: nextSettings.megaOrderThreshold,
       },
       { status: 200 }
     )

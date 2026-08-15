@@ -90,6 +90,17 @@ export function addDays(dateStr: string, n: number): string {
   return `${yy}-${mm}-${dd}`
 }
 
+/** First/last day of the Cairo month immediately before `input`'s month, as "YYYY-MM-DD". */
+export function cairoPreviousMonthRange(
+  input?: Date | string | number | null,
+): { start: string; end: string } {
+  const lastDayOfPrevMonth = addDays(cairoFirstDayOfMonth(input), -1)
+  return {
+    start: cairoFirstDayOfMonth(lastDayOfPrevMonth),
+    end: cairoLastDayOfMonth(lastDayOfPrevMonth),
+  }
+}
+
 /**
  * Human-readable Cairo date+time string (e.g. "10/06/2026, 00:01").
  * Pass a UTC ISO string (or Date) and it will be rendered in Cairo TZ.

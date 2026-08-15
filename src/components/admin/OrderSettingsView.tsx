@@ -112,6 +112,8 @@ export default function OrderSettingsView() {
   const [autoActivateEnabled, setAutoActivateEnabled] = useState(true)
   const [autoActivateThreshold, setAutoActivateThreshold] = useState(3)
   const [savingAutoActivate, setSavingAutoActivate] = useState(false)
+  const [megaOrderThreshold, setMegaOrderThreshold] = useState(3000)
+  const [savingMegaOrderThreshold, setSavingMegaOrderThreshold] = useState(false)
   const [retention, setRetention] = useState<RetentionConfig>(DEFAULT_RETENTION_CONFIG)
   const [savingRetention, setSavingRetention] = useState(false)
   const [agentNotice, setAgentNotice] = useState<AgentNotice>({
@@ -182,6 +184,9 @@ export default function OrderSettingsView() {
         }
         if (data.settings?.autoActivateEnabled !== undefined) {
           setAutoActivateEnabled(data.settings.autoActivateEnabled !== false)
+        }
+        if (data.settings?.megaOrderThreshold !== undefined) {
+          setMegaOrderThreshold(Number(data.settings.megaOrderThreshold) || 3000)
         }
         if (data.settings?.retention) {
           const merged: RetentionConfig = {
@@ -752,6 +757,60 @@ export default function OrderSettingsView() {
               className="px-5 py-2 rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 font-medium"
             >
               {savingTargetedGoal ? 'جاري الحفظ...' : '💾 حفظ الهدف'}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* Mega Order threshold */}
+      <section className="bg-white border-2 border-purple-300 rounded-xl p-4">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">💎 حد الطلب الضخم (Mega Order)</h2>
+            <p className="text-xs text-gray-500">
+              أي طلب تم توصيله وقيمته (بعد خصم الكوبونات/الخصم اليدوي، بدون خصم رصيد المحفظة، وبدون رسوم
+              التوصيل) أكبر من أو تساوي هذه القيمة يُحتسب طلب ضخم في جدول &quot;الطلبات الضخمة&quot; أسفل صفحة التقارير.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-col md:flex-row gap-2">
+          <div className="flex-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1 text-right">الحد (ج.م)</label>
+            <input
+              type="number"
+              min={1}
+              value={megaOrderThreshold}
+              onChange={(e) => setMegaOrderThreshold(Math.max(1, Math.floor(Number(e.target.value) || 0)))}
+              className="w-full px-3 py-2 border border-purple-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+              dir="ltr"
+            />
+          </div>
+
+          <div className="md:self-end">
+            <button
+              type="button"
+              disabled={savingMegaOrderThreshold}
+              onClick={async () => {
+                setSavingMegaOrderThreshold(true)
+                try {
+                  const res = await fetch('/api/order-settings', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ megaOrderThreshold }),
+                  })
+
+                  if (!res.ok) throw new Error()
+                  toast.success('تم حفظ حد الطلب الضخم')
+                } catch {
+                  toast.error('تعذر حفظ حد الطلب الضخم')
+                } finally {
+                  setSavingMegaOrderThreshold(false)
+                }
+              }}
+              className="px-5 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 font-medium"
+            >
+              {savingMegaOrderThreshold ? 'جاري الحفظ...' : '💾 حفظ الحد'}
             </button>
           </div>
         </div>
