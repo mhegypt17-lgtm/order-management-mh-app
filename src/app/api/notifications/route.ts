@@ -50,6 +50,66 @@ async function readNotificationCustomers(): Promise<{ data: unknown; error: { me
   return readNotificationCustomersCached()
 }
 
+// Egress fix (Round 4): despite the comment above claiming this whole route
+// was "short-cached at the edge so a burst of bell pollers share one DB
+// read," it wasn't — `dynamic = 'force-dynamic'` + `revalidate = 0` (below)
+// disable Next.js route caching entirely, and only the `customers` query
+// got an explicit unstable_cache wrapper. The other 6 queries (tasks,
+// daily_briefings, complaints, edit_history, and THREE separate reads of
+// `orders`) ran raw on every single call. NotificationBell throttles
+// re-fetches to at most once per 30s *per browser tab*, but that's not
+// shared across different staff — every distinct user's bell still hits
+// all of this independently, live log evidence showed 4 separate `orders`
+// requests landing in the same second. Bucketing the time window to a 20s
+// tick and caching the whole bundle behind that key means concurrent
+// bells across all staff share one DB round trip per bucket — the same
+// pattern already used for `customers` above, just extended to cover the
+// other 6 queries too.
+const NOTIF_BUNDLE_CACHE_TAG = 'notifications-bundle'
+const BUNDLE_BUCKET_MS = 20_000
+
+const readNotificationBundleCached = unstable_cache(
+  async (
+    _bucket: number,
+    cutoffISO: string,
+    inactivityCutoffISO: string,
+    todayCairo: string,
+    tomorrowCairo: string
+  ) => {
+    const [tasksRes, briefingsRes, complaintsRes, recentOrdersRes, scheduledOrdersRes, inactivityOrdersRes, historyRes] =
+      await Promise.all([
+        supabase.from('tasks').select(TASK_COLS).gte('createdAt', cutoffISO),
+        supabase.from('daily_briefings').select(BRIEFING_COLS).gte('createdAt', cutoffISO),
+        // Need recent complaints (last 7 days) AND any still-open complaint
+        // (for SLA breach detection). Combined OR keeps this to one query.
+        supabase.from('complaints').select(COMPLAINT_COLS).or(`createdAt.gte.${cutoffISO},status.neq.closed`),
+        // Recent + recently-updated orders (covers new, status-changed,
+        // priority toggled — all flow through updatedAt).
+        supabase.from('orders').select(ORDER_COLS).or(`createdAt.gte.${cutoffISO},updatedAt.gte.${cutoffISO}`),
+        // Scheduled orders for today/tomorrow (any age).
+        supabase.from('orders').select(ORDER_COLS).eq('isScheduled', true).in('scheduledDate', [todayCairo, tomorrowCairo]),
+        // Trimmed projection for inactivity computation — only need id+customerId+status+date.
+        supabase.from('orders').select(ORDER_INACTIVITY_COLS).gte('createdAt', inactivityCutoffISO).not('customerId', 'is', null),
+        // Edit history is the worst offender — was reading up to 100k rows
+        // every poll. Now filtered to 7 days + only status_changed action.
+        supabase.from('edit_history').select(HISTORY_COLS).eq('action', 'status_changed').gte('changedAt', cutoffISO),
+      ])
+
+    return {
+      tasks: (tasksRes.data as TaskRec[]) || [],
+      briefings: (briefingsRes.data as BriefingRec[]) || [],
+      complaints: (complaintsRes.data as ComplaintRec[]) || [],
+      recentOrders: (recentOrdersRes.data as OrderRec[]) || [],
+      scheduledOrders: (scheduledOrdersRes.data as OrderRec[]) || [],
+      inactivityOrders:
+        (inactivityOrdersRes.data as Array<{ id: string; customerId: string | null; orderStatus: string; createdAt: string }>) || [],
+      history: (historyRes.data as HistoryRec[]) || [],
+    }
+  },
+  ['notifications-bundle'],
+  { revalidate: 20, tags: [NOTIF_BUNDLE_CACHE_TAG] }
+)
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 export type NotificationType =
   | 'task-assigned'
@@ -180,48 +240,28 @@ export async function GET(req: NextRequest) {
     const items: NotificationItem[] = []
 
     // ── Fetch everything in parallel with narrow projections + SQL filters ──
-    // This replaces 8 full-table SELECT *s with 7 targeted queries.
-    const [
-      tasksRes,
-      briefingsRes,
-      complaintsRes,
-      recentOrdersRes,
-      scheduledOrdersRes,
-      inactivityOrdersRes,
-      customersRes,
-      historyRes,
-      settings,
-    ] = await Promise.all([
-      supabase.from('tasks').select(TASK_COLS).gte('createdAt', cutoffISO),
-      supabase.from('daily_briefings').select(BRIEFING_COLS).gte('createdAt', cutoffISO),
-      // Need recent complaints (last 7 days) AND any still-open complaint
-      // (for SLA breach detection). Combined OR keeps this to one query.
-      supabase.from('complaints').select(COMPLAINT_COLS).or(`createdAt.gte.${cutoffISO},status.neq.closed`),
-      // Recent + recently-updated orders (covers new, status-changed,
-      // priority toggled — all flow through updatedAt).
-      supabase.from('orders').select(ORDER_COLS).or(`createdAt.gte.${cutoffISO},updatedAt.gte.${cutoffISO}`),
-      // Scheduled orders for today/tomorrow (any age).
-      supabase.from('orders').select(ORDER_COLS).eq('isScheduled', true).in('scheduledDate', [todayCairo, tomorrowCairo]),
-      // Trimmed projection for inactivity computation — only need id+customerId+status+date.
-      supabase.from('orders').select(ORDER_INACTIVITY_COLS).gte('createdAt', inactivityCutoffISO).not('customerId', 'is', null),
+    // The 6 time-windowed, role-agnostic queries below (tasks, briefings,
+    // complaints, orders x3, edit_history) go through a 20s-bucketed cache
+    // shared across every caller (see readNotificationBundleCached above),
+    // instead of running raw on every single bell poll from every user.
+    const bucket = Math.floor(Date.now() / BUNDLE_BUCKET_MS) * BUNDLE_BUCKET_MS
+    const [bundle, customersRes, settings] = await Promise.all([
+      readNotificationBundleCached(bucket, cutoffISO, inactivityCutoffISO, todayCairo, tomorrowCairo),
       readNotificationCustomers(),
-      // Edit history is the worst offender — was reading up to 100k rows
-      // every poll. Now filtered to 7 days + only status_changed action.
-      supabase.from('edit_history').select(HISTORY_COLS).eq('action', 'status_changed').gte('changedAt', cutoffISO),
       readOrderSettings(),
     ])
 
-    const tasks: TaskRec[] = (tasksRes.data as TaskRec[]) || []
-    const briefings: BriefingRec[] = (briefingsRes.data as BriefingRec[]) || []
-    const complaints: ComplaintRec[] = (complaintsRes.data as ComplaintRec[]) || []
+    const tasks: TaskRec[] = bundle.tasks
+    const briefings: BriefingRec[] = bundle.briefings
+    const complaints: ComplaintRec[] = bundle.complaints
     // Merge recent + scheduled (de-dup by id) for the orders list used by notifications
-    const recentOrders: OrderRec[] = (recentOrdersRes.data as OrderRec[]) || []
-    const scheduledOrders: OrderRec[] = (scheduledOrdersRes.data as OrderRec[]) || []
+    const recentOrders: OrderRec[] = bundle.recentOrders
+    const scheduledOrders: OrderRec[] = bundle.scheduledOrders
     const orderById = new Map<string, OrderRec>()
     for (const o of recentOrders) orderById.set(o.id, o)
     for (const o of scheduledOrders) if (!orderById.has(o.id)) orderById.set(o.id, o)
     const orders: OrderRec[] = Array.from(orderById.values())
-    const inactivityOrders = (inactivityOrdersRes.data as Array<{ id: string; customerId: string | null; orderStatus: string; createdAt: string }>) || []
+    const inactivityOrders = bundle.inactivityOrders
     let customers: CustomerRec[] = (customersRes.data as CustomerRec[]) || []
     // If the new follow-up control columns don't exist yet (migration not
     // applied), Supabase rejects the whole select. Detect that and retry
@@ -230,7 +270,7 @@ export async function GET(req: NextRequest) {
       const fallback = await supabase.from('customers').select('id,customerName,phone')
       customers = (fallback.data as CustomerRec[]) || []
     }
-    const history: HistoryRec[] = (historyRes.data as HistoryRec[]) || []
+    const history: HistoryRec[] = bundle.history
 
     // ── Tasks ─────────────────────────────────────────────────────────────
     for (const t of tasks) {
