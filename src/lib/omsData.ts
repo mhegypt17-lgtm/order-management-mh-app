@@ -943,20 +943,62 @@ export async function readOrderItemsByOrderIds(
   columns: string = ORDER_ITEM_COLUMNS,
 ): Promise<OrderItemRecord[]> {
   // SAFETY: the primary line-item read must NEVER be enriched with the
-  // price-snapshot columns — those may not exist yet on this Supabase
-  // instance and any error (Postgres 42703 OR PostgREST PGRST204 "Could
-  // not find the '…' column of '…' in the schema cache") would cause the
-  // whole chunk to be dropped and line items to vanish from the UI.
-  //
-  // We ALWAYS fetch the base ORDER_ITEM_COLUMNS set (or whatever the caller
-  // explicitly passed) via fetchRowsIn, then do a separate best-effort read
-  // for the snapshot columns and merge them in by row id. If the snapshot
-  // read fails for ANY reason we silently return the base rows unchanged.
+  // price-snapshot / custom-item columns in a way that can drop base rows —
+  // those columns may not exist yet on this Supabase instance and any error
+  // (Postgres 42703 OR PostgREST PGRST204 "Could not find the '…' column of
+  // '…' in the schema cache") must fall back to a base-only-safe read
+  // instead of losing line items from the UI.
+  const wantsEnrichment = columns === ORDER_ITEM_COLUMNS
+
+  // Fast path — the common case once both migrations have run: ONE combined
+  // query per 200-id chunk selecting base + snapshot + custom columns
+  // together, instead of three separate round trips against the same rows
+  // (previously: base by orderId, then snapshot by id, then custom by id —
+  // a 3x request multiplier on order_items, our highest-volume table). If
+  // the combined select errors for ANY reason (e.g. a migration hasn't run
+  // yet on this DB) we fall straight through to the legacy three-step dance
+  // below, which is proven safe pre-migration.
+  if (wantsEnrichment) {
+    const uniqOrderIds = Array.from(new Set(orderIds.filter((v) => v != null && v !== '')))
+    if (uniqOrderIds.length > 0) {
+      try {
+        const combinedColumns = `${ORDER_ITEM_COLUMNS},${ORDER_ITEM_SNAPSHOT_COLUMNS},${ORDER_ITEM_CUSTOM_COLUMNS}`
+        const chunkSize = 200
+        const all: any[] = []
+        for (let i = 0; i < uniqOrderIds.length; i += chunkSize) {
+          const chunk = uniqOrderIds.slice(i, i + chunkSize)
+          const { data, error } = await supabase
+            .from('order_items')
+            .select(combinedColumns)
+            .in('orderId', chunk)
+          if (error) throw error
+          all.push(...(data || []))
+        }
+        return all.map((row) => ({
+          ...row,
+          basePriceSnapshot: row.basePriceSnapshot != null ? Number(row.basePriceSnapshot) : null,
+          offerPriceSnapshot: row.offerPriceSnapshot != null ? Number(row.offerPriceSnapshot) : null,
+          priceAdjustmentPct: row.priceAdjustmentPct != null ? Number(row.priceAdjustmentPct) : null,
+          isCustomItem: row.isCustomItem ?? null,
+          customItemName: row.customItemName ?? null,
+          priceAdjustmentReason: row.priceAdjustmentReason ?? null,
+        })) as OrderItemRecord[]
+      } catch {
+        // One or both migrations not applied yet (or any other error) —
+        // fall through to the legacy per-column-group fetch below.
+      }
+    }
+  }
+
+  // Legacy path (fallback for pre-migration DBs, or callers that passed a
+  // custom column set): fetch base rows, then best-effort merge snapshot
+  // and custom columns in separately, never letting either failure drop a
+  // base row.
   const baseRows = await fetchRowsIn<OrderItemRecord>('order_items', 'orderId', orderIds, columns)
   if (baseRows.length === 0) return baseRows
   // If caller asked for a custom column set we assume they know what they
   // want and don't add snapshots on top.
-  if (columns !== ORDER_ITEM_COLUMNS) return baseRows
+  if (!wantsEnrichment) return baseRows
   const ids = baseRows.map((r) => r.id).filter(Boolean)
   if (ids.length === 0) return baseRows
   const chunkSize = 200

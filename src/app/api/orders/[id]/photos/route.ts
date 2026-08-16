@@ -37,47 +37,51 @@ import { orderPhotosTag } from '@/lib/photosCache'
 // the exact same freshness guarantee (a fresh save always invalidates before
 // the next read) while letting repeat views of an untouched order be served
 // from cache instead of re-hitting Supabase every time.
+//
+// 2026-08-16 — removed a leftover SECOND, untagged unstable_cache layer that
+// used to wrap this read (keyed only ['order-photos'] + orderId, cached
+// forever, no tag). revalidateTag() only ever busted the outer wrapper below
+// — the inner one never got the memo, so a save's invalidation silently did
+// nothing and every view kept serving whatever was cached the FIRST time
+// that order's photos were ever fetched. Now there's exactly one cache
+// layer, and it's the one revalidateTag actually targets.
 export const dynamic = 'force-dynamic'
 
-const getPhotos = unstable_cache(
-  async (orderId: string) => {
-    const [deliveryRes, orderRes] = await Promise.all([
-      supabase
-        .from('order_delivery')
-        .select('productPhotos, invoicePhoto')
-        .eq('orderId', orderId)
-        .maybeSingle(),
-      supabase
-        .from('orders')
-        .select('csAttachments')
-        .eq('id', orderId)
-        .maybeSingle(),
-    ])
+async function fetchPhotosData(orderId: string) {
+  const [deliveryRes, orderRes] = await Promise.all([
+    supabase
+      .from('order_delivery')
+      .select('productPhotos, invoicePhoto')
+      .eq('orderId', orderId)
+      .maybeSingle(),
+    supabase
+      .from('orders')
+      .select('csAttachments')
+      .eq('id', orderId)
+      .maybeSingle(),
+  ])
 
-    if (deliveryRes.error) {
-      console.error('[orders/photos] delivery read failed:', deliveryRes.error)
-    }
+  if (deliveryRes.error) {
+    console.error('[orders/photos] delivery read failed:', deliveryRes.error)
+  }
 
-    const productPhotos = Array.isArray(deliveryRes.data?.productPhotos)
-      ? deliveryRes.data.productPhotos
-      : []
-    const invoicePhoto = (deliveryRes.data?.invoicePhoto as string) || ''
+  const productPhotos = Array.isArray(deliveryRes.data?.productPhotos)
+    ? deliveryRes.data.productPhotos
+    : []
+  const invoicePhoto = (deliveryRes.data?.invoicePhoto as string) || ''
 
-    let csAttachments: any[] = []
-    if (
-      orderRes.error &&
-      /csAttachments|column .* does not exist/i.test(String(orderRes.error.message || ''))
-    ) {
-      csAttachments = []
-    } else if (orderRes.data && Array.isArray((orderRes.data as any).csAttachments)) {
-      csAttachments = (orderRes.data as any).csAttachments
-    }
+  let csAttachments: any[] = []
+  if (
+    orderRes.error &&
+    /csAttachments|column .* does not exist/i.test(String(orderRes.error.message || ''))
+  ) {
+    csAttachments = []
+  } else if (orderRes.data && Array.isArray((orderRes.data as any).csAttachments)) {
+    csAttachments = (orderRes.data as any).csAttachments
+  }
 
-    return { productPhotos, invoicePhoto, csAttachments }
-  },
-  ['order-photos'],
-  { revalidate: false },
-)
+  return { productPhotos, invoicePhoto, csAttachments }
+}
 
 export async function GET(
   _request: NextRequest,
@@ -85,7 +89,7 @@ export async function GET(
 ) {
   try {
     const orderId = params.id
-    const cached = unstable_cache(() => getPhotos(orderId), ['order-photos', orderId], {
+    const cached = unstable_cache(() => fetchPhotosData(orderId), ['order-photos', orderId], {
       tags: [orderPhotosTag(orderId)],
       revalidate: false,
     })
