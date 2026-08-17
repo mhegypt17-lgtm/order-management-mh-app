@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { cairoDateString } from '@/lib/cairoTime'
 import {
   CustomerAddressRecord,
   OrderItemRecord,
@@ -319,6 +320,40 @@ export async function GET(request: NextRequest) {
 
       deliveryByOrderId = new Map<string, any>()
       for (const d of orderDelivery as any[]) deliveryByOrderId.set(d.orderId, d)
+    }
+
+    // Egress fix: preserve visibility of scheduled ("حجز") orders regardless
+    // of the orderDate window above. Callers using a narrow window (e.g. the
+    // Orders list page defaulting to "today only") filter on orderDate
+    // (creation date) — but a booking created days ago for a future/today
+    // delivery must still appear. Purely additive and opt-in via
+    // `?includeScheduled=1` so every other caller of this route (tasks page,
+    // reports, etc.) sees zero change in behavior.
+    if (!all && url.searchParams.get('includeScheduled') === '1') {
+      const todayCairo = cairoDateString()
+      const existingIds = new Set(orderList.map((o) => o.id))
+      const { data: scheduledRows, error: scheduledErr } = await supabase
+        .from('orders')
+        .select(ORDER_COLUMNS_LIST)
+        .eq('isScheduled', true)
+        .gte('scheduledDate', todayCairo)
+      if (!scheduledErr && Array.isArray(scheduledRows) && scheduledRows.length > 0) {
+        const extra = (scheduledRows as unknown as OrderRecord[]).filter((r) => !existingIds.has(r.id))
+        if (extra.length > 0) {
+          orderList = [...orderList, ...extra]
+          const extraCustomerIds = extra.map((o) => o.customerId).filter((v): v is string => Boolean(v))
+          const extraAddressIds = extra.map((o) => o.deliveryAddressId).filter((v): v is string => Boolean(v))
+          const extraOrderIds = extra.map((o) => o.id)
+          const [extraCustomers, extraAddresses, extraDelivery] = await Promise.all([
+            readCustomersByIds(extraCustomerIds),
+            readAddressesByIds(extraAddressIds),
+            readOrderDeliveryByOrderIds(extraOrderIds, DELIVERY_COLUMNS_LIST),
+          ])
+          for (const c of extraCustomers) customersById.set(c.id, c)
+          for (const a of extraAddresses) addressesById.set(a.id, a)
+          for (const d of extraDelivery as any[]) deliveryByOrderId.set(d.orderId, d)
+        }
+      }
     }
 
     // Items + products are 1:many and stay as their own scoped fetches

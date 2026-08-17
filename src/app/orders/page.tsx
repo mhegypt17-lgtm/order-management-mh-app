@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
@@ -48,7 +48,24 @@ export default function OrdersPage() {
   const fetchOrders = async () => {
     setIsLoading(true)
     try {
-      const res = await fetch('/api/orders')
+      // Egress fix: default to TODAY only instead of the route's 35-day
+      // window — most staff only ever need today's orders, and this is by
+      // far the largest JSON payload in the app. Explicit date-range filters
+      // below still work exactly as before by passing them straight through.
+      // `includeScheduled=1` asks the API to also merge in any upcoming
+      // scheduled (حجز) booking regardless of its creation date, so narrowing
+      // the window can never hide a reservation someone is expecting to see.
+      const params = new URLSearchParams()
+      if (dateFrom || dateTo) {
+        if (dateFrom) params.set('from', dateFrom)
+        if (dateTo) params.set('to', dateTo)
+      } else {
+        const today = cairoDateString()
+        params.set('from', today)
+        params.set('to', today)
+      }
+      params.set('includeScheduled', '1')
+      const res = await fetch(`/api/orders?${params.toString()}`)
       const data = await res.json()
       setOrders(data.orders || [])
     } finally {
@@ -59,6 +76,21 @@ export default function OrdersPage() {
   useEffect(() => {
     fetchOrders()
   }, [])
+
+  // Re-fetch from the server whenever the date filters change. Needed now
+  // that the default fetch window is "today only" instead of a wide 35-day
+  // range — previously all filtering happened client-side over an
+  // already-wide dataset, so picking an earlier date just filtered locally.
+  // Skips the very first run since the mount effect above already fetches
+  // the initial (empty-filters → today-only) window.
+  const isFirstDateFilterRun = useRef(true)
+  useEffect(() => {
+    if (isFirstDateFilterRun.current) {
+      isFirstDateFilterRun.current = false
+      return
+    }
+    fetchOrders()
+  }, [dateFrom, dateTo])
 
   useEffect(() => {
     fetch('/api/order-settings', { cache: 'no-store' })
