@@ -116,17 +116,17 @@ async function enrich(orderId: string, opts: { includePhotos: boolean }) {
   let effectiveItemRows = itemRows as OrderItemRecord[]
   if (isDueForPriceRefresh(order.orderStatus, order.scheduledDate)) {
     const orderSettingsForRefresh = await readOrderSettings()
+    // Bug fix: see matching comment in /api/orders/[id]/route.ts — this used
+    // to re-map effectiveItemRows into a slim object before refreshing
+    // prices, then discarded every other field (specialInstructions,
+    // orderId, createdAt, originalQuantity/Weight, isCustomItem,
+    // customItemName) from the rows used to build the response. That's why
+    // a per-product comment could appear to vanish the moment a due حجز
+    // order was opened/saved. No extra query needed — just pass the
+    // already-fetched full rows through so the spread inside
+    // refreshOrderItemPriceSnapshots preserves everything it doesn't touch.
     effectiveItemRows = (await refreshOrderItemPriceSnapshots(
-      effectiveItemRows.map((i) => ({
-        id: i.id,
-        productId: i.productId,
-        quantity: i.quantity,
-        weightGrams: i.weightGrams,
-        unitPrice: i.unitPrice,
-        lineTotal: (i as any).lineTotal,
-        basePriceSnapshot: (i as any).basePriceSnapshot,
-        offerPriceSnapshot: (i as any).offerPriceSnapshot,
-      })),
+      effectiveItemRows,
       order.orderType,
       orderSettingsForRefresh.catalogues || DEFAULT_CATALOGUES,
     )) as unknown as OrderItemRecord[]

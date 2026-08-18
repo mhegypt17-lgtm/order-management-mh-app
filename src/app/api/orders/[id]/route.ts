@@ -135,17 +135,21 @@ async function enrichOrder(order: OrderRecord, opts: { includePhotos: boolean } 
   let effectiveItemRows = itemRows as OrderItemRecord[]
   if (isDueForPriceRefresh(order.orderStatus, (order as any).scheduledDate)) {
     const orderSettingsForRefresh = await readOrderSettings()
+    // Bug fix: this used to re-map effectiveItemRows into a slim object
+    // (id/productId/quantity/weightGrams/unitPrice/lineTotal/snapshots only)
+    // before calling refreshOrderItemPriceSnapshots, then REPLACED
+    // effectiveItemRows with that slim result. Every other item field —
+    // most notably specialInstructions (the per-product "تعليمات خاصة"
+    // comment CS writes), plus orderId/createdAt/originalQuantity/
+    // originalWeightGrams/isCustomItem/customItemName — was silently
+    // dropped from the in-memory rows used to build the response, so a
+    // حجز order whose scheduledDate had passed would appear to have lost
+    // its comments the moment it was opened/saved. Passing the already-
+    // fetched full rows through (no extra query — same data already in
+    // memory) lets refreshOrderItemPriceSnapshots' object-spread preserve
+    // every field it doesn't explicitly touch.
     effectiveItemRows = (await refreshOrderItemPriceSnapshots(
-      effectiveItemRows.map((i) => ({
-        id: i.id,
-        productId: i.productId,
-        quantity: i.quantity,
-        weightGrams: i.weightGrams,
-        unitPrice: i.unitPrice,
-        lineTotal: (i as any).lineTotal,
-        basePriceSnapshot: (i as any).basePriceSnapshot,
-        offerPriceSnapshot: (i as any).offerPriceSnapshot,
-      })),
+      effectiveItemRows,
       order.orderType,
       orderSettingsForRefresh.catalogues || DEFAULT_CATALOGUES,
     )) as unknown as OrderItemRecord[]

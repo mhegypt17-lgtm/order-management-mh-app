@@ -38,17 +38,14 @@ export async function POST(
     const itemRows = await readOrderItemsByOrderIds([params.id], ORDER_ITEM_COLUMNS)
     const orderSettings = await readOrderSettings()
 
+    // Bug fix: previously re-mapped itemRows into a slim object (dropping
+    // specialInstructions/orderId/createdAt/etc.) before refreshing prices.
+    // The client here only reads basePriceSnapshot/offerPriceSnapshot/
+    // unitPrice off the response so it never showed symptoms on THIS button,
+    // but pass the full rows through anyway (no extra query) to keep this
+    // helper's contract consistent with the other two call sites.
     const refreshed = await refreshOrderItemPriceSnapshots(
-      itemRows.map((i) => ({
-        id: i.id,
-        productId: i.productId,
-        quantity: i.quantity,
-        weightGrams: i.weightGrams,
-        unitPrice: i.unitPrice,
-        lineTotal: (i as any).lineTotal,
-        basePriceSnapshot: (i as any).basePriceSnapshot,
-        offerPriceSnapshot: (i as any).offerPriceSnapshot,
-      })),
+      itemRows,
       (orderRow as any).orderType,
       orderSettings.catalogues || DEFAULT_CATALOGUES,
     )
