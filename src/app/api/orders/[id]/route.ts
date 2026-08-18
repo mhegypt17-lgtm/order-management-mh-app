@@ -224,30 +224,54 @@ async function enrichOrder(order: OrderRecord, opts: { includePhotos: boolean } 
       : 0
   } else {
     // Cheap size-only lookups so the UI can render the "N صور محفوظة" pill
-    // without downloading the base64 blobs.
+    // without downloading the base64 blobs. These read DB-generated STORED
+    // columns (see data/photo-count-columns-migration.sql) instead of the
+    // full productPhotos/invoicePhoto/csAttachments blobs — the previous
+    // code selected the heavy columns just to call .length on them, which
+    // defeated the whole point of this "light" path (still paid full photo
+    // egress from Postgres->Node on every order open). Falls back to the
+    // old heavy select if the migration hasn't been applied yet.
     try {
-      const { data: metaDelivery } = await supabase
+      const { data: metaDelivery, error: metaDeliveryError } = await supabase
         .from('order_delivery')
-        .select('productPhotos, invoicePhoto')
+        .select('productPhotosCount, hasInvoicePhoto')
         .eq('orderId', orderId)
         .maybeSingle()
-      if (metaDelivery) {
-        productPhotosCount = Array.isArray((metaDelivery as any).productPhotos)
-          ? (metaDelivery as any).productPhotos.length
-          : 0
-        hasInvoicePhoto = Boolean((metaDelivery as any).invoicePhoto)
+      if (metaDeliveryError && /productPhotosCount|hasInvoicePhoto/i.test(metaDeliveryError.message || '')) {
+        const { data: legacy } = await supabase
+          .from('order_delivery')
+          .select('productPhotos, invoicePhoto')
+          .eq('orderId', orderId)
+          .maybeSingle()
+        if (legacy) {
+          productPhotosCount = Array.isArray((legacy as any).productPhotos) ? (legacy as any).productPhotos.length : 0
+          hasInvoicePhoto = Boolean((legacy as any).invoicePhoto)
+        }
+      } else if (metaDelivery) {
+        productPhotosCount = Number((metaDelivery as any).productPhotosCount) || 0
+        hasInvoicePhoto = Boolean((metaDelivery as any).hasInvoicePhoto)
       }
     } catch {}
     try {
-      const { data: metaOrder } = await supabase
+      const { data: metaOrder, error: metaOrderError } = await supabase
         .from('orders')
-        .select('csAttachments')
+        .select('csAttachmentsCount')
         .eq('id', orderId)
         .maybeSingle()
-      if (metaOrder) {
-        const arr = (metaOrder as any).csAttachments
-        hasCsAttachments = Array.isArray(arr) && arr.length > 0
-        csAttachmentsCount = Array.isArray(arr) ? arr.length : 0
+      if (metaOrderError && /csAttachmentsCount/i.test(metaOrderError.message || '')) {
+        const { data: legacy } = await supabase
+          .from('orders')
+          .select('csAttachments')
+          .eq('id', orderId)
+          .maybeSingle()
+        if (legacy) {
+          const arr = (legacy as any).csAttachments
+          hasCsAttachments = Array.isArray(arr) && arr.length > 0
+          csAttachmentsCount = Array.isArray(arr) ? arr.length : 0
+        }
+      } else if (metaOrder) {
+        csAttachmentsCount = Number((metaOrder as any).csAttachmentsCount) || 0
+        hasCsAttachments = csAttachmentsCount > 0
       }
     } catch {}
   }

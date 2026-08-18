@@ -72,11 +72,10 @@ const readNotificationBundleCached = unstable_cache(
   async (
     _bucket: number,
     cutoffISO: string,
-    inactivityCutoffISO: string,
     todayCairo: string,
     tomorrowCairo: string
   ) => {
-    const [tasksRes, briefingsRes, complaintsRes, recentOrdersRes, scheduledOrdersRes, inactivityOrdersRes, historyRes] =
+    const [tasksRes, briefingsRes, complaintsRes, recentOrdersRes, scheduledOrdersRes, historyRes] =
       await Promise.all([
         supabase.from('tasks').select(TASK_COLS).gte('createdAt', cutoffISO),
         supabase.from('daily_briefings').select(BRIEFING_COLS).gte('createdAt', cutoffISO),
@@ -88,8 +87,6 @@ const readNotificationBundleCached = unstable_cache(
         supabase.from('orders').select(ORDER_COLS).or(`createdAt.gte.${cutoffISO},updatedAt.gte.${cutoffISO}`),
         // Scheduled orders for today/tomorrow (any age).
         supabase.from('orders').select(ORDER_COLS).eq('isScheduled', true).in('scheduledDate', [todayCairo, tomorrowCairo]),
-        // Trimmed projection for inactivity computation — only need id+customerId+status+date.
-        supabase.from('orders').select(ORDER_INACTIVITY_COLS).gte('createdAt', inactivityCutoffISO).not('customerId', 'is', null),
         // Edit history is the worst offender — was reading up to 100k rows
         // every poll. Now filtered to 7 days + only status_changed action.
         supabase.from('edit_history').select(HISTORY_COLS).eq('action', 'status_changed').gte('changedAt', cutoffISO),
@@ -101,13 +98,36 @@ const readNotificationBundleCached = unstable_cache(
       complaints: (complaintsRes.data as ComplaintRec[]) || [],
       recentOrders: (recentOrdersRes.data as OrderRec[]) || [],
       scheduledOrders: (scheduledOrdersRes.data as OrderRec[]) || [],
-      inactivityOrders:
-        (inactivityOrdersRes.data as Array<{ id: string; customerId: string | null; orderStatus: string; createdAt: string }>) || [],
       history: (historyRes.data as HistoryRec[]) || [],
     }
   },
   ['notifications-bundle'],
   { revalidate: 20, tags: [NOTIF_BUNDLE_CACHE_TAG] }
+)
+
+// Egress fix (Round 5): the 400-day inactivity scan (customer-retention
+// follow-ups) used to share the bundle's 20s bucket above — i.e. it re-scanned
+// the ENTIRE order history every 20 seconds during active bell polling, even
+// though "last order date per customer" cannot meaningfully change within
+// minutes. Split into its own cache with a 12h bucket: retention reminders
+// have no rush (confirmed — this is a slow, no-urgency signal), so refreshing
+// twice daily instead of every 20s is a ~4000x cut in how often this scan
+// runs, with zero impact on the fast-moving bell items above (tasks/
+// complaints/priority orders).
+const NOTIF_INACTIVITY_CACHE_TAG = 'notifications-inactivity'
+const INACTIVITY_BUCKET_MS = 12 * 60 * 60 * 1000 // 12 hours — twice daily
+
+const readInactivityOrdersCached = unstable_cache(
+  async (_bucket: number, inactivityCutoffISO: string) => {
+    const { data } = await supabase
+      .from('orders')
+      .select(ORDER_INACTIVITY_COLS)
+      .gte('createdAt', inactivityCutoffISO)
+      .not('customerId', 'is', null)
+    return (data as Array<{ id: string; customerId: string | null; orderStatus: string; createdAt: string }>) || []
+  },
+  ['notifications-inactivity-orders'],
+  { revalidate: 12 * 60 * 60, tags: [NOTIF_INACTIVITY_CACHE_TAG] }
 )
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -245,8 +265,10 @@ export async function GET(req: NextRequest) {
     // shared across every caller (see readNotificationBundleCached above),
     // instead of running raw on every single bell poll from every user.
     const bucket = Math.floor(Date.now() / BUNDLE_BUCKET_MS) * BUNDLE_BUCKET_MS
-    const [bundle, customersRes, settings] = await Promise.all([
-      readNotificationBundleCached(bucket, cutoffISO, inactivityCutoffISO, todayCairo, tomorrowCairo),
+    const inactivityBucket = Math.floor(Date.now() / INACTIVITY_BUCKET_MS) * INACTIVITY_BUCKET_MS
+    const [bundle, inactivityOrders, customersRes, settings] = await Promise.all([
+      readNotificationBundleCached(bucket, cutoffISO, todayCairo, tomorrowCairo),
+      readInactivityOrdersCached(inactivityBucket, inactivityCutoffISO),
       readNotificationCustomers(),
       readOrderSettings(),
     ])
@@ -261,7 +283,6 @@ export async function GET(req: NextRequest) {
     for (const o of recentOrders) orderById.set(o.id, o)
     for (const o of scheduledOrders) if (!orderById.has(o.id)) orderById.set(o.id, o)
     const orders: OrderRec[] = Array.from(orderById.values())
-    const inactivityOrders = bundle.inactivityOrders
     let customers: CustomerRec[] = (customersRes.data as CustomerRec[]) || []
     // If the new follow-up control columns don't exist yet (migration not
     // applied), Supabase rejects the whole select. Detect that and retry
