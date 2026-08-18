@@ -310,11 +310,15 @@ create table if not exists public.edit_history (
 -- 13. chat_messages  — used by ChatButton (empty in fresh project)
 -- ============================================================
 create table if not exists public.chat_messages (
-  id          text primary key,
-  role        text not null,             -- 'cs' | 'branch' | 'admin'
-  author      text not null,
-  text        text not null,
-  "createdAt" timestamptz not null default now()
+  id              text primary key,
+  role            text not null,             -- 'cs' | 'branch' | 'admin'
+  author          text not null,
+  text            text not null,
+  "createdAt"     timestamptz not null default now(),
+  "replyToId"     text,                      -- id of the message being replied to (nullable)
+  "replyToAuthor" text,                      -- denormalized so reads don't need a join
+  "replyToText"   text,                      -- denormalized quoted snippet (truncated)
+  "mentions"      text[]                     -- roles mentioned via @admin / @cs / @branch
 );
 
 

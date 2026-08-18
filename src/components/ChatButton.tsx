@@ -12,6 +12,37 @@ interface ChatMessage {
   author: string
   text: string
   createdAt: string
+  replyToId?: string | null
+  replyToAuthor?: string | null
+  replyToText?: string | null
+  mentions?: string[] | null
+}
+
+// Matches the server's MENTION_RE — used only for client-side highlighting,
+// the actual mentions array is computed and stored server-side.
+const MENTION_RE = /(@admin|@cs|@branch)\b/gi
+const MENTION_LABELS: Record<string, string> = {
+  admin: 'الإدارة',
+  cs: 'خدمة العملاء',
+  branch: 'الفرع',
+}
+
+function renderMessageText(text: string) {
+  const parts = text.split(MENTION_RE)
+  return parts.map((part, i) => {
+    const key = part.slice(1).toLowerCase()
+    if (MENTION_LABELS[key]) {
+      return (
+        <span
+          key={i}
+          className="font-bold bg-yellow-200/70 text-gray-900 rounded px-0.5"
+        >
+          {part}
+        </span>
+      )
+    }
+    return <span key={i}>{part}</span>
+  })
 }
 
 interface ChatButtonProps {
@@ -49,6 +80,7 @@ export default function ChatButton({ user }: ChatButtonProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null)
   const [lastSeen, setLastSeen] = useState<number>(() => {
     if (typeof window === 'undefined') return 0
     const v = window.localStorage.getItem(lastSeenKey(user.id))
@@ -62,9 +94,12 @@ export default function ChatButton({ user }: ChatButtonProps) {
   // Highest createdAt seen — used as the `since` cursor for incremental
   // fetches so we never re-download the same 200 messages.
   const sinceTsRef = useRef<number>(0)
-  // Latest user.role available to the fetcher without forcing a re-create.
+  // Latest user.role / user.name available to the fetcher & merge logic
+  // without forcing a re-create.
   const userRoleRef = useRef(user.role)
+  const userNameRef = useRef(user.name)
   useEffect(() => { userRoleRef.current = user.role }, [user.role])
+  useEffect(() => { userNameRef.current = user.name }, [user.name])
   const openRef = useRef(open)
   useEffect(() => { openRef.current = open }, [open])
 
@@ -80,12 +115,18 @@ export default function ChatButton({ user }: ChatButtonProps) {
         const ts = new Date(m.createdAt).getTime()
         if (ts > sinceTsRef.current) sinceTsRef.current = ts
       }
-      // Toast for messages from another role when panel is closed
+      // Toast for messages from another role, or ones that @-mention my
+      // role (even from my own role's channel), when panel is closed.
       if (!initialLoadRef.current && !openRef.current) {
-        const externals = fresh.filter((m) => m.role !== userRoleRef.current)
-        if (externals.length > 0) {
-          const top = externals[externals.length - 1]
-          toast(`💬 ${top.author}: ${top.text.slice(0, 60)}`, {
+        const notable = fresh.filter(
+          (m) =>
+            m.author !== userNameRef.current &&
+            (m.role !== userRoleRef.current || m.mentions?.includes(userRoleRef.current)),
+        )
+        if (notable.length > 0) {
+          const top = notable[notable.length - 1]
+          const mentioned = top.mentions?.includes(userRoleRef.current)
+          toast(`${mentioned ? '📣' : '💬'} ${top.author}: ${top.text.slice(0, 60)}`, {
             duration: 4000,
             style: { textAlign: 'right', direction: 'rtl' },
           })
@@ -201,6 +242,7 @@ export default function ChatButton({ user }: ChatButtonProps) {
           role: user.role,
           author: user.name,
           text: value,
+          replyToId: replyTo?.id,
         }),
       })
       if (!res.ok) {
@@ -211,6 +253,7 @@ export default function ChatButton({ user }: ChatButtonProps) {
       setMessages((prev) => [...prev, data.message])
       knownIdsRef.current.add(data.message.id)
       setText('')
+      setReplyTo(null)
     } catch (e: any) {
       toast.error(e?.message || 'تعذر إرسال الرسالة')
     } finally {
@@ -288,8 +331,19 @@ export default function ChatButton({ user }: ChatButtonProps) {
                 return (
                   <div
                     key={m.id}
-                    className={`flex ${mine ? 'justify-start' : 'justify-end'}`}
+                    className={`group flex items-end gap-1 ${mine ? 'justify-start' : 'justify-end'}`}
                   >
+                    {mine && (
+                      <button
+                        type="button"
+                        onClick={() => setReplyTo(m)}
+                        className="opacity-0 group-hover:opacity-100 transition text-gray-400 hover:text-red-600 text-xs shrink-0"
+                        title="رد"
+                        aria-label="رد على الرسالة"
+                      >
+                        ↩
+                      </button>
+                    )}
                     <div
                       className={`max-w-[80%] rounded-2xl px-3 py-2 shadow-sm border ${
                         mine
@@ -309,8 +363,20 @@ export default function ChatButton({ user }: ChatButtonProps) {
                           </span>
                         </div>
                       )}
+                      {m.replyToId && (
+                        <div
+                          className={`text-[11px] rounded-lg px-2 py-1 mb-1 border-r-2 truncate ${
+                            mine
+                              ? 'bg-red-700/40 border-red-200 text-red-50'
+                              : 'bg-gray-100 border-gray-300 text-gray-600'
+                          }`}
+                        >
+                          <span className="font-bold">{m.replyToAuthor}: </span>
+                          {m.replyToText}
+                        </div>
+                      )}
                       <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">
-                        {m.text}
+                        {renderMessageText(m.text)}
                       </p>
                       <div
                         className={`text-[10px] mt-1 ${mine ? 'text-red-100' : 'text-gray-400'}`}
@@ -318,11 +384,43 @@ export default function ChatButton({ user }: ChatButtonProps) {
                         {formatTime(m.createdAt)}
                       </div>
                     </div>
+                    {!mine && (
+                      <button
+                        type="button"
+                        onClick={() => setReplyTo(m)}
+                        className="opacity-0 group-hover:opacity-100 transition text-gray-400 hover:text-red-600 text-xs shrink-0"
+                        title="رد"
+                        aria-label="رد على الرسالة"
+                      >
+                        ↩
+                      </button>
+                    )}
                   </div>
                 )
               })
             )}
           </div>
+
+          {/* Reply preview bar */}
+          {replyTo && (
+            <div
+              dir="rtl"
+              className="px-3 py-2 border-t border-gray-200 bg-gray-50 flex items-center justify-between gap-2"
+            >
+              <div className="text-[11px] text-gray-600 truncate">
+                <span className="font-bold">الرد على {replyTo.author}: </span>
+                {replyTo.text.slice(0, 60)}
+              </div>
+              <button
+                type="button"
+                onClick={() => setReplyTo(null)}
+                className="text-gray-400 hover:text-gray-600 text-sm shrink-0"
+                aria-label="إلغاء الرد"
+              >
+                ✕
+              </button>
+            </div>
+          )}
 
           {/* Composer */}
           <div className="border-t border-gray-200 p-3 bg-white rounded-b-xl">

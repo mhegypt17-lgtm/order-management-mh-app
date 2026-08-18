@@ -9,6 +9,7 @@ import { compressImage } from '@/lib/imageCompression'
 import { useDiscountCodeInfo, describeDiscountBrief } from '@/lib/discountCodeInfo'
 import DeliveryDispatchShare from '@/components/orders/DeliveryDispatchShare'
 import ImageLightbox from '@/components/orders/ImageLightbox'
+import type { CSAttachment } from '@/lib/omsData'
 
 type OrderItemDetail = {
   id: string
@@ -54,6 +55,10 @@ type OrderDetail = {
   productPhotosCount?: number
   hasInvoicePhoto?: boolean
   photosLoaded?: boolean
+  // CS-uploaded attachments (receipts, ID photos, etc.) — read-only for
+  // branch. Same lazy pattern: only a boolean flag on the initial load,
+  // real bytes fetched from /photos on demand alongside product photos.
+  hasCsAttachments?: boolean
 }
 
 const STATUS_OPTIONS: Array<OrderDetail['delivery']['deliveryStatus']> = ['لم يخرج بعد', 'جاهز', 'في الطريق', 'تم التوصيل']
@@ -87,6 +92,10 @@ export default function BranchOrderDetailPage() {
   const [isLoadingPhotos, setIsLoadingPhotos] = useState(false)
   const [savedPhotosCount, setSavedPhotosCount] = useState(0)
   const [savedHasInvoice, setSavedHasInvoice] = useState(false)
+  // CS attachments — view-only for branch (no add/remove/caption-edit),
+  // hydrated from the same lazy /photos fetch as product photos/invoice.
+  const [csAttachments, setCsAttachments] = useState<CSAttachment[]>([])
+  const [savedHasCsAttachments, setSavedHasCsAttachments] = useState(false)
 
   /** Per-line draft edits keyed by item id. */
   const [itemEdits, setItemEdits] = useState<
@@ -122,9 +131,11 @@ export default function BranchOrderDetailPage() {
         setBranchComments(loaded.delivery.branchComments || '')
         setProductPhotos([])
         setInvoicePhoto('')
+        setCsAttachments([])
         setPhotosLoaded(Boolean(loaded.photosLoaded))
         setSavedPhotosCount(Number(loaded.productPhotosCount) || 0)
         setSavedHasInvoice(Boolean(loaded.hasInvoicePhoto))
+        setSavedHasCsAttachments(Boolean(loaded.hasCsAttachments))
         const drafts: Record<string, { quantity: number; weightGrams: number; weightDraft: string }> = {}
         for (const it of loaded.items || []) {
           drafts[it.id] = {
@@ -229,6 +240,7 @@ export default function BranchOrderDetailPage() {
       const data = await res.json()
       setProductPhotos(Array.isArray(data.productPhotos) ? data.productPhotos : [])
       setInvoicePhoto((data.invoicePhoto as string) || '')
+      setCsAttachments(Array.isArray(data.csAttachments) ? data.csAttachments : [])
       setPhotosLoaded(true)
     } catch {
       toast.error('تعذر تحميل الصور')
@@ -248,8 +260,13 @@ export default function BranchOrderDetailPage() {
   const ensurePhotosLoaded = async () => {
     if (photosLoaded) return true
     if (!order) return false
-    // No existing photos to preserve — just mark loaded and continue.
-    if (savedPhotosCount === 0 && !savedHasInvoice) {
+    // No existing photos/attachments to preserve — just mark loaded and
+    // continue. Must also check savedHasCsAttachments here: if CS left
+    // attachments but branch never viewed them, skipping the fetch would
+    // flip photosLoaded=true and permanently hide the "view attachments"
+    // banner (its condition is `!photosLoaded && savedHasCsAttachments`)
+    // without ever having actually fetched them.
+    if (savedPhotosCount === 0 && !savedHasInvoice && !savedHasCsAttachments) {
       setPhotosLoaded(true)
       return true
     }
@@ -260,6 +277,7 @@ export default function BranchOrderDetailPage() {
       const data = await res.json()
       setProductPhotos(Array.isArray(data.productPhotos) ? data.productPhotos : [])
       setInvoicePhoto((data.invoicePhoto as string) || '')
+      setCsAttachments(Array.isArray(data.csAttachments) ? data.csAttachments : [])
       setPhotosLoaded(true)
       return true
     } catch {
@@ -938,6 +956,77 @@ export default function BranchOrderDetailPage() {
             </div>
           </div>
         </div>
+
+        {/* CS attachments — read-only for branch (receipts, ID photos, etc.
+            uploaded by CS). Same lazy-load pattern as product photos/invoice:
+            only a "view" banner + count until the user clicks to fetch. */}
+        {(savedHasCsAttachments || csAttachments.length > 0) && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1 text-right">
+              مرفقات خدمة العملاء
+            </label>
+            {!photosLoaded && savedHasCsAttachments && (
+              <div className="mb-2 flex items-center justify-between bg-amber-50 border border-amber-200 rounded px-3 py-2 text-sm">
+                <span className="text-amber-800">📎 مرفقات محفوظة من خدمة العملاء (لم يتم تحميلها)</span>
+                <button
+                  type="button"
+                  onClick={handleLoadPhotos}
+                  disabled={isLoadingPhotos}
+                  className="px-3 py-1 rounded bg-amber-600 hover:bg-amber-700 disabled:bg-amber-300 text-white text-xs font-semibold"
+                >
+                  {isLoadingPhotos ? '... جاري التحميل' : 'عرض المرفقات'}
+                </button>
+              </div>
+            )}
+            {csAttachments.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                {csAttachments.map((att) => (
+                  <div
+                    key={att.id}
+                    className="relative border border-gray-200 rounded-lg p-2 bg-gray-50 space-y-2"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setLightbox({ src: att.url, alt: att.caption || 'مرفق' })}
+                      className="block w-full"
+                      title="عرض الصورة"
+                    >
+                      <img
+                        src={att.url}
+                        alt={att.caption || 'مرفق'}
+                        className="w-full h-28 object-cover rounded border border-gray-300 cursor-zoom-in"
+                      />
+                    </button>
+                    {att.caption && (
+                      <p className="text-xs text-gray-700 text-right truncate">{att.caption}</p>
+                    )}
+                    <div className="flex items-center justify-between text-[10px] text-gray-500">
+                      <span>👤 {att.uploadedBy || '—'}</span>
+                      <span className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setLightbox({ src: att.url, alt: att.caption || 'مرفق' })}
+                          className="text-emerald-700 underline"
+                        >
+                          🔍 عرض
+                        </button>
+                        <a
+                          href={att.url}
+                          download={att.caption ? `${att.caption}.png` : `attachment-${att.id}.png`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-blue-700 underline"
+                        >
+                          📥 تحميل
+                        </a>
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       <div className="flex gap-3">
