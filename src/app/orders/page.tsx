@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
 import { DeliveryProgressBar } from '@/components/orders/DeliveryProgressBar'
-import { cairoDateString } from '@/lib/cairoTime'
+import { cairoDateString, addDays } from '@/lib/cairoTime'
 
 export default function OrdersPage() {
   const router = useRouter()
@@ -48,20 +48,21 @@ export default function OrdersPage() {
   const fetchOrders = async () => {
     setIsLoading(true)
     try {
-      // Egress fix: default to TODAY only instead of the route's 35-day
-      // window — most staff only ever need today's orders, and this is by
-      // far the largest JSON payload in the app. Explicit date-range filters
-      // below still work exactly as before by passing them straight through.
-      // `includeScheduled=1` asks the API to also merge in any upcoming
-      // scheduled (حجز) booking regardless of its creation date, so narrowing
-      // the window can never hide a reservation someone is expecting to see.
+      // Egress fix: default to TODAY + 2 previous days (3-day window)
+      // instead of the route's 35-day window — most staff only ever need
+      // recent orders, and this is by far the largest JSON payload in the
+      // app. Explicit date-range filters below still work exactly as before
+      // by passing them straight through. `includeScheduled=1` asks the API
+      // to also merge in any upcoming scheduled (حجز) booking regardless of
+      // its creation date, so narrowing the window can never hide a
+      // reservation someone is expecting to see.
       const params = new URLSearchParams()
       if (dateFrom || dateTo) {
         if (dateFrom) params.set('from', dateFrom)
         if (dateTo) params.set('to', dateTo)
       } else {
         const today = cairoDateString()
-        params.set('from', today)
+        params.set('from', addDays(today, -2))
         params.set('to', today)
       }
       params.set('includeScheduled', '1')

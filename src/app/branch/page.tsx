@@ -51,8 +51,14 @@ export default function BranchPage() {
   const [savingId, setSavingId] = useState<string | null>(null)
 
   const today = cairoDateString()
+  // Egress fix: default landing window is TODAY + 2 previous days (3-day
+  // window) instead of today-only — branch staff occasionally need to
+  // check yesterday's deliveries without manually widening the filter.
+  // The explicit "today" preset button below still narrows to literally
+  // just today when clicked.
+  const defaultFromDate = addDays(today, -2)
   const [searchTerm, setSearchTerm] = useState('')
-  const [fromDate, setFromDate] = useState(today)
+  const [fromDate, setFromDate] = useState(defaultFromDate)
   const [toDate, setToDate] = useState(today)
   const [orderTypeFilter, setOrderTypeFilter] = useState('all')
   const [orderStatusFilter, setOrderStatusFilter] = useState('all')
@@ -78,7 +84,7 @@ export default function BranchPage() {
 
   const clearFilters = () => {
     setSearchTerm('')
-    setFromDate(today)
+    setFromDate(defaultFromDate)
     setToDate(today)
     setOrderTypeFilter('all')
     setOrderStatusFilter('all')
