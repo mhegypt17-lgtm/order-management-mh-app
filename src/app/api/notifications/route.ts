@@ -60,13 +60,27 @@ async function readNotificationCustomers(): Promise<{ data: unknown; error: { me
 // re-fetches to at most once per 30s *per browser tab*, but that's not
 // shared across different staff — every distinct user's bell still hits
 // all of this independently, live log evidence showed 4 separate `orders`
-// requests landing in the same second. Bucketing the time window to a 20s
+// requests landing in the same second. Bucketing the time window to a
 // tick and caching the whole bundle behind that key means concurrent
 // bells across all staff share one DB round trip per bucket — the same
 // pattern already used for `customers` above, just extended to cover the
 // other 6 queries too.
+//
+// Egress fix (Round 6): bucket was 20s, matching NotificationBell's old
+// fallback-poll cadence from before Realtime existed. Realtime (postgres_changes
+// on orders/tasks/complaints, 5s debounce) is now the primary update path and
+// this poll is just a safety net (180s client-side), so a 20s server bucket
+// was needlessly tight — it also set the ceiling on how fast a genuine
+// Realtime-triggered refetch could see fresh data, since the cached bundle
+// only refreshes when the bucket rolls over. Bumped to 45s: ~2.25x fewer
+// forced bundle executions/hour (180/hr -> 80/hr), while keeping worst-case
+// notification lag (task/complaint/priority-order alerts) reasonable.
+// `revalidate` below MUST stay equal to this value in seconds — Next's
+// stale-while-revalidate would otherwise re-trigger the fetcher every
+// `revalidate` seconds regardless of the bucket, silently undoing this fix
+// (same interaction that caused the inactivity-scan bug fixed in Round 5).
 const NOTIF_BUNDLE_CACHE_TAG = 'notifications-bundle'
-const BUNDLE_BUCKET_MS = 20_000
+const BUNDLE_BUCKET_MS = 45_000
 
 const readNotificationBundleCached = unstable_cache(
   async (
@@ -102,7 +116,7 @@ const readNotificationBundleCached = unstable_cache(
     }
   },
   ['notifications-bundle'],
-  { revalidate: 20, tags: [NOTIF_BUNDLE_CACHE_TAG] }
+  { revalidate: 45, tags: [NOTIF_BUNDLE_CACHE_TAG] }
 )
 
 // Egress fix (Round 5): the 400-day inactivity scan (customer-retention
@@ -261,9 +275,11 @@ export async function GET(req: NextRequest) {
 
     // ── Fetch everything in parallel with narrow projections + SQL filters ──
     // The 6 time-windowed, role-agnostic queries below (tasks, briefings,
-    // complaints, orders x3, edit_history) go through a 20s-bucketed cache
+    // complaints, orders x2, edit_history) go through a 45s-bucketed cache
     // shared across every caller (see readNotificationBundleCached above),
     // instead of running raw on every single bell poll from every user.
+    // The 400-day inactivity scan runs through its own, separate 12h-bucketed
+    // cache (see readInactivityOrdersCached above) — decoupled from this one.
     const bucket = Math.floor(Date.now() / BUNDLE_BUCKET_MS) * BUNDLE_BUCKET_MS
     const inactivityBucket = Math.floor(Date.now() / INACTIVITY_BUCKET_MS) * INACTIVITY_BUCKET_MS
     const [bundle, inactivityOrders, customersRes, settings] = await Promise.all([
