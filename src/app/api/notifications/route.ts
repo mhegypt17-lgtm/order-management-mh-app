@@ -261,13 +261,30 @@ export async function GET(req: NextRequest) {
     const role = (searchParams.get('role') || 'cs').toLowerCase()
     const userName = (searchParams.get('user') || '').trim()
 
-    // Look back 7 days for recent activity
-    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
+    // Egress fix (Round 7 — critical): `unstable_cache` derives its cache key
+    // from ALL arguments passed to the wrapped function, not just the
+    // `_bucket` number. `cutoffISO`/`inactivityCutoffISO` used to be computed
+    // from a raw `Date.now()` (millisecond precision) BEFORE this fix, which
+    // meant they were a different string on literally every request — so
+    // the cache key was unique every single call and NEVER actually hit,
+    // silently defeating both the Round 3/4 45s-bucket bundle cache AND the
+    // Round 5 12h-bucket inactivity-scan cache. Live log evidence on
+    // 2026-08-20 showed the 400-day inactivity scan (the most expensive
+    // query in this file) re-executing every ~5 minutes instead of twice a
+    // day. Fix: derive both cutoffs from the (already-floored) bucket value
+    // instead of the live clock, so they stay byte-for-byte identical for
+    // the whole bucket window and the cache can actually dedupe.
+    const bucket = Math.floor(Date.now() / BUNDLE_BUCKET_MS) * BUNDLE_BUCKET_MS
+    const inactivityBucket = Math.floor(Date.now() / INACTIVITY_BUCKET_MS) * INACTIVITY_BUCKET_MS
+    // Look back 7 days for recent activity. `cutoff` (numeric ms) is used
+    // below for in-process filtering/comparisons; `cutoffISO` (string, same
+    // instant) is the cache-keyed argument sent to Supabase.
+    const cutoff = bucket - 7 * 24 * 60 * 60 * 1000
     const cutoffISO = new Date(cutoff).toISOString()
     // Inactive-customer logic needs orders going back further than 7 days
     // but bounded — anyone whose last order is older than ~13 months is
     // already beyond every retention stage in use.
-    const inactivityCutoffISO = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000).toISOString()
+    const inactivityCutoffISO = new Date(inactivityBucket - 400 * 24 * 60 * 60 * 1000).toISOString()
     const todayCairo = cairoDateString()
     const tomorrowCairo = addDays(todayCairo, 1)
 
@@ -280,8 +297,6 @@ export async function GET(req: NextRequest) {
     // instead of running raw on every single bell poll from every user.
     // The 400-day inactivity scan runs through its own, separate 12h-bucketed
     // cache (see readInactivityOrdersCached above) — decoupled from this one.
-    const bucket = Math.floor(Date.now() / BUNDLE_BUCKET_MS) * BUNDLE_BUCKET_MS
-    const inactivityBucket = Math.floor(Date.now() / INACTIVITY_BUCKET_MS) * INACTIVITY_BUCKET_MS
     const [bundle, inactivityOrders, customersRes, settings] = await Promise.all([
       readNotificationBundleCached(bucket, cutoffISO, todayCairo, tomorrowCairo),
       readInactivityOrdersCached(inactivityBucket, inactivityCutoffISO),
