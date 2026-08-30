@@ -29,6 +29,10 @@ export default function OrdersPage() {
   const [scheduleFilter, setScheduleFilter] = useState<'all' | 'today' | 'scheduled'>('all')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  // Filters to "تم التوصيل" only. Purely a client-side filter over the
+  // delivery status already loaded with every order (same field the summary
+  // card's "delivered" count already uses) — no extra fetch involved.
+  const [deliveredOnly, setDeliveredOnly] = useState(false)
   // Bug fix: this dropdown used to be a hardcoded <option> list that had
   // drifted from the admin-configured order statuses (Settings → حالات الطلب)
   // — e.g. still offering 'مؤجل' after an admin deactivated it, while the
@@ -43,6 +47,7 @@ export default function OrdersPage() {
     setScheduleFilter('all')
     setDateFrom('')
     setDateTo('')
+    setDeliveredOnly(false)
   }
 
   const fetchOrders = async () => {
@@ -143,10 +148,11 @@ export default function OrdersPage() {
           (order.isScheduled && order.scheduledDate === today) ||
           (!order.isScheduled && orderDate === today)
         ))
+      const matchesDelivered = !deliveredOnly || order.delivery?.deliveryStatus === 'تم التوصيل'
 
-      return matchesSearch && matchesStatus && matchesType && matchesFrom && matchesTo && matchesSchedule
+      return matchesSearch && matchesStatus && matchesType && matchesFrom && matchesTo && matchesSchedule && matchesDelivered
     })
-  }, [orders, searchTerm, statusFilter, orderTypeFilter, scheduleFilter, dateFrom, dateTo])
+  }, [orders, searchTerm, statusFilter, orderTypeFilter, scheduleFilter, dateFrom, dateTo, deliveredOnly])
 
   const statusClasses: Record<string, string> = {
     ساري: 'bg-indigo-100 text-indigo-800',
@@ -296,6 +302,16 @@ export default function OrdersPage() {
           <option value="today">طلبات اليوم</option>
           <option value="scheduled">طلبات مجدولة</option>
         </select>
+
+        <label className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg cursor-pointer select-none" dir="rtl">
+          <input
+            type="checkbox"
+            checked={deliveredOnly}
+            onChange={(e) => setDeliveredOnly(e.target.checked)}
+            className="h-4 w-4 accent-red-600"
+          />
+          <span className="text-sm text-gray-700">تم التوصيل فقط</span>
+        </label>
 
         <button
           onClick={fetchOrders}
