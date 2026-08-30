@@ -1160,7 +1160,14 @@ export default function ComplaintsSection() {
                     <span>📋 {complaint.channel}</span>
                     {complaint.customerName && <span>👤 {complaint.customerName}</span>}
                     {complaint.customerPhone && <span>📱 {complaint.customerPhone}</span>}
-                    {complaint.linkedOrderId && <span>🛒 الطلب: {complaint.linkedOrderId}</span>}
+                    {complaint.linkedOrderId && (
+                      <span>
+                        🛒 الطلب:{' '}
+                        {orders.find((o) => o.id === complaint.linkedOrderId)?.appOrderNo
+                          ? `#${orders.find((o) => o.id === complaint.linkedOrderId)!.appOrderNo}`
+                          : complaint.linkedOrderId}
+                      </span>
+                    )}
                     <span>👨‍💼 {complaint.assignedTo}</span>
                     {complaint.complaintOwner && <span>🏢 {complaint.complaintOwner}</span>}
                     <span>🕒 {formatCairoDateTime(complaint.openedAt, 'ar-EG')}</span>
@@ -1327,7 +1334,17 @@ export default function ComplaintsSection() {
                 {selectedComplaint.linkedOrderId && (
                   <p>
                     <strong className="text-gray-700">الطلب المرتبط:</strong>{' '}
-                    <span className="text-gray-600">🛒 {selectedComplaint.linkedOrderId}</span>
+                    <span className="text-gray-600">
+                      🛒{' '}
+                      {(() => {
+                        // Resolve to the human-friendly app order number from
+                        // the already-loaded 90-day `orders` list — zero extra
+                        // egress. Falls back to the raw internal id if the
+                        // linked order is older than that window.
+                        const linked = orders.find((o) => o.id === selectedComplaint.linkedOrderId)
+                        return linked ? `#${linked.appOrderNo}` : selectedComplaint.linkedOrderId
+                      })()}
+                    </span>
                   </p>
                 )}
                 <p>
