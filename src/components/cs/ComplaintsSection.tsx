@@ -1312,6 +1312,24 @@ export default function ComplaintsSection() {
 
               {/* Details */}
               <div className="space-y-3 bg-gray-50 border border-gray-200 rounded-lg p-4">
+                {/* Customer & linked order — same info the list card shows,
+                    all already present on the fetched complaint object, so
+                    this is a pure render addition with zero extra egress. */}
+                {(selectedComplaint.customerName || selectedComplaint.customerPhone) && (
+                  <p>
+                    <strong className="text-gray-700">العميل:</strong>{' '}
+                    <span className="text-gray-600">
+                      {selectedComplaint.customerName || 'غير محدد'}
+                      {selectedComplaint.customerPhone ? ` • 📱 ${selectedComplaint.customerPhone}` : ''}
+                    </span>
+                  </p>
+                )}
+                {selectedComplaint.linkedOrderId && (
+                  <p>
+                    <strong className="text-gray-700">الطلب المرتبط:</strong>{' '}
+                    <span className="text-gray-600">🛒 {selectedComplaint.linkedOrderId}</span>
+                  </p>
+                )}
                 <p>
                   <strong className="text-gray-700">القناة:</strong> <span className="text-gray-600">{selectedComplaint.channel}</span>
                 </p>
@@ -1322,6 +1340,20 @@ export default function ComplaintsSection() {
                     {selectedComplaint.subReason ? ` › ${selectedComplaint.subReason}` : ''}
                   </span>
                 </p>
+                <p>
+                  <strong className="text-gray-700">التفاصيل:</strong>{' '}
+                  <span className="text-gray-600 whitespace-pre-wrap">{selectedComplaint.description || '—'}</span>
+                </p>
+                {selectedComplaint.productIds && selectedComplaint.productIds.length > 0 && (
+                  <p>
+                    <strong className="text-gray-700">المنتج/المنتجات المعنية:</strong>{' '}
+                    <span className="text-gray-600">
+                      {selectedComplaint.productIds
+                        .map((id) => products.find((p) => p.id === id)?.productName || 'منتج محذوف')
+                        .join('، ')}
+                    </span>
+                  </p>
+                )}
                 <p>
                   <strong className="text-gray-700">الوقت المستغرق:</strong> <span className="text-gray-600">{calculateSLA(selectedComplaint)}</span>
                 </p>
@@ -1335,11 +1367,10 @@ export default function ComplaintsSection() {
                     <span className="text-gray-600">{formatCairoDateTime(selectedComplaint.closedAt, 'ar-EG')}</span>
                   </p>
                 )}
-                {selectedComplaint.customerName && (
-                  <p>
-                    <strong className="text-gray-700">العميل:</strong> <span className="text-gray-600">{selectedComplaint.customerName}</span>
-                  </p>
-                )}
+                <p>
+                  <strong className="text-gray-700">تم الإنشاء بواسطة:</strong>{' '}
+                  <span className="text-gray-600">{selectedComplaint.createdBy}</span>
+                </p>
               </div>
 
               {/* Comments */}
