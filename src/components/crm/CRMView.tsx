@@ -148,6 +148,23 @@ interface CustomerProfile {
   feedbackStats?: FeedbackStats
 }
 
+// Aggregate customer-base insights returned alongside the list by
+// GET /api/crm/customers — computed server-side from data the endpoint
+// already reads in full (customers/orders/addresses), so this costs zero
+// additional Supabase reads.
+interface CRMStats {
+  totalCustomers: number
+  customersWithOrders: number
+  avgOrdersPerCustomer: number
+  avgOrdersPerActiveCustomer: number
+  avgOrderValue: number
+  totalRevenue: number
+  b2bCount: number
+  retailCount: number
+  byTier: Record<string, number>
+  bySource: Record<string, number>
+}
+
 interface DeliveryZoneOpt {
   area: string
   subArea?: string
@@ -189,6 +206,15 @@ const STATUS_COLORS: Record<string, string> = {
 // indistinguishable from "2,651,77" — looked like a totally different,
 // much larger number. Western digits/separators here keep amounts unambiguous
 // while the rest of the UI stays Arabic.
+function StatChip({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="px-3 py-1.5 rounded-lg bg-gray-50 border border-gray-200 min-w-[110px]">
+      <div className="text-[11px] text-gray-500 leading-tight">{label}</div>
+      <div className="text-sm font-bold text-gray-900 leading-tight">{value}</div>
+    </div>
+  )
+}
+
 function formatCurrency(n: number) {
   return (
     n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ج.م'
@@ -215,6 +241,8 @@ export default function CRMView({ role }: CRMViewProps) {
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
   const [zones, setZones] = useState<DeliveryZoneOpt[]>([])
+  const [stats, setStats] = useState<CRMStats | null>(null)
+  const [showStats, setShowStats] = useState(true)
 
   // Add-customer modal state
   const [showAdd, setShowAdd] = useState(false)
@@ -625,7 +653,8 @@ export default function CRMView({ role }: CRMViewProps) {
         const res = await fetch(`/api/crm/customers?search=${encodeURIComponent(search)}`)
         if (!res.ok) throw new Error('Failed to load')
         const data = await res.json()
-        setCustomers(data)
+        setCustomers(data.customers || [])
+        setStats(data.stats || null)
       } catch {
         toast.error('خطأ في تحميل العملاء')
       } finally {
@@ -675,7 +704,63 @@ export default function CRMView({ role }: CRMViewProps) {
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
-    <div className="flex h-[calc(100vh-4rem)] overflow-hidden" dir="rtl">
+    <div className="flex flex-col h-[calc(100vh-4rem)] overflow-hidden" dir="rtl">
+      {/* ── Insights bar: aggregate customer-base stats (zero extra egress —
+          computed server-side from data /api/crm/customers already reads) ── */}
+      {stats && (
+        <div className="flex-shrink-0 border-b border-gray-200 bg-white px-4 py-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-gray-700">📊 نظرة عامة على قاعدة العملاء</span>
+            <button
+              type="button"
+              onClick={() => setShowStats((v) => !v)}
+              className="text-xs text-gray-500 hover:text-gray-700"
+            >
+              {showStats ? 'إخفاء ▲' : 'عرض ▼'}
+            </button>
+          </div>
+          {showStats && (
+            <div className="mt-2 space-y-2">
+              <div className="flex flex-wrap gap-2">
+                <StatChip label="إجمالي العملاء" value={stats.totalCustomers} />
+                <StatChip label="عملاء نشطون (لديهم طلب)" value={stats.customersWithOrders} />
+                <StatChip label="متوسط الطلبات / عميل" value={stats.avgOrdersPerCustomer} />
+                <StatChip label="متوسط الطلبات / عميل نشط" value={stats.avgOrdersPerActiveCustomer} />
+                <StatChip label="متوسط قيمة الطلب" value={formatCurrency(stats.avgOrderValue)} />
+                <StatChip label="B2B" value={stats.b2bCount} />
+                <StatChip label="أفراد" value={stats.retailCount} />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-gray-400">حسب الفئة:</span>
+                {Object.entries(stats.byTier)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([tier, count]) => (
+                    <span
+                      key={tier}
+                      className={`text-xs px-2 py-0.5 rounded-full font-medium ${TIER_COLORS[tier] || 'bg-gray-100 text-gray-700'}`}
+                    >
+                      {tier}: {count}
+                    </span>
+                  ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-gray-400">مصدر اكتساب العملاء:</span>
+                {Object.entries(stats.bySource)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([source, count]) => (
+                    <span
+                      key={source}
+                      className="text-xs px-2 py-0.5 rounded-full font-medium bg-sky-100 text-sky-800"
+                    >
+                      {source}: {count}
+                    </span>
+                  ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      <div className="flex flex-1 overflow-hidden">
       {/* ── Sidebar: Customer List ─────────────────────────────────────────── */}
       <div className="w-72 flex-shrink-0 border-l border-gray-200 bg-white flex flex-col">
         <div className="p-3 border-b border-gray-200">
@@ -1409,6 +1494,7 @@ export default function CRMView({ role }: CRMViewProps) {
             )}
           </div>
         ) : null}
+      </div>
       </div>
 
       {/* ── Add Customer Modal ─────────────────────────────────────────── */}
