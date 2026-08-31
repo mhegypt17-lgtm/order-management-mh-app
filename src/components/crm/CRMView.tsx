@@ -24,6 +24,10 @@ interface CustomerSummary {
   tier: string
   // True if any of the customer's orders was placed with orderType === 'B2B'.
   isB2B: boolean
+  // First order's customerSource (acquisition channel), and distinct
+  // delivery-address areas — both admin-only filter/insight fields.
+  acquisitionSource?: string
+  zones?: string[]
 }
 
 interface Address {
@@ -163,6 +167,7 @@ interface CRMStats {
   retailCount: number
   byTier: Record<string, number>
   bySource: Record<string, number>
+  byZone: Record<string, number>
 }
 
 interface DeliveryZoneOpt {
@@ -200,12 +205,6 @@ const STATUS_COLORS: Record<string, string> = {
   'حجز':   'bg-blue-100 text-blue-800',
 }
 
-// `en-US` on purpose, not `ar-EG`: the Arabic locale renders both the
-// thousands separator (٬) and the decimal separator (٫) as glyphs that look
-// like a plain comma in most fonts, so "2,651.77" became visually
-// indistinguishable from "2,651,77" — looked like a totally different,
-// much larger number. Western digits/separators here keep amounts unambiguous
-// while the rest of the UI stays Arabic.
 function StatChip({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="px-3 py-1.5 rounded-lg bg-gray-50 border border-gray-200 min-w-[110px]">
@@ -215,6 +214,12 @@ function StatChip({ label, value }: { label: string; value: string | number }) {
   )
 }
 
+// `en-US` on purpose, not `ar-EG`: the Arabic locale renders both the
+// thousands separator (٬) and the decimal separator (٫) as glyphs that look
+// like a plain comma in most fonts, so "2,651.77" became visually
+// indistinguishable from "2,651,77" — looked like a totally different,
+// much larger number. Western digits/separators here keep amounts unambiguous
+// while the rest of the UI stays Arabic.
 function formatCurrency(n: number) {
   return (
     n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ج.م'
@@ -233,6 +238,11 @@ export default function CRMView({ role }: CRMViewProps) {
   const [customers, setCustomers] = useState<CustomerSummary[]>([])
   const [search, setSearch] = useState('')
   const [segment, setSegment] = useState<'all' | 'b2b' | 'retail'>('all')
+  // Admin-only extra filters (client-side, over already-loaded data — same
+  // zero-egress pattern as `segment` above).
+  const [tierFilter, setTierFilter] = useState<string>('all')
+  const [zoneFilter, setZoneFilter] = useState<string>('all')
+  const [sourceFilter, setSourceFilter] = useState<string>('all')
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [profile, setProfile] = useState<CustomerProfile | null>(null)
@@ -666,9 +676,15 @@ export default function CRMView({ role }: CRMViewProps) {
   }, [search, reloadKey])
 
   const displayedCustomers = useMemo(() => {
-    if (segment === 'all') return customers
-    return customers.filter((c) => (segment === 'b2b' ? c.isB2B : !c.isB2B))
-  }, [customers, segment])
+    return customers.filter((c) => {
+      if (segment === 'b2b' && !c.isB2B) return false
+      if (segment === 'retail' && c.isB2B) return false
+      if (tierFilter !== 'all' && c.tier !== tierFilter) return false
+      if (zoneFilter !== 'all' && !(c.zones || []).includes(zoneFilter)) return false
+      if (sourceFilter !== 'all' && (c.acquisitionSource || 'غير محدد') !== sourceFilter) return false
+      return true
+    })
+  }, [customers, segment, tierFilter, zoneFilter, sourceFilter])
 
   // Load customer profile
   const loadProfile = useCallback(async (id: string) => {
@@ -706,8 +722,9 @@ export default function CRMView({ role }: CRMViewProps) {
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] overflow-hidden" dir="rtl">
       {/* ── Insights bar: aggregate customer-base stats (zero extra egress —
-          computed server-side from data /api/crm/customers already reads) ── */}
-      {stats && (
+          computed server-side from data /api/crm/customers already reads) ──
+          Admin-only per explicit request — CS never sees this panel. ── */}
+      {role === 'admin' && stats && (
         <div className="flex-shrink-0 border-b border-gray-200 bg-white px-4 py-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-gray-700">📊 نظرة عامة على قاعدة العملاء</span>
@@ -753,6 +770,19 @@ export default function CRMView({ role }: CRMViewProps) {
                       className="text-xs px-2 py-0.5 rounded-full font-medium bg-sky-100 text-sky-800"
                     >
                       {source}: {count}
+                    </span>
+                  ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-gray-400">حسب المنطقة:</span>
+                {Object.entries(stats.byZone)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([zone, count]) => (
+                    <span
+                      key={zone}
+                      className="text-xs px-2 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-800"
+                    >
+                      {zone}: {count}
                     </span>
                   ))}
               </div>
@@ -812,6 +842,45 @@ export default function CRMView({ role }: CRMViewProps) {
               </button>
             ))}
           </div>
+          {/* Admin-only extra filters — client-side over already-loaded data,
+              same zero-egress pattern as the segment toggle above. */}
+          {role === 'admin' && stats && (
+            <div className="grid grid-cols-3 gap-1 mt-2">
+              <select
+                value={tierFilter}
+                onChange={(e) => setTierFilter(e.target.value)}
+                className="text-xs border border-gray-300 rounded px-1.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-red-400"
+                title="الفئة"
+              >
+                <option value="all">كل الفئات</option>
+                {Object.keys(stats.byTier).map((tier) => (
+                  <option key={tier} value={tier}>{tier}</option>
+                ))}
+              </select>
+              <select
+                value={zoneFilter}
+                onChange={(e) => setZoneFilter(e.target.value)}
+                className="text-xs border border-gray-300 rounded px-1.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-red-400"
+                title="المنطقة"
+              >
+                <option value="all">كل المناطق</option>
+                {Object.keys(stats.byZone).map((zone) => (
+                  <option key={zone} value={zone}>{zone}</option>
+                ))}
+              </select>
+              <select
+                value={sourceFilter}
+                onChange={(e) => setSourceFilter(e.target.value)}
+                className="text-xs border border-gray-300 rounded px-1.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-red-400"
+                title="المصدر"
+              >
+                <option value="all">كل المصادر</option>
+                {Object.keys(stats.bySource).map((source) => (
+                  <option key={source} value={source}>{source}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
         <div className="flex-1 overflow-y-auto">
           {loading ? (

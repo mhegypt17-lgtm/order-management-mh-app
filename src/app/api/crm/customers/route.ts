@@ -44,6 +44,7 @@ export async function GET(req: NextRequest) {
     let b2bCount = 0
     const tierCounts: Record<string, number> = {}
     const sourceCounts: Record<string, number> = {}
+    const zoneCounts: Record<string, number> = {}
 
     const allSummaries = customers.map((c) => {
       const custOrders = orders.filter((o) => o.customerId === c.id)
@@ -81,6 +82,14 @@ export async function GET(req: NextRequest) {
         : null
       const acquisitionSource = firstOrder?.customerSource || 'غير محدد'
 
+      // Zone(s) = distinct delivery areas across the customer's saved
+      // addresses (already loaded via `addresses` above — no extra read).
+      // A customer with addresses in two areas counts toward both zones,
+      // same convention as loyalty tiers only ever counting once per customer.
+      const zones = Array.from(
+        new Set(custAddresses.map((a) => (a.area || '').trim()).filter(Boolean))
+      )
+
       // Accumulate aggregate counters (side effect, single pass).
       if (custOrders.length > 0) customersWithOrders += 1
       totalOrdersAll += custOrders.length
@@ -89,6 +98,7 @@ export async function GET(req: NextRequest) {
       if (isB2B) b2bCount += 1
       tierCounts[tier] = (tierCounts[tier] || 0) + 1
       sourceCounts[acquisitionSource] = (sourceCounts[acquisitionSource] || 0) + 1
+      for (const z of zones) zoneCounts[z] = (zoneCounts[z] || 0) + 1
 
       return {
         id: c.id,
@@ -97,6 +107,8 @@ export async function GET(req: NextRequest) {
         wallet: typeof c.wallet === 'number' ? c.wallet : 0,
         createdAt: c.createdAt,
         addressCount: custAddresses.length,
+        acquisitionSource,
+        zones,
         totalOrders: custOrders.length,
         completedOrders: completedOrders.length,
         totalRevenue,
@@ -136,6 +148,7 @@ export async function GET(req: NextRequest) {
       retailCount: customers.length - b2bCount,
       byTier: tierCounts,
       bySource: sourceCounts,
+      byZone: zoneCounts,
     }
 
     return NextResponse.json({ customers: result, stats })
