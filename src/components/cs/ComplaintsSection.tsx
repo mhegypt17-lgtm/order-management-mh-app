@@ -4,6 +4,15 @@ import { useState, useEffect } from 'react'
 import { useAuthStore } from '@/lib/auth'
 import toast from 'react-hot-toast'
 import { formatCairoDateTime } from '@/lib/cairoTime'
+import { compressImage } from '@/lib/imageCompression'
+
+interface ComplaintAttachment {
+  id: string
+  url: string
+  caption: string
+  uploadedBy: string
+  uploadedAt: string
+}
 
 interface Complaint {
   id: string
@@ -123,6 +132,18 @@ export default function ComplaintsSection() {
   const [searchResults, setSearchResults] = useState<Order[]>([])
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [showSearchResults, setShowSearchResults] = useState(false)
+
+  // Attachments — capped at 5, compressed client-side, lazy-loaded per
+  // ticket (never part of the main complaints fetch). `newAttachments` holds
+  // images picked before the ticket exists yet (create form); once a ticket
+  // has an id, everything goes through attachmentsByComplaint + the dedicated
+  // /api/complaints/[id]/attachments endpoint.
+  const MAX_ATTACHMENTS = 5
+  const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024 // 5MB per file, pre-compression
+  const [newAttachments, setNewAttachments] = useState<ComplaintAttachment[]>([])
+  const [attachmentsByComplaint, setAttachmentsByComplaint] = useState<Record<string, ComplaintAttachment[]>>({})
+  const [loadingAttachments, setLoadingAttachments] = useState(false)
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null)
 
   const [formData, setFormData] = useState({
     channel: '',
@@ -287,6 +308,7 @@ export default function ComplaintsSection() {
           complaintOwner: formData.complaintOwner || null,
           createdBy: user?.name || 'System',
           productIds: formData.productIds,
+          attachments: newAttachments,
         }),
       })
 
@@ -306,12 +328,117 @@ export default function ComplaintsSection() {
         complaintOwner: '',
         productIds: [],
       })
+      setNewAttachments([])
       setShowForm(false)
       await fetchData()
     } catch (error) {
       console.error('Error creating complaint:', error)
       toast.error('فشل فتح الشكوى')
     }
+  }
+
+  // ── Attachments (create form — no ticket id yet, kept in local state) ──
+  const handleAddNewAttachments = async (files: File[]) => {
+    if (!files || files.length === 0) return
+    if (newAttachments.length >= MAX_ATTACHMENTS) {
+      toast.error(`الحد الأقصى ${MAX_ATTACHMENTS} صور لكل تذكرة`)
+      return
+    }
+    const room = MAX_ATTACHMENTS - newAttachments.length
+    const toAdd: ComplaintAttachment[] = []
+    for (const file of files.slice(0, room)) {
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        toast.error(`الملف "${file.name}" أكبر من 5MB — اختر صورة أصغر`)
+        continue
+      }
+      try {
+        const dataUrl = await compressImage(file)
+        toAdd.push({
+          id: `comp-att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          url: dataUrl,
+          caption: '',
+          uploadedBy: user?.name || user?.id || 'unknown',
+          uploadedAt: new Date().toISOString(),
+        })
+      } catch {
+        toast.error(`تعذر قراءة الملف "${file.name}"`)
+      }
+    }
+    if (toAdd.length > 0) setNewAttachments((prev) => [...prev, ...toAdd])
+  }
+
+  const handleRemoveNewAttachment = (id: string) => {
+    setNewAttachments((prev) => prev.filter((a) => a.id !== id))
+  }
+
+  // ── Attachments (existing ticket — lazy-loaded, saved via the dedicated
+  //    /api/complaints/[id]/attachments endpoint, never through the normal
+  //    complaint PUT so a status/subject edit never echoes the blob back) ──
+  const ensureAttachmentsLoaded = async (complaintId: string): Promise<ComplaintAttachment[] | null> => {
+    if (attachmentsByComplaint[complaintId]) return attachmentsByComplaint[complaintId]
+    setLoadingAttachments(true)
+    try {
+      const res = await fetch(`/api/complaints/${complaintId}/attachments`)
+      if (!res.ok) throw new Error('failed')
+      const data = await res.json()
+      const list: ComplaintAttachment[] = Array.isArray(data.attachments) ? data.attachments : []
+      setAttachmentsByComplaint((prev) => ({ ...prev, [complaintId]: list }))
+      return list
+    } catch {
+      toast.error('تعذر تحميل المرفقات')
+      return null
+    } finally {
+      setLoadingAttachments(false)
+    }
+  }
+
+  const saveExistingAttachments = async (complaintId: string, list: ComplaintAttachment[]) => {
+    setAttachmentsByComplaint((prev) => ({ ...prev, [complaintId]: list }))
+    try {
+      const res = await fetch(`/api/complaints/${complaintId}/attachments`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ attachments: list }),
+      })
+      if (!res.ok) throw new Error('failed')
+    } catch {
+      toast.error('تعذر حفظ المرفقات')
+    }
+  }
+
+  const handleAddExistingAttachments = async (complaintId: string, files: File[]) => {
+    if (!files || files.length === 0) return
+    const current = (await ensureAttachmentsLoaded(complaintId)) || []
+    if (current.length >= MAX_ATTACHMENTS) {
+      toast.error(`الحد الأقصى ${MAX_ATTACHMENTS} صور لكل تذكرة`)
+      return
+    }
+    const room = MAX_ATTACHMENTS - current.length
+    const toAdd: ComplaintAttachment[] = []
+    for (const file of files.slice(0, room)) {
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        toast.error(`الملف "${file.name}" أكبر من 5MB — اختر صورة أصغر`)
+        continue
+      }
+      try {
+        const dataUrl = await compressImage(file)
+        toAdd.push({
+          id: `comp-att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          url: dataUrl,
+          caption: '',
+          uploadedBy: user?.name || user?.id || 'unknown',
+          uploadedAt: new Date().toISOString(),
+        })
+      } catch {
+        toast.error(`تعذر قراءة الملف "${file.name}"`)
+      }
+    }
+    if (toAdd.length > 0) await saveExistingAttachments(complaintId, [...current, ...toAdd])
+  }
+
+  const handleRemoveExistingAttachment = async (complaintId: string, id: string) => {
+    const current = attachmentsByComplaint[complaintId] || []
+    await saveExistingAttachments(complaintId, current.filter((a) => a.id !== id))
   }
 
   const handleAddComment = async () => {
@@ -996,6 +1123,46 @@ export default function ComplaintsSection() {
             </div>
           )}
 
+          {/* Attachments — compressed client-side, capped at 5, only ever
+              sent once as part of this create request (see egress note on
+              MAX_ATTACHMENTS above). */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              📎 مرفقات (صور، حد أقصى {MAX_ATTACHMENTS})
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={(e) => {
+                const captured = e.target.files ? Array.from(e.target.files) : []
+                e.target.value = ''
+                handleAddNewAttachments(captured)
+              }}
+              disabled={newAttachments.length >= MAX_ATTACHMENTS}
+              className="w-full text-sm"
+            />
+            {newAttachments.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 mt-2">
+                {newAttachments.map((att) => (
+                  <div key={att.id} className="relative">
+                    <button type="button" onClick={() => setLightbox({ src: att.url, alt: 'مرفق' })} className="block w-full">
+                      <img src={att.url} alt="مرفق" className="w-full h-20 object-cover rounded border border-gray-300 cursor-zoom-in" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveNewAttachment(att.id)}
+                      className="absolute top-0.5 left-0.5 bg-red-600 hover:bg-red-700 text-white w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shadow"
+                      title="حذف"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Actions */}
           <div className="flex gap-3 justify-end pt-4 border-t border-gray-200">
             <button
@@ -1015,6 +1182,7 @@ export default function ComplaintsSection() {
                   productIds: [],
                 })
                 setProductSearch('')
+                setNewAttachments([])
               }}
               className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition"
             >
@@ -1390,6 +1558,56 @@ export default function ComplaintsSection() {
                 </p>
               </div>
 
+              {/* Attachments — lazy-loaded on demand, never fetched as part
+                  of the ticket list/detail read (see COMPLAINT_COLUMNS). */}
+              <div className="space-y-2">
+                <h3 className="font-semibold text-gray-900">📎 المرفقات</h3>
+                {!attachmentsByComplaint[selectedComplaint.id] ? (
+                  <button
+                    type="button"
+                    onClick={() => ensureAttachmentsLoaded(selectedComplaint.id)}
+                    disabled={loadingAttachments}
+                    className="px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-semibold"
+                  >
+                    {loadingAttachments ? '... جاري التحميل' : 'عرض المرفقات'}
+                  </button>
+                ) : (
+                  <>
+                    {attachmentsByComplaint[selectedComplaint.id].length > 0 && (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                        {attachmentsByComplaint[selectedComplaint.id].map((att) => (
+                          <div key={att.id} className="relative">
+                            <button type="button" onClick={() => setLightbox({ src: att.url, alt: 'مرفق' })} className="block w-full">
+                              <img src={att.url} alt="مرفق" className="w-full h-20 object-cover rounded border border-gray-300 cursor-zoom-in" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveExistingAttachment(selectedComplaint.id, att.id)}
+                              className="absolute top-0.5 left-0.5 bg-red-600 hover:bg-red-700 text-white w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shadow"
+                              title="حذف"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={(e) => {
+                        const captured = e.target.files ? Array.from(e.target.files) : []
+                        e.target.value = ''
+                        handleAddExistingAttachments(selectedComplaint.id, captured)
+                      }}
+                      disabled={(attachmentsByComplaint[selectedComplaint.id]?.length || 0) >= MAX_ATTACHMENTS}
+                      className="w-full text-sm"
+                    />
+                  </>
+                )}
+              </div>
+
               {/* Comments */}
               <div className="space-y-3">
                 <h3 className="font-semibold text-gray-900">💬 التعليقات</h3>
@@ -1464,6 +1682,15 @@ export default function ComplaintsSection() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setLightbox(null)}
+        >
+          <img src={lightbox.src} alt={lightbox.alt} className="max-w-full max-h-full rounded" />
         </div>
       )}
     </div>

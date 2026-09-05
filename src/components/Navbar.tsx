@@ -111,6 +111,7 @@ export default function Navbar({ user }: NavbarProps) {
     ],
     branch: [
       { label: '🍖 الطلبات', href: '/branch' },
+      { label: '🎫 الشكاوى', href: '/branch/complaints' },
       { label: '📊 التقارير', href: '/branch/reports' },
       { label: '🐑 اضاحي', href: '/branch/adahi' },
       { label: '🚚 التوصيل', href: '/branch/delivery' },

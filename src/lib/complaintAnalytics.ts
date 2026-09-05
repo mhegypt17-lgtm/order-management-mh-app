@@ -8,6 +8,8 @@ export interface ComplaintAnalyticsRecord {
   // sub-reason migration. Legacy tickets leave this undefined and are
   // bucketed as `غير محدد` in the sub-reason breakdown.
   subReason?: string | null
+  // المسؤول عن الشكوى — فرع/مصنع/مبيعات/ديليفري. Used for the topOwners breakdown.
+  complaintOwner?: string | null
   status: ComplaintStatus
   compensationAmount: number
   openedAt: string
@@ -160,6 +162,7 @@ export function calculateComplaintAnalytics(
     // absolute weight in the report.
     reasonBreakdown: buildReasonBreakdown(filtered, totalTickets),
     topChannels: rankByCount(filtered.map((complaint) => complaint.channel), totalTickets),
+    topOwners: rankByCount(filtered.map((complaint) => complaint.complaintOwner || ''), totalTickets),
     topProducts,
     complaintsWithProducts,
   }

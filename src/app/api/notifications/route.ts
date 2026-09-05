@@ -35,7 +35,11 @@ const HISTORY_COLS = 'id,entityType,entityId,orderId,action,changedBy,changedAt,
 // Map, since this app's low/sporadic traffic means requests routinely land
 // on a fresh serverless instance where a process-local cache never hits.
 // Invalidated immediately on customer edits (see api/crm/customers/[id]).
-export const NOTIF_CUSTOMERS_CACHE_TAG = 'notifications-customers'
+// NOT exported — Next.js route files may only export HTTP handlers +
+// segment-config fields; any other named export fails the build's route
+// validation. The invalidating side (crm/customers/[id]) uses the literal
+// string 'notifications-customers' instead of importing this constant.
+const NOTIF_CUSTOMERS_CACHE_TAG = 'notifications-customers'
 
 const readNotificationCustomersCached = unstable_cache(
   async (): Promise<{ data: unknown; error: { message: string } | null }> => {
@@ -370,6 +374,11 @@ export async function GET(req: NextRequest) {
     const slaHours = Number(settings?.slaHours) || 4
     const slaMs = slaHours * 60 * 60 * 1000
     const nowMsForSla = Date.now()
+    // Branch has its own read-only complaints view; every other role uses
+    // the CS one. Previously hardcoded to '/orders/complaints', which
+    // silently 404'd (redirected home) for branch since these items were
+    // never role-filtered out for them in the first place.
+    const complaintsHref = role === 'branch' ? '/branch/complaints' : '/orders/complaints'
 
     // Track complaints that breached SLA in this pass so we can create
     // (idempotent) auto-tasks for their owners after the notification loop.
@@ -383,7 +392,7 @@ export async function GET(req: NextRequest) {
           type: 'complaint-new',
           title: '🎫 شكوى جديدة',
           body: `تذكرة #${c.ticketNumber || c.id.slice(-6)} — ${c.channel || ''}`.trim(),
-          href: '/orders/complaints',
+          href: complaintsHref,
           createdAt: c.createdAt,
           actor: c.createdBy,
           priority: 'high',
@@ -407,7 +416,7 @@ export async function GET(req: NextRequest) {
             type: 'complaint-sla-breach',
             title: '🚨 تذكرة تجاوزت SLA',
             body: `#${c.ticketNumber || c.id.slice(-6)} — مفتوحة منذ ${overdueHours}س${c.assignedTo ? ' · ' + c.assignedTo : ''}`,
-            href: '/orders/complaints',
+            href: complaintsHref,
             createdAt: new Date(openedMs + slaMs).toISOString(),
             actor: c.assignedTo,
             priority: 'urgent',
@@ -428,7 +437,7 @@ export async function GET(req: NextRequest) {
           type: 'complaint-comment',
           title: '💬 تعليق على شكوى',
           body: `#${c.ticketNumber || c.id.slice(-6)}: ${(cm.text || '').slice(0, 100)}`,
-          href: '/orders/complaints',
+          href: complaintsHref,
           createdAt: cm.createdAt,
           actor: cm.authorName,
           priority: 'normal',

@@ -94,7 +94,8 @@ function sortComplaints(rows: ComplaintRecord[]): ComplaintRecord[] {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    
+    const attachments = Array.isArray(body.attachments) ? body.attachments.slice(0, 5) : []
+
     const complaint = await createComplaint({
       channel: body.channel,
       subject: body.subject,
@@ -114,6 +115,7 @@ export async function POST(request: NextRequest) {
       createdBy: body.createdBy,
       compensationAmount: 0,
       productIds: Array.isArray(body.productIds) ? body.productIds.filter((id: any) => typeof id === 'string' && id) : [],
+      attachments,
       openedAt: new Date().toISOString(),
       closedAt: null,
     })

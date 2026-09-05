@@ -319,6 +319,17 @@ export interface ComplaintCommentRecord {
   createdAt: string
 }
 
+// Same shape/pattern as orders' CSAttachment: base64 data URL, compressed
+// client-side before upload. Lives in its OWN lazy-loaded column (never in
+// COMPLAINT_COLUMNS) — see /api/complaints/[id]/attachments.
+export interface ComplaintAttachmentRecord {
+  id: string
+  url: string
+  caption?: string
+  uploadedBy: string
+  uploadedAt: string
+}
+
 export interface ComplaintRecord {
   id: string
   ticketNumber: string
@@ -350,6 +361,9 @@ export interface ComplaintRecord {
   compensationAmount: number
   productIds: string[]
   comments: ComplaintCommentRecord[]
+  // Capped at 5, lazy-loaded on demand — never part of COMPLAINT_COLUMNS or
+  // the default list/detail fetch (same egress-safe pattern as csAttachments).
+  attachments?: ComplaintAttachmentRecord[]
   openedAt: string
   closedAt: string | null
   createdAt: string
@@ -1134,7 +1148,7 @@ export async function refreshOrderItemPriceSnapshots(
   if (orderItemsForOrder.length === 0) return orderItemsForOrder
 
   const catalogueKey = resolveCatalogueKey(orderType, catalogues)
-  const productIds = [...new Set(orderItemsForOrder.map((i) => i.productId).filter(Boolean))]
+  const productIds = Array.from(new Set(orderItemsForOrder.map((i) => i.productId).filter(Boolean)))
   if (productIds.length === 0) return orderItemsForOrder
 
   const productRows = await readProductsByIds(productIds, PRODUCT_COLUMNS)
@@ -1792,15 +1806,16 @@ export async function createComplaint(
   }
   let { error } = await supabase.from('complaints').insert([newComplaint])
   // If the DB hasn't had one of the optional-column migrations applied yet
-  // (subReason, complaintOwner, closureAction), the INSERT fails because
-  // that column doesn't exist. Fall back to an INSERT that drops all three
-  // optional fields so complaint creation keeps working until the admin
-  // runs the migration. Matches the csAttachments pattern.
-  if (error && /subReason|complaintOwner|closureAction|column .* does not exist|PGRST204/i.test(error.message || '')) {
-    const { subReason: _drop, complaintOwner: _drop2, closureAction: _drop3, ...withoutOptional } = newComplaint as any
+  // (subReason, complaintOwner, closureAction, attachments), the INSERT fails
+  // because that column doesn't exist. Fall back to an INSERT that drops all
+  // of them so complaint creation keeps working until the admin runs the
+  // migration. Matches the csAttachments pattern.
+  if (error && /subReason|complaintOwner|closureAction|attachments|column .* does not exist|PGRST204/i.test(error.message || '')) {
+    const { subReason: _drop, complaintOwner: _drop2, closureAction: _drop3, attachments: _drop4, ...withoutOptional } = newComplaint as any
     void _drop
     void _drop2
     void _drop3
+    void _drop4
     const retry = await supabase.from('complaints').insert([withoutOptional])
     error = retry.error
   }
@@ -1815,26 +1830,30 @@ export async function updateComplaint(
   updates: Partial<Omit<ComplaintRecord, 'id' | 'ticketNumber' | 'createdAt'>>
 ): Promise<ComplaintRecord | null> {
   const updated = { ...updates, updatedAt: new Date().toISOString() }
-  let { data, error } = await supabase
+  // Select COMPLAINT_COLUMNS explicitly (not '*') so a normal field edit
+  // (status/subject/etc.) never echoes the attachments blob back to the
+  // client — that column is only ever read via the dedicated lazy endpoint.
+  let { data, error } = (await supabase
     .from('complaints')
     .update(updated)
     .eq('id', id)
-    .select()
-    .single()
+    .select(COMPLAINT_COLUMNS)
+    .single()) as { data: ComplaintRecord | null; error: any }
 
   // Same DB-migration fallback as createComplaint — retry without the
   // optional columns if they aren't there yet.
-  if (error && /subReason|complaintOwner|closureAction|column .* does not exist|PGRST204/i.test(error.message || '')) {
-    const { subReason: _drop, complaintOwner: _drop2, closureAction: _drop3, ...withoutOptional } = updated as any
+  if (error && /subReason|complaintOwner|closureAction|attachments|column .* does not exist|PGRST204/i.test(error.message || '')) {
+    const { subReason: _drop, complaintOwner: _drop2, closureAction: _drop3, attachments: _drop4, ...withoutOptional } = updated as any
     void _drop
     void _drop2
     void _drop3
-    const retry = await supabase
+    void _drop4
+    const retry = (await supabase
       .from('complaints')
       .update(withoutOptional)
       .eq('id', id)
-      .select()
-      .single()
+      .select(COMPLAINT_COLUMNS)
+      .single()) as { data: ComplaintRecord | null; error: any }
     data = retry.data
     error = retry.error
   }
@@ -1875,12 +1894,12 @@ export async function addComplaintComment(
   }
 
   const updatedComments = [...((existing?.comments as ComplaintCommentRecord[]) || []), comment]
-  const { data, error } = await supabase
+  const { data, error } = (await supabase
     .from('complaints')
     .update({ comments: updatedComments, updatedAt: new Date().toISOString() })
     .eq('id', complaintId)
-    .select()
-    .single()
+    .select(COMPLAINT_COLUMNS)
+    .single()) as { data: ComplaintRecord | null; error: any }
 
   if (error) {
     console.error('Error adding complaint comment:', error)

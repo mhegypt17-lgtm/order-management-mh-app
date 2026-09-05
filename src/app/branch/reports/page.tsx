@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { cairoMonthString } from '@/lib/cairoTime'
+import { calculateComplaintAnalytics, type ComplaintAnalyticsRecord } from '@/lib/complaintAnalytics'
+
+type BranchReportComplaint = ComplaintAnalyticsRecord
 
 type BranchReportOrder = {
   id: string
@@ -50,6 +53,7 @@ export default function BranchReportsPage() {
   const [monthFilter, setMonthFilter] = useState(getCurrentMonth())
   const [isLoading, setIsLoading] = useState(true)
   const [orders, setOrders] = useState<BranchReportOrder[]>([])
+  const [complaints, setComplaints] = useState<BranchReportComplaint[]>([])
 
   const fetchMonthlyOrders = async () => {
     setIsLoading(true)
@@ -63,8 +67,23 @@ export default function BranchReportsPage() {
     }
   }
 
+  // Owner breakdown (فرع/ديليفري/etc.) for the selected month only — a new
+  // read for this page (it never called /api/complaints before), but bounded
+  // to the selected month via `from` and narrowed further client-side via
+  // calculateComplaintAnalytics's dateFrom/dateTo, same as the CS reports page.
+  const fetchMonthlyComplaints = async () => {
+    try {
+      const res = await fetch(`/api/complaints?from=${monthFilter}-01`)
+      const data = await res.json()
+      setComplaints(Array.isArray(data) ? data : [])
+    } catch {
+      setComplaints([])
+    }
+  }
+
   useEffect(() => {
     fetchMonthlyOrders()
+    fetchMonthlyComplaints()
   }, [monthFilter])
 
   const stats = useMemo(() => {
@@ -139,6 +158,16 @@ export default function BranchReportsPage() {
       .sort((a, b) => (a.date < b.date ? 1 : -1))
   }, [orders])
 
+  // dateTo = last day of the selected month (YYYY-MM-DD), so the analytics
+  // helper's inclusive date-range filter matches exactly one calendar month.
+  const complaintAnalytics = useMemo(() => {
+    const [y, m] = monthFilter.split('-').map(Number)
+    const lastDay = new Date(y, m, 0).getDate()
+    const dateFrom = `${monthFilter}-01`
+    const dateTo = `${monthFilter}-${String(lastDay).padStart(2, '0')}`
+    return calculateComplaintAnalytics(complaints, dateFrom, dateTo)
+  }, [complaints, monthFilter])
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -210,7 +239,27 @@ export default function BranchReportsPage() {
               )}
             </div>
           </div>
-
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <h2 className="font-bold text-gray-900 mb-1">🎫 الشكاوى حسب المسؤول</h2>
+            <p className="text-xs text-gray-500 mb-3">
+              عدد الشكاوى المفتوحة هذا الشهر مقسّمة حسب الجهة المسؤولة (فرع، ديليفري، مصنع، مبيعات) — إجمالي {complaintAnalytics.totalTickets} تذكرة
+            </p>
+            {complaintAnalytics.topOwners.length === 0 ? (
+              <p className="text-sm text-gray-500 text-center py-4">لا توجد شكاوى لهذا الشهر</p>
+            ) : (
+              <div className="space-y-2">
+                {complaintAnalytics.topOwners.map((o) => (
+                  <div key={o.name} className="flex items-center gap-3">
+                    <span className="w-24 shrink-0 text-sm font-medium text-gray-700">{o.name}</span>
+                    <div className="flex-1 bg-gray-100 rounded-full h-3 overflow-hidden">
+                      <div className="bg-red-500 h-3 rounded-full" style={{ width: `${o.share}%` }} />
+                    </div>
+                    <span className="w-16 shrink-0 text-sm text-gray-600 text-left">{o.count} ({o.share}%)</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
             <div className="px-4 py-3 border-b border-gray-200">
               <h2 className="font-bold text-gray-900">الأداء اليومي داخل الشهر</h2>
