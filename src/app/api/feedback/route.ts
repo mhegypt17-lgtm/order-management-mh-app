@@ -164,7 +164,7 @@ export async function POST(req: NextRequest) {
     // Parse + validate the optional detailed dimensions
     const dimsResult = parseDimensions(body)
     if (!dimsResult.ok) {
-      return NextResponse.json({ error: dimsResult.error }, { status: 400 })
+      return NextResponse.json({ error: (dimsResult as { ok: false; error: string }).error }, { status: 400 })
     }
     const dimensions = dimsResult.values
 
@@ -347,7 +347,7 @@ export async function PATCH(req: NextRequest) {
     // Detailed dimensions — validate against config
     const dimsResult = parseDimensions(body)
     if (!dimsResult.ok) {
-      return NextResponse.json({ error: dimsResult.error }, { status: 400 })
+      return NextResponse.json({ error: (dimsResult as { ok: false; error: string }).error }, { status: 400 })
     }
     Object.assign(patch, dimsResult.values)
 

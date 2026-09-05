@@ -11,10 +11,12 @@ const CACHE_HEADERS = {
 }
 
 function slugify(label: string): string {
+  // `new RegExp(...)` instead of a /u-flagged literal — identical behavior,
+  // just sidesteps tsconfig target's regex-literal-flag check (es5).
   const base = label
     .trim()
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(new RegExp('[^\\p{L}\\p{N}]+', 'gu'), '-')
     .replace(/^-+|-+$/g, '')
   return base || 'catalogue'
 }

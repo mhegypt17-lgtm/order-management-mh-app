@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
     if (fbErr) {
       return NextResponse.json({ error: 'feedback read failed', details: fbErr.message }, { status: 500 })
     }
-    const feedback = (rows || []) as Array<{
+    const feedback = (rows || []) as unknown as Array<{
       id: string
       orderId: string
       rating: number
