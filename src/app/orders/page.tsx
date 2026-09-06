@@ -39,6 +39,10 @@ export default function OrdersPage() {
   // /branch view's equivalent list was separately missing 'ساري'. Now fetched
   // from the same source OrderForm.tsx already uses, so both stay in sync.
   const [orderStatusOptions, setOrderStatusOptions] = useState<string[]>(['تم', 'لاغي', 'حجز'])
+  // Same bug class as orderStatusOptions above — this filter used to be a
+  // hardcoded <option> list that drifted from admin-added order types
+  // (Settings → نوع الطلب), e.g. missing 'Branch' after it was added there.
+  const [orderTypeOptions, setOrderTypeOptions] = useState<string[]>(['B2B', 'Online', 'Instashop', 'App'])
 
   const clearFilters = () => {
     setSearchTerm('')
@@ -104,6 +108,8 @@ export default function OrdersPage() {
       .then((d) => {
         const statuses = Array.isArray(d?.options?.orderStatuses) ? d.options.orderStatuses : []
         if (statuses.length > 0) setOrderStatusOptions(statuses)
+        const types = Array.isArray(d?.options?.orderTypes) ? d.options.orderTypes : []
+        if (types.length > 0) setOrderTypeOptions(types)
       })
       .catch(() => {/* keep fallback list */})
   }, [])
@@ -286,10 +292,12 @@ export default function OrdersPage() {
           dir="rtl"
         >
           <option value="all">كل الأنواع</option>
-          <option value="B2B">B2B</option>
-          <option value="Online">Online</option>
-          <option value="Instashop">Instashop</option>
-          <option value="App">App</option>
+          {(orderTypeOptions.includes(orderTypeFilter) || orderTypeFilter === 'all'
+            ? orderTypeOptions
+            : [orderTypeFilter, ...orderTypeOptions]
+          ).map((type) => (
+            <option key={type} value={type}>{type}</option>
+          ))}
         </select>
 
         <select
