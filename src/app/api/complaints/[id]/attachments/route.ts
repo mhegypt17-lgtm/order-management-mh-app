@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { unstable_cache, revalidateTag } from 'next/cache'
 import { supabase } from '@/lib/supabase'
 import { complaintAttachmentsTag } from '@/lib/complaintAttachmentsCache'
+import { persistAttachment } from '@/lib/attachmentStorage'
 
 // On-demand image fetch for a single complaint ticket — mirrors
 // /api/orders/[id]/photos exactly (same Phase 2H lazy-load design, same
@@ -64,9 +65,15 @@ export async function PUT(
       return NextResponse.json({ error: `الحد الأقصى ${MAX_ATTACHMENTS} صور لكل تذكرة` }, { status: 400 })
     }
 
+    // New (base64) uploads move to Storage here; anything already a URL
+    // (existing saved attachments being re-sent unchanged) passes through.
+    const stored = await Promise.all(
+      attachments.map(async (a: any) => ({ ...a, url: await persistAttachment(a.url, `complaint-attachments/${complaintId}`) })),
+    )
+
     const { error } = await supabase
       .from('complaints')
-      .update({ attachments, updatedAt: new Date().toISOString() })
+      .update({ attachments: stored, updatedAt: new Date().toISOString() })
       .eq('id', complaintId)
 
     if (error) {
@@ -81,7 +88,7 @@ export async function PUT(
     }
 
     revalidateTag(complaintAttachmentsTag(complaintId))
-    return NextResponse.json({ success: true, count: attachments.length })
+    return NextResponse.json({ success: true, count: stored.length })
   } catch (e) {
     console.error('[complaints/attachments PUT] failed:', e)
     return NextResponse.json({ error: 'Failed to save attachments' }, { status: 500 })

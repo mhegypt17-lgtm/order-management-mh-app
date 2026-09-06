@@ -11,6 +11,7 @@ import {
   type ComplaintRecord,
 } from '@/lib/omsData'
 import { supabase } from '@/lib/supabase'
+import { persistAttachment } from '@/lib/attachmentStorage'
 
 // Short server-side cache — a burst of dashboard loaders in the same minute
 // share one DB read. Mutations (POST/PUT/DELETE) don't need this to be
@@ -94,7 +95,13 @@ function sortComplaints(rows: ComplaintRecord[]): ComplaintRecord[] {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const attachments = Array.isArray(body.attachments) ? body.attachments.slice(0, 5) : []
+    const rawAttachments = Array.isArray(body.attachments) ? body.attachments.slice(0, 5) : []
+    // Ticket id doesn't exist yet at insert time — folder name just needs to
+    // be unique/readable, it isn't a foreign key.
+    const storagePrefix = `complaint-attachments/new-${Date.now()}`
+    const attachments = await Promise.all(
+      rawAttachments.map(async (a: any) => ({ ...a, url: await persistAttachment(a.url, storagePrefix) })),
+    )
 
     const complaint = await createComplaint({
       channel: body.channel,

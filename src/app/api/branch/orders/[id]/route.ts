@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidateTag } from 'next/cache'
 import { supabase } from '@/lib/supabase'
 import { orderPhotosTag } from '@/lib/photosCache'
+import { persistAttachment } from '@/lib/attachmentStorage'
 import {
   OrderDeliveryRecord,
   OrderItemRecord,
@@ -592,12 +593,23 @@ export async function PUT(
       }
     }
 
+    // New (base64) photo uploads move to Storage; already-saved ones
+    // (already a URL) pass through untouched.
+    const incomingProductPhotos = Array.isArray(body.productPhotos) ? body.productPhotos : existing.productPhotos
+    const storedProductPhotos = await Promise.all(
+      incomingProductPhotos.map((p: string) => persistAttachment(p, `order-photos/${params.id}`)),
+    )
+    const incomingInvoicePhoto = body.invoicePhoto ?? existing.invoicePhoto
+    const storedInvoicePhoto = incomingInvoicePhoto
+      ? await persistAttachment(incomingInvoicePhoto, `order-photos/${params.id}`)
+      : incomingInvoicePhoto
+
     const updated: OrderDeliveryRecord = {
       ...existing,
       deliveryStatus: nextStatus,
       branchComments: body.branchComments ?? existing.branchComments,
-      productPhotos: Array.isArray(body.productPhotos) ? body.productPhotos : existing.productPhotos,
-      invoicePhoto: body.invoicePhoto ?? existing.invoicePhoto,
+      productPhotos: storedProductPhotos,
+      invoicePhoto: storedInvoicePhoto,
       // Stage-transition timestamps — set the FIRST time the order reaches
       // each stage and never overwritten thereafter, so durations stay
       // truthful even if the branch toggles statuses while correcting a

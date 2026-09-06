@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidateTag } from 'next/cache'
 import { supabase } from '@/lib/supabase'
 import { orderPhotosTag } from '@/lib/photosCache'
+import { persistAttachment } from '@/lib/attachmentStorage'
 import {
   CustomerAddressRecord,
   OrderDeliveryRecord,
@@ -389,12 +390,17 @@ export async function PUT(
         // else on the order is touched.
         if (body.attachmentsOnly === true) {
           const incomingAttachments = Array.isArray(body.csAttachments) ? body.csAttachments : []
+          // New (base64) uploads move to Storage; already-saved attachments
+          // being re-sent unchanged (already a URL) pass through untouched.
+          const storedAttachments = await Promise.all(
+            incomingAttachments.map(async (a: any) => ({ ...a, url: await persistAttachment(a.url, `cs-attachments/${params.id}`) })),
+          )
           // General comments (ملاحظات) remain editable on a locked/delivered
           // order — CS must always be able to record notes. We only include
           // `notes` in the patch when the client actually sent the key so we
           // never blank out existing notes by accident.
           const notesProvided = typeof body.notes === 'string'
-          const patch: Record<string, unknown> = { csAttachments: incomingAttachments, updatedAt: now }
+          const patch: Record<string, unknown> = { csAttachments: storedAttachments, updatedAt: now }
           if (notesProvided) patch.notes = body.notes
           const attUpd = await supabase
             .from('orders')
@@ -437,11 +443,11 @@ export async function PUT(
             action: 'updated',
             changedBy: body.createdBy || 'unknown',
             summary: 'تم تحديث مرفقات/ملاحظات خدمة العملاء (الطلب مقفل بعد التوصيل)',
-            details: { attachmentCount: incomingAttachments.length, notesUpdated: notesProvided, lockedStatus: (currentDelivery as any).deliveryStatus },
+            details: { attachmentCount: storedAttachments.length, notesUpdated: notesProvided, lockedStatus: (currentDelivery as any).deliveryStatus },
           })
           const refreshed = {
             ...existing,
-            csAttachments: incomingAttachments,
+            csAttachments: storedAttachments,
             ...(notesProvided ? { notes: body.notes } : {}),
             updatedAt: now,
           } as OrderRecord
@@ -762,6 +768,15 @@ export async function PUT(
       }
     })
 
+    // New (base64) csAttachment uploads move to Storage; already-saved ones
+    // (already a URL) pass through untouched. No-op array if none sent.
+    const incomingCsAttachments = Array.isArray(body.csAttachments)
+      ? body.csAttachments
+      : (existing as any).csAttachments || []
+    const storedCsAttachments = await Promise.all(
+      incomingCsAttachments.map(async (a: any) => ({ ...a, url: await persistAttachment(a.url, `cs-attachments/${params.id}`) })),
+    )
+
     // Update order in Supabase
     const updatedOrder = {
       ...existing,
@@ -794,9 +809,7 @@ export async function PUT(
       manualDiscountReason: nextManualDiscountReason,
       netTotal: nextNetTotal,
       walletUsed: nextWalletUsed,
-      csAttachments: Array.isArray(body.csAttachments)
-        ? body.csAttachments
-        : (existing as any).csAttachments || [],
+      csAttachments: storedCsAttachments,
       updatedAt: now,
     }
     const updRes = await supabase.from('orders').update(updatedOrder).eq('id', params.id)
