@@ -238,11 +238,11 @@ export default function CRMView({ role }: CRMViewProps) {
   const [customers, setCustomers] = useState<CustomerSummary[]>([])
   const [search, setSearch] = useState('')
   const [segment, setSegment] = useState<'all' | 'b2b' | 'retail'>('all')
-  // Admin-only extra filters (client-side, over already-loaded data — same
-  // zero-egress pattern as `segment` above).
-  const [tierFilter, setTierFilter] = useState<string>('all')
-  const [zoneFilter, setZoneFilter] = useState<string>('all')
-  const [sourceFilter, setSourceFilter] = useState<string>('all')
+  // Admin-only extra filter (client-side, over already-loaded data — same
+  // zero-egress pattern as `segment` above). One combined dropdown instead
+  // of 3 separate selects (tier/zone/source) — simpler on mobile and far
+  // less visually "scattered". Value shape: 'all' | 'tier:<x>' | 'zone:<x>' | 'source:<x>'.
+  const [extraFilter, setExtraFilter] = useState<string>('all')
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [profile, setProfile] = useState<CustomerProfile | null>(null)
@@ -252,7 +252,9 @@ export default function CRMView({ role }: CRMViewProps) {
   const [reloadKey, setReloadKey] = useState(0)
   const [zones, setZones] = useState<DeliveryZoneOpt[]>([])
   const [stats, setStats] = useState<CRMStats | null>(null)
-  const [showStats, setShowStats] = useState(true)
+  // Collapsed by default — the full breakdown (dozens of region/source tags)
+  // was overwhelming, especially on mobile. Opt-in via the toggle instead.
+  const [showStats, setShowStats] = useState(false)
 
   // Add-customer modal state
   const [showAdd, setShowAdd] = useState(false)
@@ -676,15 +678,16 @@ export default function CRMView({ role }: CRMViewProps) {
   }, [search, reloadKey])
 
   const displayedCustomers = useMemo(() => {
+    const [kind, value] = extraFilter === 'all' ? ['all', ''] : extraFilter.split(':')
     return customers.filter((c) => {
       if (segment === 'b2b' && !c.isB2B) return false
       if (segment === 'retail' && c.isB2B) return false
-      if (tierFilter !== 'all' && c.tier !== tierFilter) return false
-      if (zoneFilter !== 'all' && !(c.zones || []).includes(zoneFilter)) return false
-      if (sourceFilter !== 'all' && (c.acquisitionSource || 'غير محدد') !== sourceFilter) return false
+      if (kind === 'tier' && c.tier !== value) return false
+      if (kind === 'zone' && !(c.zones || []).includes(value)) return false
+      if (kind === 'source' && (c.acquisitionSource || 'غير محدد') !== value) return false
       return true
     })
-  }, [customers, segment, tierFilter, zoneFilter, sourceFilter])
+  }, [customers, segment, extraFilter])
 
   // Load customer profile
   const loadProfile = useCallback(async (id: string) => {
@@ -792,7 +795,7 @@ export default function CRMView({ role }: CRMViewProps) {
       )}
       <div className="flex flex-1 overflow-hidden">
       {/* ── Sidebar: Customer List ─────────────────────────────────────────── */}
-      <div className="w-72 flex-shrink-0 border-l border-gray-200 bg-white flex flex-col">
+      <div className={`${selectedId ? 'hidden md:flex' : 'flex'} w-full md:w-72 flex-shrink-0 border-l border-gray-200 bg-white flex-col`}>
         <div className="p-3 border-b border-gray-200">
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-base font-bold text-gray-800">👥 قاعدة العملاء</h2>
@@ -842,44 +845,33 @@ export default function CRMView({ role }: CRMViewProps) {
               </button>
             ))}
           </div>
-          {/* Admin-only extra filters — client-side over already-loaded data,
-              same zero-egress pattern as the segment toggle above. */}
+          {/* Admin-only extra filter — client-side over already-loaded data,
+              same zero-egress pattern as the segment toggle above. One
+              combined dropdown (grouped by category) instead of 3 separate
+              selects — simpler to use, and fits mobile widths cleanly. */}
           {role === 'admin' && stats && (
-            <div className="grid grid-cols-3 gap-1 mt-2">
-              <select
-                value={tierFilter}
-                onChange={(e) => setTierFilter(e.target.value)}
-                className="text-xs border border-gray-300 rounded px-1.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-red-400"
-                title="الفئة"
-              >
-                <option value="all">كل الفئات</option>
+            <select
+              value={extraFilter}
+              onChange={(e) => setExtraFilter(e.target.value)}
+              className="w-full mt-2 text-sm border border-gray-300 rounded px-2 py-2 focus:outline-none focus:ring-1 focus:ring-red-400"
+            >
+              <option value="all">تصفية إضافية: بدون</option>
+              <optgroup label="الفئة">
                 {Object.keys(stats.byTier).map((tier) => (
-                  <option key={tier} value={tier}>{tier}</option>
+                  <option key={`tier:${tier}`} value={`tier:${tier}`}>{tier}</option>
                 ))}
-              </select>
-              <select
-                value={zoneFilter}
-                onChange={(e) => setZoneFilter(e.target.value)}
-                className="text-xs border border-gray-300 rounded px-1.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-red-400"
-                title="المنطقة"
-              >
-                <option value="all">كل المناطق</option>
+              </optgroup>
+              <optgroup label="المنطقة">
                 {Object.keys(stats.byZone).map((zone) => (
-                  <option key={zone} value={zone}>{zone}</option>
+                  <option key={`zone:${zone}`} value={`zone:${zone}`}>{zone}</option>
                 ))}
-              </select>
-              <select
-                value={sourceFilter}
-                onChange={(e) => setSourceFilter(e.target.value)}
-                className="text-xs border border-gray-300 rounded px-1.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-red-400"
-                title="المصدر"
-              >
-                <option value="all">كل المصادر</option>
+              </optgroup>
+              <optgroup label="المصدر">
                 {Object.keys(stats.bySource).map((source) => (
-                  <option key={source} value={source}>{source}</option>
+                  <option key={`source:${source}`} value={`source:${source}`}>{source}</option>
                 ))}
-              </select>
-            </div>
+              </optgroup>
+            </select>
           )}
         </div>
         <div className="flex-1 overflow-y-auto">
@@ -929,7 +921,16 @@ export default function CRMView({ role }: CRMViewProps) {
       </div>
 
       {/* ── Main Panel: Customer Profile ───────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto bg-gray-50">
+      <div className={`${selectedId ? 'flex' : 'hidden md:flex'} flex-1 flex-col overflow-y-auto bg-gray-50`}>
+        {selectedId && (
+          <button
+            type="button"
+            onClick={() => setSelectedId(null)}
+            className="md:hidden flex items-center gap-1 px-4 py-3 text-sm font-semibold text-gray-700 border-b border-gray-200 bg-white"
+          >
+            → رجوع لقائمة العملاء
+          </button>
+        )}
         {!selectedId ? (
           <div className="flex items-center justify-center h-full text-gray-400">
             <div className="text-center">
