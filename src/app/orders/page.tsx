@@ -43,6 +43,8 @@ export default function OrdersPage() {
   // hardcoded <option> list that drifted from admin-added order types
   // (Settings → نوع الطلب), e.g. missing 'Branch' after it was added there.
   const [orderTypeOptions, setOrderTypeOptions] = useState<string[]>(['B2B', 'Online', 'Instashop', 'App'])
+  const [orderReceiverFilter, setOrderReceiverFilter] = useState('all')
+  const [orderReceiverOptions, setOrderReceiverOptions] = useState<string[]>([])
 
   const clearFilters = () => {
     setSearchTerm('')
@@ -52,6 +54,7 @@ export default function OrdersPage() {
     setDateFrom('')
     setDateTo('')
     setDeliveredOnly(false)
+    setOrderReceiverFilter('all')
   }
 
   const fetchOrders = async () => {
@@ -110,6 +113,8 @@ export default function OrdersPage() {
         if (statuses.length > 0) setOrderStatusOptions(statuses)
         const types = Array.isArray(d?.options?.orderTypes) ? d.options.orderTypes : []
         if (types.length > 0) setOrderTypeOptions(types)
+        const receivers = Array.isArray(d?.options?.orderReceivers) ? d.options.orderReceivers : []
+        setOrderReceiverOptions(receivers)
       })
       .catch(() => {/* keep fallback list */})
   }, [])
@@ -155,10 +160,11 @@ export default function OrdersPage() {
           (!order.isScheduled && orderDate === today)
         ))
       const matchesDelivered = !deliveredOnly || order.delivery?.deliveryStatus === 'تم التوصيل'
+      const matchesReceiver = orderReceiverFilter === 'all' || order.orderReceiver === orderReceiverFilter
 
-      return matchesSearch && matchesStatus && matchesType && matchesFrom && matchesTo && matchesSchedule && matchesDelivered
+      return matchesSearch && matchesStatus && matchesType && matchesFrom && matchesTo && matchesSchedule && matchesDelivered && matchesReceiver
     })
-  }, [orders, searchTerm, statusFilter, orderTypeFilter, scheduleFilter, dateFrom, dateTo, deliveredOnly])
+  }, [orders, searchTerm, statusFilter, orderTypeFilter, scheduleFilter, dateFrom, dateTo, deliveredOnly, orderReceiverFilter])
 
   const statusClasses: Record<string, string> = {
     ساري: 'bg-indigo-100 text-indigo-800',
@@ -309,6 +315,21 @@ export default function OrdersPage() {
           <option value="all">الكل</option>
           <option value="today">طلبات اليوم</option>
           <option value="scheduled">طلبات مجدولة</option>
+        </select>
+
+        <select
+          value={orderReceiverFilter}
+          onChange={(e) => setOrderReceiverFilter(e.target.value)}
+          className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+          dir="rtl"
+        >
+          <option value="all">كل متلقي الطلب</option>
+          {(orderReceiverOptions.includes(orderReceiverFilter) || orderReceiverFilter === 'all'
+            ? orderReceiverOptions
+            : [orderReceiverFilter, ...orderReceiverOptions]
+          ).map((receiver) => (
+            <option key={receiver} value={receiver}>{receiver}</option>
+          ))}
         </select>
 
         <label className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg cursor-pointer select-none" dir="rtl">

@@ -19,6 +19,7 @@ type BranchOrder = {
   netTotal?: number | null
   walletUsed?: number | null
   createdBy: string
+  orderReceiver?: string
   customer: { customerName: string; phone: string } | null
   address: { streetAddress: string; googleMapsLink: string } | null
   items: Array<{ id: string; productName: string; quantity: number }>
@@ -73,6 +74,8 @@ export default function BranchPage() {
   // hardcoded <option> list that drifted from admin-added order types
   // (Settings → نوع الطلب), e.g. missing 'Branch' after it was added there.
   const [orderTypeOptions, setOrderTypeOptions] = useState<string[]>(['B2B', 'Online', 'Instashop', 'App'])
+  const [orderReceiverFilter, setOrderReceiverFilter] = useState('all')
+  const [orderReceiverOptions, setOrderReceiverOptions] = useState<string[]>([])
 
   const setPreset = (preset: 'today' | 'week' | 'month' | 'all') => {
     if (preset === 'today') {
@@ -93,6 +96,7 @@ export default function BranchPage() {
     setOrderTypeFilter('all')
     setOrderStatusFilter('all')
     setDeliveryFilter('all')
+    setOrderReceiverFilter('all')
   }
 
   const fetchOrders = async () => {
@@ -123,6 +127,8 @@ export default function BranchPage() {
         if (statuses.length > 0) setOrderStatusOptions(statuses)
         const types = Array.isArray(d?.options?.orderTypes) ? d.options.orderTypes : []
         if (types.length > 0) setOrderTypeOptions(types)
+        const receivers = Array.isArray(d?.options?.orderReceivers) ? d.options.orderReceivers : []
+        setOrderReceiverOptions(receivers)
       })
       .catch(() => {/* keep fallback list */})
   }, [])
@@ -138,9 +144,10 @@ export default function BranchPage() {
 
       const matchesType = orderTypeFilter === 'all' || order.orderType === orderTypeFilter
       const matchesStatus = orderStatusFilter === 'all' || order.orderStatus === orderStatusFilter
-      return matchesSearch && matchesType && matchesStatus
+      const matchesReceiver = orderReceiverFilter === 'all' || order.orderReceiver === orderReceiverFilter
+      return matchesSearch && matchesType && matchesStatus && matchesReceiver
     })
-  }, [orders, searchTerm, orderTypeFilter, orderStatusFilter])
+  }, [orders, searchTerm, orderTypeFilter, orderStatusFilter, orderReceiverFilter])
 
   const summary = useMemo(() => {
     // Branch KPI — sum the *net* amount actually collected from customers,
@@ -243,6 +250,21 @@ export default function BranchPage() {
             <option value="جاهز">جاهز</option>
             <option value="في الطريق">في الطريق</option>
             <option value="تم التوصيل">تم التوصيل</option>
+          </select>
+
+          <select
+            value={orderReceiverFilter}
+            onChange={(e) => setOrderReceiverFilter(e.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+            dir="rtl"
+          >
+            <option value="all">كل متلقي الطلب</option>
+            {(orderReceiverOptions.includes(orderReceiverFilter) || orderReceiverFilter === 'all'
+              ? orderReceiverOptions
+              : [orderReceiverFilter, ...orderReceiverOptions]
+            ).map((receiver) => (
+              <option key={receiver} value={receiver}>{receiver}</option>
+            ))}
           </select>
 
           <input
