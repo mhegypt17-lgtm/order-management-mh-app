@@ -594,15 +594,19 @@ export async function PUT(
     }
 
     // New (base64) photo uploads move to Storage; already-saved ones
-    // (already a URL) pass through untouched.
-    const incomingProductPhotos = Array.isArray(body.productPhotos) ? body.productPhotos : existing.productPhotos
-    const storedProductPhotos = await Promise.all(
-      incomingProductPhotos.map((p: string) => persistAttachment(p, `order-photos/${params.id}`)),
-    )
-    const incomingInvoicePhoto = body.invoicePhoto ?? existing.invoicePhoto
-    const storedInvoicePhoto = incomingInvoicePhoto
-      ? await persistAttachment(incomingInvoicePhoto, `order-photos/${params.id}`)
-      : incomingInvoicePhoto
+    // (already a URL) pass through untouched. Only touched when the caller
+    // actually sent them — a status-only update (e.g. the quick "تم
+    // التوصيل" list action, which never includes these keys) must not risk
+    // wiping photos via a stale/incomplete `existing` read. Same discipline
+    // as CS's `attachmentsOnly` path in /api/orders/[id].
+    const photosProvided = Array.isArray(body.productPhotos)
+    const invoiceProvided = body.invoicePhoto !== undefined
+    const storedProductPhotos = photosProvided
+      ? await Promise.all(body.productPhotos.map((p: string) => persistAttachment(p, `order-photos/${params.id}`)))
+      : existing.productPhotos
+    const storedInvoicePhoto = invoiceProvided
+      ? (body.invoicePhoto ? await persistAttachment(body.invoicePhoto, `order-photos/${params.id}`) : body.invoicePhoto)
+      : existing.invoicePhoto
 
     const updated: OrderDeliveryRecord = {
       ...existing,
@@ -633,10 +637,18 @@ export async function PUT(
       updatedAt: now,
     }
 
+    // DB write payload: a PARTIAL patch, never a full-row replace. Only
+    // includes productPhotos/invoicePhoto when this request actually meant
+    // to change them — so the SQL UPDATE is structurally incapable of
+    // touching (and thus wiping) those columns on a status/comment-only save.
+    const dbPatch: Record<string, unknown> = { ...updated }
+    if (!photosProvided) delete dbPatch.productPhotos
+    if (!invoiceProvided) delete dbPatch.invoicePhoto
+
     if (index >= 0) {
       const updRes = await supabase
         .from('order_delivery')
-        .update(updated)
+        .update(dbPatch)
         .eq('id', updated.id)
       if (
         updRes.error &&
@@ -648,7 +660,7 @@ export async function PUT(
           '[branch PUT] timing columns missing in DB, retrying without them',
         )
         const { acceptedAt: _a, readyAt: _r, outForDeliveryAt: _o, ...safe } =
-          updated
+          dbPatch
         await supabase.from('order_delivery').update(safe).eq('id', updated.id)
       }
     } else {

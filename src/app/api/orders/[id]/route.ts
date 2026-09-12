@@ -770,7 +770,8 @@ export async function PUT(
 
     // New (base64) csAttachment uploads move to Storage; already-saved ones
     // (already a URL) pass through untouched. No-op array if none sent.
-    const incomingCsAttachments = Array.isArray(body.csAttachments)
+    const csAttachmentsProvided = Array.isArray(body.csAttachments)
+    const incomingCsAttachments = csAttachmentsProvided
       ? body.csAttachments
       : (existing as any).csAttachments || []
     const storedCsAttachments = await Promise.all(
@@ -812,7 +813,13 @@ export async function PUT(
       csAttachments: storedCsAttachments,
       updatedAt: now,
     }
-    const updRes = await supabase.from('orders').update(updatedOrder).eq('id', params.id)
+    // DB write payload: excludes csAttachments entirely unless this request
+    // actually meant to change them - a status/notes-only save must not be
+    // able to wipe attachments via a stale/incomplete `existing` read. Same
+    // discipline as the branch order_delivery fix (consistency, per request).
+    const dbPatch: Record<string, unknown> = { ...updatedOrder }
+    if (!csAttachmentsProvided) delete dbPatch.csAttachments
+    const updRes = await supabase.from('orders').update(dbPatch).eq('id', params.id)
 
     // ─── Migration-fallback chain ──────────────────────────────────────
     // If a column referenced in `updatedOrder` doesn't exist yet on this
@@ -835,14 +842,14 @@ export async function PUT(
 
     if (lastError && errorMentions(lastError, 'isScheduled', 'scheduledDate', 'scheduledTimeSlot', 'scheduledSpecificTime')) {
       console.warn('[orders PUT] scheduled columns missing, retrying without them')
-      const { isScheduled: _i, scheduledDate: _d, scheduledTimeSlot: _s, scheduledSpecificTime: _t, ...safe } = updatedOrder as any
+      const { isScheduled: _i, scheduledDate: _d, scheduledTimeSlot: _s, scheduledSpecificTime: _t, ...safe } = dbPatch as any
       const retry = await supabase.from('orders').update(safe).eq('id', params.id)
       lastError = retry.error
       stripped.scheduled = true
     }
     if (lastError && errorMentions(lastError, 'discountCode', 'discountAmount', 'netTotal')) {
       console.warn('[orders PUT] discount columns missing, retrying without them')
-      const { discountCode: _dc, discountAmount: _da, netTotal: _nt, ...safe } = updatedOrder as any
+      const { discountCode: _dc, discountAmount: _da, netTotal: _nt, ...safe } = dbPatch as any
       const retry = await supabase.from('orders').update(safe).eq('id', params.id)
       lastError = retry.error
       stripped.discount = true
@@ -855,7 +862,7 @@ export async function PUT(
         manualDiscountAmount: _mda,
         manualDiscountReason: _mdr,
         ...safe
-      } = updatedOrder as any
+      } = dbPatch as any
       const retry = await supabase.from('orders').update(safe).eq('id', params.id)
       lastError = retry.error
       stripped.manualDiscount = true
@@ -867,17 +874,17 @@ export async function PUT(
       // data/cs-attachments-migration.sql; the client surfaces a toast
       // so the operator never thinks the photos were persisted.
       console.warn('[orders PUT] csAttachments column missing in DB, retrying without it')
-      const { csAttachments: _ca, ...safe } = updatedOrder as any
+      const { csAttachments: _ca, ...safe } = dbPatch as any
       const retry = await supabase.from('orders').update(safe).eq('id', params.id)
       lastError = retry.error
-      stripped.csAttachments = (updatedOrder as any).csAttachments && (updatedOrder as any).csAttachments.length > 0
+      stripped.csAttachments = (dbPatch as any).csAttachments && (dbPatch as any).csAttachments.length > 0
     }
     if (lastError && errorMentions(lastError, 'walletUsed')) {
       // walletUsed column hasn't been added yet — retry without it. Wallet
       // won't be debited/refunded in this branch; the client warning tells
       // the operator to run data/wallet-used-migration.sql.
       console.warn('[orders PUT] walletUsed column missing in DB, retrying without it')
-      const { walletUsed: _wu, ...safe } = updatedOrder as any
+      const { walletUsed: _wu, ...safe } = dbPatch as any
       const retry = await supabase.from('orders').update(safe).eq('id', params.id)
       lastError = retry.error
       stripped.walletUsed = nextWalletUsed > 0 || previousWalletUsed > 0
