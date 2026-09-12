@@ -55,9 +55,17 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Google's "Publish to web" CSV is served through a CDN that can return
+    // an inconsistent (sometimes stale) snapshot across requests even with
+    // `cache: 'no-store'` on our end — that only controls OUR fetch cache,
+    // not Google's edge. A unique query param forces a fresh origin fetch
+    // every time instead of risking a stale edge-cached copy.
+    const bustedUrl = new URL(csvUrl)
+    bustedUrl.searchParams.set('_cb', Date.now().toString())
+
     // Fetch the CSV. Google occasionally 302s to a login page if the sheet
     // isn't actually published — treat that as an error.
-    const csvRes = await fetch(csvUrl, {
+    const csvRes = await fetch(bustedUrl.toString(), {
       cache: 'no-store',
       redirect: 'follow',
       headers: { Accept: 'text/csv, text/plain, */*' },
