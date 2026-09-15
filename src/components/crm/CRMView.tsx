@@ -28,6 +28,10 @@ interface CustomerSummary {
   // delivery-address areas — both admin-only filter/insight fields.
   acquisitionSource?: string
   zones?: string[]
+  // Tier 1 Customer Intelligence — admin-only, precomputed nightly. null
+  // until the first cron/manual recompute has run for this customer.
+  healthScore?: number | null
+  lifecycleStage?: string | null
 }
 
 interface Address {
@@ -150,6 +154,27 @@ interface CustomerProfile {
   top5Products: TopProduct[]
   insights: Insights
   feedbackStats?: FeedbackStats
+  // Tier 1 Customer Intelligence — admin-only (null for CS, or if this
+  // customer hasn't been through a nightly/manual recompute yet).
+  intelligence?: {
+    rfm: { r: number; f: number; m: number; label: string }
+    lifecycleStage: string
+    healthScore: number
+    healthBreakdown: {
+      recency: number
+      frequency: number
+      monetary: number
+      retention: number
+      complaints: number
+      survey: number
+    }
+    churnRisk: 'Low' | 'Medium' | 'High'
+    retentionPct: number
+    daysSinceLastOrder: number | null
+    typicalIntervalDays: number | null
+    cohortMonth: string | null
+    computedAt: string
+  } | null
 }
 
 // Aggregate customer-base insights returned alongside the list by
@@ -197,6 +222,28 @@ const TIER_AR_TO_EN: Record<string, string> = {
 
 const matchesTier = (apiTier: string | undefined | null, arTier: string): boolean =>
   !!apiTier && (apiTier === arTier || apiTier === TIER_AR_TO_EN[arTier])
+
+// Tier 1 Customer Intelligence — admin-only, precomputed nightly (see
+// src/lib/customerIntelligence.ts). Colors mirror the standalone preview
+// page (src/app/admin/customer-intelligence) for consistency.
+const LIFECYCLE_COLORS: Record<string, string> = {
+  'VIP': 'bg-amber-100 text-amber-800 border border-amber-300',
+  'نشط': 'bg-emerald-100 text-emerald-800 border border-emerald-300',
+  'جديد': 'bg-blue-100 text-blue-800 border border-blue-300',
+  'قيد التطور': 'bg-sky-100 text-sky-800 border border-sky-300',
+  'في خطر': 'bg-orange-100 text-orange-800 border border-orange-300',
+  'خامل': 'bg-gray-200 text-gray-700 border border-gray-300',
+  'تم استرجاعه': 'bg-purple-100 text-purple-800 border border-purple-300',
+}
+
+const CHURN_RISK_COLORS: Record<string, string> = {
+  Low: 'bg-emerald-100 text-emerald-800',
+  Medium: 'bg-amber-100 text-amber-800',
+  High: 'bg-red-100 text-red-800',
+}
+const CHURN_RISK_LABELS: Record<string, string> = { Low: 'منخفضة', Medium: 'متوسطة', High: 'عالية' }
+
+const healthScoreColor = (score: number) => (score >= 70 ? 'text-emerald-600' : score >= 45 ? 'text-amber-600' : 'text-red-600')
 
 const STATUS_COLORS: Record<string, string> = {
   'تم':    'bg-green-100 text-green-800',
@@ -311,6 +358,7 @@ export default function CRMView({ role }: CRMViewProps) {
   // Delete confirm state
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [refreshingIntelligence, setRefreshingIntelligence] = useState(false)
 
   // Load delivery zones (areas + sub-areas) once for the area pickers.
   useEffect(() => {
@@ -719,6 +767,23 @@ export default function CRMView({ role }: CRMViewProps) {
     loadProfile(id)
   }
 
+  // Tier 1 Customer Intelligence manual refresh trigger. Runs the same
+  // recompute the nightly cron does (see /api/cron/customer-intelligence),
+  // then re-fetches this customer's profile so the card reflects it
+  // immediately instead of waiting for the next 2am run.
+  const handleRefreshIntelligence = async () => {
+    if (!profile) return
+    setRefreshingIntelligence(true)
+    try {
+      await fetch('/api/admin/customer-intelligence', { method: 'POST' })
+      await loadProfile(profile.customer.id)
+    } catch {
+      toast.error('تعذر تحديث بيانات الذكاء')
+    } finally {
+      setRefreshingIntelligence(false)
+    }
+  }
+
   const selectedCustomer = customers.find((c) => c.id === selectedId)
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -906,6 +971,18 @@ export default function CRMView({ role }: CRMViewProps) {
                   </span>
                   <span className="text-xs text-gray-600">{c.totalOrders} طلب</span>
                 </div>
+                {/* Tier 1 Customer Intelligence chip — admin-only, precomputed
+                    nightly (null until the first recompute has run). */}
+                {role === 'admin' && c.lifecycleStage && (
+                  <div className="flex justify-between items-center mt-1">
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${LIFECYCLE_COLORS[c.lifecycleStage] || 'bg-gray-100 text-gray-700'}`}>
+                      {c.lifecycleStage}
+                    </span>
+                    {typeof c.healthScore === 'number' && (
+                      <span className={`text-xs font-bold ${healthScoreColor(c.healthScore)}`}>{c.healthScore}/100</span>
+                    )}
+                  </div>
+                )}
                 {typeof c.wallet === 'number' && c.wallet > 0 && (
                   <div className="text-xs text-emerald-700 font-semibold mt-1 text-right">
                     💳 {formatCurrency(c.wallet)}
@@ -959,6 +1036,11 @@ export default function CRMView({ role }: CRMViewProps) {
                     {profile.insights.isB2B && (
                       <span className="px-2 py-0.5 rounded-full text-sm font-bold bg-indigo-100 text-indigo-700">
                         B2B
+                      </span>
+                    )}
+                    {role === 'admin' && profile.intelligence && (
+                      <span className={`px-2 py-0.5 rounded-full text-sm font-bold ${LIFECYCLE_COLORS[profile.intelligence.lifecycleStage] || 'bg-gray-100 text-gray-700'}`}>
+                        {profile.intelligence.lifecycleStage}
                       </span>
                     )}
                     {(() => {
@@ -1194,6 +1276,73 @@ export default function CRMView({ role }: CRMViewProps) {
                     </div>
                   )}
                 </div>
+
+                {/* Tier 1 Customer Intelligence — admin-only. Precomputed
+                    nightly (see /api/cron/customer-intelligence); "تحديث
+                    الآن" runs the same recompute on demand. Renders nothing
+                    if this customer hasn't been through a recompute yet. */}
+                {role === 'admin' && profile.intelligence && (
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-sm font-bold text-gray-700">🧠 ذكاء العميل</h3>
+                      <button
+                        type="button"
+                        onClick={handleRefreshIntelligence}
+                        disabled={refreshingIntelligence}
+                        className="text-[11px] bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-gray-700 font-bold px-2 py-1 rounded"
+                      >
+                        {refreshingIntelligence ? '⏳ جاري التحديث...' : '🔄 تحديث الآن'}
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div className="bg-gray-50 rounded-lg p-3 text-center">
+                        <div className={`text-xl font-bold ${healthScoreColor(profile.intelligence.healthScore)}`}>
+                          {profile.intelligence.healthScore}/100
+                        </div>
+                        <div className="text-[11px] text-gray-500 mt-0.5">مؤشر الصحة</div>
+                      </div>
+                      <div className="bg-gray-50 rounded-lg p-3 text-center">
+                        <div className="text-base font-bold text-gray-800">{profile.intelligence.rfm.label}</div>
+                        <div className="text-[11px] text-gray-500 mt-0.5">RFM (R{profile.intelligence.rfm.r} F{profile.intelligence.rfm.f} M{profile.intelligence.rfm.m})</div>
+                      </div>
+                      <div className="bg-gray-50 rounded-lg p-3 text-center">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${CHURN_RISK_COLORS[profile.intelligence.churnRisk]}`}>
+                          {CHURN_RISK_LABELS[profile.intelligence.churnRisk]}
+                        </span>
+                        <div className="text-[11px] text-gray-500 mt-1">مخاطرة فقدان العميل</div>
+                      </div>
+                      <div className="bg-gray-50 rounded-lg p-3 text-center">
+                        <div className="text-xl font-bold text-gray-800">{profile.intelligence.retentionPct}%</div>
+                        <div className="text-[11px] text-gray-500 mt-0.5">الاستمرارية</div>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5 mt-3">
+                      {(Object.entries(profile.intelligence.healthBreakdown) as Array<[string, number]>).map(([key, value]) => (
+                        <div key={key}>
+                          <div className="flex justify-between text-[11px] text-gray-500 mb-0.5">
+                            <span>{value}</span>
+                            <span>
+                              {{
+                                recency: 'الحداثة',
+                                frequency: 'التكرار',
+                                monetary: 'الإنفاق',
+                                retention: 'الاستمرارية',
+                                complaints: 'الشكاوى',
+                                survey: 'التقييمات',
+                              }[key] || key}
+                            </span>
+                          </div>
+                          <div className="w-full bg-gray-100 rounded-full h-1.5">
+                            <div className="h-1.5 rounded-full bg-red-500" style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="text-[10px] text-gray-400 mt-2 text-left" dir="ltr">
+                      updated: {profile.intelligence.computedAt?.split('T')[0]}
+                    </div>
+                  </div>
+                )}
 
                 {/* Customer feedback summary — only renders when at least
                     one feedback row exists for this customer. */}

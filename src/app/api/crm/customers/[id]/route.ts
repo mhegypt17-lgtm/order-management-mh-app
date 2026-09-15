@@ -345,6 +345,31 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const predictedCLV = avgOrderValue * ordersPerMonth * projectionHorizonMonths
     const totalCLV = totalRevenue + predictedCLV
 
+    // Tier 1 Customer Intelligence — admin-only, reads the nightly-
+    // precomputed table (never recalculated here). CS never pays this read.
+    let intelligence: Record<string, unknown> | null = null
+    if (role === 'admin') {
+      const { data: intelRow } = await supabase
+        .from('customer_intelligence_scores')
+        .select('*')
+        .eq('customerId', customerId)
+        .maybeSingle()
+      if (intelRow) {
+        intelligence = {
+          rfm: { r: (intelRow as any).r, f: (intelRow as any).f, m: (intelRow as any).m, label: (intelRow as any).rfmLabel },
+          lifecycleStage: (intelRow as any).lifecycleStage,
+          healthScore: (intelRow as any).healthScore,
+          healthBreakdown: (intelRow as any).healthBreakdown,
+          churnRisk: (intelRow as any).churnRisk,
+          retentionPct: (intelRow as any).retentionPct,
+          daysSinceLastOrder: (intelRow as any).daysSinceLastOrder,
+          typicalIntervalDays: (intelRow as any).typicalIntervalDays,
+          cohortMonth: (intelRow as any).cohortMonth,
+          computedAt: (intelRow as any).computedAt,
+        }
+      }
+    }
+
     return NextResponse.json({
       customer,
       addresses,
@@ -366,6 +391,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       top5Products,
       insights,
       feedbackStats,
+      intelligence,
     })
   } catch (err) {
     console.error('CRM customer detail error:', err)

@@ -8,6 +8,7 @@ import {
   resolveCustomerTier,
   DEFAULT_LOYALTY_CONFIG,
 } from '@/lib/omsData'
+import { supabase } from '@/lib/supabase'
 
 export async function GET(req: NextRequest) {
   try {
@@ -28,6 +29,20 @@ export async function GET(req: NextRequest) {
     // config and count any non-cancelled order toward the tier.
     const settings = await readOrderSettings()
     const loyalty = settings.loyalty || DEFAULT_LOYALTY_CONFIG
+
+    // Tier 1 Customer Intelligence — admin-only chip in the sidebar. Reads
+    // the nightly-precomputed table (never recalculated here) so this adds
+    // one cheap indexed select, not a live computation.
+    const { data: intelRows } = await supabase
+      .from('customer_intelligence_scores')
+      .select('customerId, healthScore, lifecycleStage')
+    const intelByCustomer = new Map<string, { healthScore: number; lifecycleStage: string }>()
+    for (const row of intelRows || []) {
+      intelByCustomer.set((row as any).customerId, {
+        healthScore: (row as any).healthScore,
+        lifecycleStage: (row as any).lifecycleStage,
+      })
+    }
 
     // Aggregate insights accumulated while building each customer's summary
     // below — reuses the SAME `customers`/`orders`/`addresses` arrays already
@@ -116,6 +131,8 @@ export async function GET(req: NextRequest) {
         daysSinceLastOrder,
         tier,
         isB2B,
+        healthScore: intelByCustomer.get(c.id)?.healthScore ?? null,
+        lifecycleStage: intelByCustomer.get(c.id)?.lifecycleStage ?? null,
       }
     })
 
