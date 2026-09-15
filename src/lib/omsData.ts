@@ -8,6 +8,10 @@ import {
   catalogueOfferPrice,
   resolveCatalogueKey,
 } from '@/lib/catalogue'
+import {
+  CustomerIntelligenceConfig,
+  DEFAULT_CUSTOMER_INTELLIGENCE_CONFIG,
+} from '@/lib/customerIntelligence'
 
 export interface CustomerRecord {
   id: string
@@ -504,6 +508,8 @@ export interface OrderSettingsRecord {
   autoActivateThreshold?: number
   autoActivateEnabled?: boolean
   catalogues?: CatalogueRecord[]
+  /** Tier 1 "Customer Intelligence" scoring formulas — see src/lib/customerIntelligence.ts. */
+  customerIntelligence?: CustomerIntelligenceConfig
   /**
    * "Mega Order" reporting threshold (EGP). An order counts as mega when its
    * value net of discounts (voucher `discountAmount` + B2B
@@ -680,6 +686,7 @@ function defaultOrderSettings(): OrderSettingsRecord {
     autoActivateEnabled: true,
     megaOrderThreshold: 3000,
     catalogues: DEFAULT_CATALOGUES,
+    customerIntelligence: DEFAULT_CUSTOMER_INTELLIGENCE_CONFIG,
   }
 }
 
@@ -1678,6 +1685,7 @@ async function readOrderSettingsUncached(): Promise<OrderSettingsRecord> {
         Array.isArray((parsed as any).catalogues) && (parsed as any).catalogues.length > 0
           ? (parsed as any).catalogues
           : DEFAULT_CATALOGUES,
+      customerIntelligence: (parsed as any).customerIntelligence || DEFAULT_CUSTOMER_INTELLIGENCE_CONFIG,
     }
 
     if (normalized.orderReceivers.length === 0) normalized.orderReceivers = defaults.orderReceivers

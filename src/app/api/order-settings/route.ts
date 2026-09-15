@@ -8,6 +8,10 @@ import {
   readOrderSettings,
   RetentionConfig,
 } from '@/lib/omsData'
+import {
+  CustomerIntelligenceConfig,
+  DEFAULT_CUSTOMER_INTELLIGENCE_CONFIG,
+} from '@/lib/customerIntelligence'
 
 // Order settings change rarely (only when an admin edits a lookup list in the
 // settings screen) but are read on nearly every page load and by several
@@ -250,6 +254,31 @@ export async function PATCH(request: NextRequest) {
       } as RetentionConfig
     }
 
+    // Handle Tier 1 Customer Intelligence config (RFM/lifecycle/health-score
+    // formulas) — partial updates merge onto the current stored config so
+    // the settings UI can save one sub-section at a time.
+    if (body.customerIntelligence && typeof body.customerIntelligence === 'object') {
+      const current: CustomerIntelligenceConfig =
+        (nextSettings as any).customerIntelligence || DEFAULT_CUSTOMER_INTELLIGENCE_CONFIG
+      const incoming = body.customerIntelligence as Partial<CustomerIntelligenceConfig>
+      ;(nextSettings as any).customerIntelligence = {
+        ...current,
+        ...incoming,
+        rfm: { ...current.rfm, ...(incoming.rfm || {}) },
+        lifecycle: { ...current.lifecycle, ...(incoming.lifecycle || {}) },
+        healthScore: {
+          ...current.healthScore,
+          ...(incoming.healthScore || {}),
+          weights: { ...current.healthScore.weights, ...(incoming.healthScore?.weights || {}) },
+          complaintSeverityPenalty: {
+            ...current.healthScore.complaintSeverityPenalty,
+            ...(incoming.healthScore?.complaintSeverityPenalty || {}),
+          },
+        },
+        opportunities: { ...current.opportunities, ...(incoming.opportunities || {}) },
+      } as CustomerIntelligenceConfig
+    }
+
     // Handle agent notice update
     if (body.message !== undefined || body.type !== undefined || body.isActive !== undefined) {
       const notice: AgentNoticeRecord = {
@@ -287,6 +316,7 @@ export async function PATCH(request: NextRequest) {
         autoActivateEnabled: nextSettings.autoActivateEnabled,
         retention: nextSettings.retention,
         megaOrderThreshold: nextSettings.megaOrderThreshold,
+        customerIntelligence: (nextSettings as any).customerIntelligence,
       },
       { status: 200 }
     )

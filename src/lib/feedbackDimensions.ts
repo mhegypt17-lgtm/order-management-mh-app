@@ -181,3 +181,16 @@ export function getEscalationReasons(
   }
   return reasons
 }
+
+// Resolves the numeric (1..5) scores for every answered, rateable dimension
+// on a feedback row — used by customerIntelligence.ts's survey component.
+export function resolveDimensionScores(fb: Partial<OrderFeedbackRecord>): number[] {
+  const scores: number[] = []
+  for (const dim of FEEDBACK_DIMENSIONS) {
+    const v = (fb as Record<string, unknown>)[dim.key] as string | null | undefined
+    const option = findOption(dim, v)
+    if (option && option.score != null) scores.push(option.score)
+  }
+  return scores
+}
+
