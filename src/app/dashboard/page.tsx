@@ -109,6 +109,7 @@ export default function DashboardPage() {
     avgOrderValue: number
     avgOrdersPerCustomer: number
     totalCustomers: number
+    transactingCustomers: number
     totalOrders: number
     computedAt: string
   } | null>(null)
@@ -542,7 +543,7 @@ export default function DashboardPage() {
                 : (analytics.uniqueCustomers ? (analytics.totalOrders / analytics.uniqueCustomers).toFixed(1) : '0')
             }
             tone="emerald"
-            subtitle={biMode === 'lifetime' ? 'Lifetime' : 'الفترة المحددة'}
+            subtitle={biMode === 'lifetime' ? 'Lifetime — عملاء متعاملين فقط' : 'الفترة المحددة'}
           />
         </div>
         {biMode === 'lifetime' && biSummary?.computedAt && (

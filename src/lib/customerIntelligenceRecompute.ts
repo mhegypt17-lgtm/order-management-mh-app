@@ -153,14 +153,17 @@ export async function recomputeCustomerIntelligence(): Promise<{ count: number; 
 
   // Global "Business Intelligence" lifetime aggregates for the main Admin
   // dashboard — reuses the per-customer numbers already computed above
-  // (zero extra reads), single row upsert.
+  // (zero extra reads), single row upsert. avgOrdersPerCustomer divides by
+  // TRANSACTING customers only (>=1 order) — dividing by the full customer
+  // table (which includes never-ordered records) understates the figure.
   const totalCustomers = rows.length
+  const transactingCustomers = rows.filter((r) => r.totalOrders > 0).length
   const totalOrders = rows.reduce((s, r) => s + r.totalOrders, 0)
   const totalRevenue = rows.reduce((s, r) => s + r.totalRevenue, 0)
   const intervals = rows.map((r) => r.typicalIntervalDays).filter((v): v is number => v != null)
   const avgOrderIntervalDays = intervals.length > 0 ? intervals.reduce((s, v) => s + v, 0) / intervals.length : null
   const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0
-  const avgOrdersPerCustomer = totalCustomers > 0 ? totalOrders / totalCustomers : 0
+  const avgOrdersPerCustomer = transactingCustomers > 0 ? totalOrders / transactingCustomers : 0
 
   const { error: summaryError } = await supabase.from('business_intelligence_summary').upsert({
     id: 'global',
@@ -168,6 +171,7 @@ export async function recomputeCustomerIntelligence(): Promise<{ count: number; 
     avgOrderValue,
     avgOrdersPerCustomer,
     totalCustomers,
+    transactingCustomers,
     totalOrders,
     totalRevenue,
     computedAt,
