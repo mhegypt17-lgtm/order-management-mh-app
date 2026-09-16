@@ -43,7 +43,7 @@ export async function GET() {
     }))
 
     const opportunities = {
-      atRisk: rows.filter((r: any) => r.lifecycleStage === 'في خطر').length,
+      atRisk: rows.filter((r: any) => r.lifecycleStage === 'At Risk').length,
       reactivated: rows.filter((r: any) => r.isReactivatedOpportunity).length,
       spendingUp: rows.filter((r: any) => r.isSpendingUp).length,
     }

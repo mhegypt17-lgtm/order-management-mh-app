@@ -89,13 +89,13 @@ export const DEFAULT_CUSTOMER_INTELLIGENCE_CONFIG: CustomerIntelligenceConfig = 
 }
 
 export type LifecycleStage =
-  | 'جديد'
-  | 'قيد التطور'
-  | 'نشط'
+  | 'New'
+  | 'Developing'
+  | 'Active'
   | 'VIP'
-  | 'في خطر'
-  | 'خامل'
-  | 'تم استرجاعه'
+  | 'At Risk'
+  | 'Dormant'
+  | 'Reactivated'
 
 export interface CustomerIntelligenceInput {
   customerId: string
@@ -192,22 +192,22 @@ export function computeCustomerIntelligence(
     daysSinceLastOrder != null && daysSinceLastOrder <= config.lifecycle.reactivatedWindowDays && totalOrders >= 2
 
   if (totalOrders === 0) {
-    lifecycleStage = 'جديد'
+    lifecycleStage = 'New'
   } else if (
     totalOrders >= config.lifecycle.vipMinOrders ||
     totalRevenue >= config.lifecycle.vipMinRevenue
   ) {
     lifecycleStage = 'VIP'
   } else if (gapRatio != null && gapRatio > config.lifecycle.dormantGapMultiplier) {
-    lifecycleStage = justReactivated ? 'تم استرجاعه' : 'خامل'
+    lifecycleStage = justReactivated ? 'Reactivated' : 'Dormant'
   } else if (gapRatio != null && gapRatio > config.lifecycle.atRiskGapMultiplier) {
-    lifecycleStage = 'في خطر'
+    lifecycleStage = 'At Risk'
   } else if (totalOrders <= config.lifecycle.newMaxOrders && (ageDays ?? 0) <= config.lifecycle.newMaxAgeDays) {
-    lifecycleStage = 'جديد'
+    lifecycleStage = 'New'
   } else if (totalOrders <= config.lifecycle.newMaxOrders) {
-    lifecycleStage = 'قيد التطور'
+    lifecycleStage = 'Developing'
   } else {
-    lifecycleStage = 'نشط'
+    lifecycleStage = 'Active'
   }
 
   // ── Health score components (each 0-100) ────────────────────────────────

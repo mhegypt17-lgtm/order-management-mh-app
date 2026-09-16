@@ -18,28 +18,48 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out
 }
 
+// Supabase/PostgREST caps a plain `.select()` at 1000 rows by default —
+// silently, no error, no warning. Found 2026-09-16: this repo has 1469
+// customers, so a single un-paginated `.select()` was quietly scoring only
+// the first 1000 and leaving 469 with zero row. Every bulk read below MUST
+// go through this paginated helper. `.order(orderCol)` is required for a
+// stable cursor across pages (see pattern #6/migration-script incident in
+// repo memory — `.range()` without `.order()` can skip/duplicate rows).
+async function fetchAllRows<T = any>(table: string, columns: string, orderCol: string): Promise<T[]> {
+  const pageSize = 1000
+  const all: T[] = []
+  let from = 0
+  while (true) {
+    let query = supabase.from(table).select(columns).order(orderCol, { ascending: true }).range(from, from + pageSize - 1)
+    if (table === 'orders') query = (query as any).neq('orderStatus', 'لاغي')
+    const { data, error } = await query
+    if (error) throw new Error(`${table} read failed: ${error.message}`)
+    if (!data || data.length === 0) break
+    all.push(...(data as T[]))
+    if (data.length < pageSize) break
+    from += pageSize
+  }
+  return all
+}
+
 export async function recomputeCustomerIntelligence(): Promise<{ count: number; computedAt: string }> {
   const settings = await readOrderSettings()
   const config = (settings as any).customerIntelligence || DEFAULT_CUSTOMER_INTELLIGENCE_CONFIG
 
-  const [customersRes, ordersRes, complaintsRes, feedbackRes] = await Promise.all([
-    supabase.from('customers').select('id, customerName, phone'),
-    supabase
-      .from('orders')
-      .select('id, customerId, orderTotal, orderStatus, createdAt')
-      .neq('orderStatus', 'لاغي'),
-    supabase.from('complaints').select('customerId, priority, status'),
-    supabase
-      .from('order_feedback')
-      .select(
-        'customerId, rating, productQuality, packaging, deliveryTimeliness, customerService, pricingValue, appUsability, recommendToFriends',
-      ),
+  const [customers, orders, complaints, feedback] = await Promise.all([
+    fetchAllRows<{ id: string; customerName: string; phone: string }>('customers', 'id, customerName, phone', 'id'),
+    fetchAllRows<{ id: string; customerId: string; orderTotal: number; orderStatus: string; createdAt: string }>(
+      'orders',
+      'id, customerId, orderTotal, orderStatus, createdAt',
+      'id',
+    ),
+    fetchAllRows<{ customerId: string; priority: string; status: string }>('complaints', 'customerId, priority, status', 'id'),
+    fetchAllRows<{ customerId: string; rating: number; [k: string]: unknown }>(
+      'order_feedback',
+      'customerId, rating, productQuality, packaging, deliveryTimeliness, customerService, pricingValue, appUsability, recommendToFriends',
+      'id',
+    ),
   ])
-
-  const customers = customersRes.data || []
-  const orders = ordersRes.data || []
-  const complaints = complaintsRes.data || []
-  const feedback = feedbackRes.data || []
 
   const ordersByCustomer = new Map<string, typeof orders>()
   for (const o of orders) {
@@ -98,7 +118,7 @@ export async function recomputeCustomerIntelligence(): Promise<{ count: number; 
         priorAvg > 0 && ((trailingAvg - priorAvg) / priorAvg) * 100 >= config.opportunities.spendingUpMinIncreasePct
     }
     const isReactivatedOpportunity =
-      intel.lifecycleStage === 'تم استرجاعه' &&
+      intel.lifecycleStage === 'Reactivated' &&
       intel.daysSinceLastOrder != null &&
       intel.daysSinceLastOrder <= config.opportunities.reactivationLookbackDays
 

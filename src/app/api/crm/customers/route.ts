@@ -32,16 +32,30 @@ export async function GET(req: NextRequest) {
 
     // Tier 1 Customer Intelligence — admin-only chip in the sidebar. Reads
     // the nightly-precomputed table (never recalculated here) so this adds
-    // one cheap indexed select, not a live computation.
-    const { data: intelRows } = await supabase
-      .from('customer_intelligence_scores')
-      .select('customerId, healthScore, lifecycleStage')
+    // cheap indexed selects, not a live computation. Paginated — this repo
+    // has 1469 customers, well past Supabase's silent 1000-row default cap
+    // (a plain un-paginated select here would just drop everyone after row
+    // 1000, same bug found in the recompute job on 2026-09-16).
     const intelByCustomer = new Map<string, { healthScore: number; lifecycleStage: string }>()
-    for (const row of intelRows || []) {
-      intelByCustomer.set((row as any).customerId, {
-        healthScore: (row as any).healthScore,
-        lifecycleStage: (row as any).lifecycleStage,
-      })
+    {
+      const pageSize = 1000
+      let from = 0
+      while (true) {
+        const { data: page, error } = await supabase
+          .from('customer_intelligence_scores')
+          .select('customerId, healthScore, lifecycleStage')
+          .order('customerId', { ascending: true })
+          .range(from, from + pageSize - 1)
+        if (error || !page || page.length === 0) break
+        for (const row of page) {
+          intelByCustomer.set((row as any).customerId, {
+            healthScore: (row as any).healthScore,
+            lifecycleStage: (row as any).lifecycleStage,
+          })
+        }
+        if (page.length < pageSize) break
+        from += pageSize
+      }
     }
 
     // Aggregate insights accumulated while building each customer's summary

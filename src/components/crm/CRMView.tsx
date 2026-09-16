@@ -224,16 +224,17 @@ const matchesTier = (apiTier: string | undefined | null, arTier: string): boolea
   !!apiTier && (apiTier === arTier || apiTier === TIER_AR_TO_EN[arTier])
 
 // Tier 1 Customer Intelligence — admin-only, precomputed nightly (see
-// src/lib/customerIntelligence.ts). Colors mirror the standalone preview
-// page (src/app/admin/customer-intelligence) for consistency.
+// src/lib/customerIntelligence.ts). Metric/stage names are kept in English
+// (Recency/Frequency/Monetary/Health Score/Churn Risk/lifecycle stages) per
+// explicit decision — only the section title is bilingual.
 const LIFECYCLE_COLORS: Record<string, string> = {
   'VIP': 'bg-amber-100 text-amber-800 border border-amber-300',
-  'نشط': 'bg-emerald-100 text-emerald-800 border border-emerald-300',
-  'جديد': 'bg-blue-100 text-blue-800 border border-blue-300',
-  'قيد التطور': 'bg-sky-100 text-sky-800 border border-sky-300',
-  'في خطر': 'bg-orange-100 text-orange-800 border border-orange-300',
-  'خامل': 'bg-gray-200 text-gray-700 border border-gray-300',
-  'تم استرجاعه': 'bg-purple-100 text-purple-800 border border-purple-300',
+  'Active': 'bg-emerald-100 text-emerald-800 border border-emerald-300',
+  'New': 'bg-blue-100 text-blue-800 border border-blue-300',
+  'Developing': 'bg-sky-100 text-sky-800 border border-sky-300',
+  'At Risk': 'bg-orange-100 text-orange-800 border border-orange-300',
+  'Dormant': 'bg-gray-200 text-gray-700 border border-gray-300',
+  'Reactivated': 'bg-purple-100 text-purple-800 border border-purple-300',
 }
 
 const CHURN_RISK_COLORS: Record<string, string> = {
@@ -241,7 +242,6 @@ const CHURN_RISK_COLORS: Record<string, string> = {
   Medium: 'bg-amber-100 text-amber-800',
   High: 'bg-red-100 text-red-800',
 }
-const CHURN_RISK_LABELS: Record<string, string> = { Low: 'منخفضة', Medium: 'متوسطة', High: 'عالية' }
 
 const healthScoreColor = (score: number) => (score >= 70 ? 'text-emerald-600' : score >= 45 ? 'text-amber-600' : 'text-red-600')
 
@@ -1278,13 +1278,15 @@ export default function CRMView({ role }: CRMViewProps) {
                 </div>
 
                 {/* Tier 1 Customer Intelligence — admin-only. Precomputed
-                    nightly (see /api/cron/customer-intelligence); "تحديث
-                    الآن" runs the same recompute on demand. Renders nothing
-                    if this customer hasn't been through a recompute yet. */}
+                    nightly (see /api/cron/customer-intelligence); the
+                    refresh button runs the same recompute on demand.
+                    Renders nothing if this customer hasn't been through a
+                    recompute yet. Metric/stage names are kept in English
+                    per explicit decision — only the title is bilingual. */}
                 {role === 'admin' && profile.intelligence && (
                   <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
                     <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-sm font-bold text-gray-700">🧠 ذكاء العميل</h3>
+                      <h3 className="text-sm font-bold text-gray-700">🧠 Customer Intelligence (ذكاء العميل)</h3>
                       <button
                         type="button"
                         onClick={handleRefreshIntelligence}
@@ -1299,7 +1301,7 @@ export default function CRMView({ role }: CRMViewProps) {
                         <div className={`text-xl font-bold ${healthScoreColor(profile.intelligence.healthScore)}`}>
                           {profile.intelligence.healthScore}/100
                         </div>
-                        <div className="text-[11px] text-gray-500 mt-0.5">مؤشر الصحة</div>
+                        <div className="text-[11px] text-gray-500 mt-0.5">Health Score</div>
                       </div>
                       <div className="bg-gray-50 rounded-lg p-3 text-center">
                         <div className="text-base font-bold text-gray-800">{profile.intelligence.rfm.label}</div>
@@ -1307,13 +1309,13 @@ export default function CRMView({ role }: CRMViewProps) {
                       </div>
                       <div className="bg-gray-50 rounded-lg p-3 text-center">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${CHURN_RISK_COLORS[profile.intelligence.churnRisk]}`}>
-                          {CHURN_RISK_LABELS[profile.intelligence.churnRisk]}
+                          {profile.intelligence.churnRisk}
                         </span>
-                        <div className="text-[11px] text-gray-500 mt-1">مخاطرة فقدان العميل</div>
+                        <div className="text-[11px] text-gray-500 mt-1">Churn Risk</div>
                       </div>
                       <div className="bg-gray-50 rounded-lg p-3 text-center">
                         <div className="text-xl font-bold text-gray-800">{profile.intelligence.retentionPct}%</div>
-                        <div className="text-[11px] text-gray-500 mt-0.5">الاستمرارية</div>
+                        <div className="text-[11px] text-gray-500 mt-0.5">Retention</div>
                       </div>
                     </div>
                     <div className="space-y-1.5 mt-3">
@@ -1323,12 +1325,12 @@ export default function CRMView({ role }: CRMViewProps) {
                             <span>{value}</span>
                             <span>
                               {{
-                                recency: 'الحداثة',
-                                frequency: 'التكرار',
-                                monetary: 'الإنفاق',
-                                retention: 'الاستمرارية',
-                                complaints: 'الشكاوى',
-                                survey: 'التقييمات',
+                                recency: 'Recency',
+                                frequency: 'Frequency',
+                                monetary: 'Monetary',
+                                retention: 'Retention',
+                                complaints: 'Complaints',
+                                survey: 'Survey',
                               }[key] || key}
                             </span>
                           </div>

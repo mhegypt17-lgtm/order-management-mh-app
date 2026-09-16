@@ -8,6 +8,10 @@ import {
   type RetentionConfig,
   type RetentionStageConfig,
 } from '@/lib/omsData'
+import {
+  DEFAULT_CUSTOMER_INTELLIGENCE_CONFIG,
+  type CustomerIntelligenceConfig,
+} from '@/lib/customerIntelligence'
 
 type SectionKey =
   | 'orderReceivers'
@@ -116,6 +120,8 @@ export default function OrderSettingsView() {
   const [savingMegaOrderThreshold, setSavingMegaOrderThreshold] = useState(false)
   const [retention, setRetention] = useState<RetentionConfig>(DEFAULT_RETENTION_CONFIG)
   const [savingRetention, setSavingRetention] = useState(false)
+  const [ciConfig, setCiConfig] = useState<CustomerIntelligenceConfig>(DEFAULT_CUSTOMER_INTELLIGENCE_CONFIG)
+  const [savingCiConfig, setSavingCiConfig] = useState(false)
   const [agentNotice, setAgentNotice] = useState<AgentNotice>({
     message: '',
     type: 'info',
@@ -196,6 +202,25 @@ export default function OrderSettingsView() {
             stage3: { ...DEFAULT_RETENTION_CONFIG.stage3, ...(data.settings.retention.stage3 || {}) },
           }
           setRetention(merged)
+        }
+        if (data.settings?.customerIntelligence) {
+          const src = data.settings.customerIntelligence
+          const merged: CustomerIntelligenceConfig = {
+            enabled: src.enabled !== false,
+            rfm: { ...DEFAULT_CUSTOMER_INTELLIGENCE_CONFIG.rfm, ...(src.rfm || {}) },
+            lifecycle: { ...DEFAULT_CUSTOMER_INTELLIGENCE_CONFIG.lifecycle, ...(src.lifecycle || {}) },
+            healthScore: {
+              ...DEFAULT_CUSTOMER_INTELLIGENCE_CONFIG.healthScore,
+              ...(src.healthScore || {}),
+              weights: { ...DEFAULT_CUSTOMER_INTELLIGENCE_CONFIG.healthScore.weights, ...(src.healthScore?.weights || {}) },
+              complaintSeverityPenalty: {
+                ...DEFAULT_CUSTOMER_INTELLIGENCE_CONFIG.healthScore.complaintSeverityPenalty,
+                ...(src.healthScore?.complaintSeverityPenalty || {}),
+              },
+            },
+            opportunities: { ...DEFAULT_CUSTOMER_INTELLIGENCE_CONFIG.opportunities, ...(src.opportunities || {}) },
+          }
+          setCiConfig(merged)
         }
       } catch {
         toast.error('تعذر تحميل إعدادات النظام')
@@ -1161,6 +1186,231 @@ export default function OrderSettingsView() {
             className="px-5 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 font-medium"
           >
             {savingRetention ? 'جاري الحفظ...' : '💾 حفظ إعدادات المتابعة'}
+          </button>
+        </div>
+      </section>
+
+      {/* ── Customer Intelligence (RFM / Lifecycle / Health Score formulas) ── */}
+      <section className="bg-white border-2 border-indigo-300 rounded-xl p-4 space-y-4" dir="rtl">
+        <div>
+          <h3 className="text-lg font-bold text-indigo-900 flex items-center gap-2">
+            🧠 Customer Intelligence (ذكاء العميل)
+          </h3>
+          <p className="text-sm text-indigo-700 mt-1">
+            كل القيم أدناه تتحكم في حساب RFM / Lifecycle Stage / Health Score لكل عميل. يتم إعادة الحساب ليلاً، أو فوراً عبر زر "تحديث الآن" في صفحة العميل.
+          </p>
+        </div>
+
+        <label className="flex items-center gap-3 p-3 rounded-lg bg-indigo-50 border border-indigo-200 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={ciConfig.enabled !== false}
+            onChange={(e) => setCiConfig({ ...ciConfig, enabled: e.target.checked })}
+            className="w-5 h-5 accent-indigo-600"
+          />
+          <span className="font-medium text-indigo-900">تفعيل محرك Customer Intelligence</span>
+        </label>
+
+        {/* RFM thresholds */}
+        <div className="rounded-xl border-2 border-gray-200 p-3 space-y-3">
+          <div className="font-bold text-gray-900">RFM Thresholds</div>
+          {([
+            { key: 'recencyThresholdsDays', label: 'Recency (days since last order) — lower is better' },
+            { key: 'frequencyThresholds', label: 'Frequency (order count) — higher is better' },
+            { key: 'monetaryThresholds', label: 'Monetary (lifetime revenue, EGP) — higher is better' },
+          ] as const).map(({ key, label }) => (
+            <div key={key}>
+              <span className="text-sm text-gray-700 font-medium">{label}</span>
+              <div className="grid grid-cols-4 gap-2 mt-1">
+                {ciConfig.rfm[key].map((v, i) => (
+                  <input
+                    key={i}
+                    type="number"
+                    value={v}
+                    onChange={(e) => {
+                      const next = [...ciConfig.rfm[key]] as [number, number, number, number]
+                      next[i] = Number(e.target.value) || 0
+                      setCiConfig({ ...ciConfig, rfm: { ...ciConfig.rfm, [key]: next } })
+                    }}
+                    className="px-2 py-1.5 border-2 border-gray-300 rounded-lg text-center"
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Lifecycle thresholds */}
+        <div className="rounded-xl border-2 border-gray-200 p-3 space-y-3">
+          <div className="font-bold text-gray-900">Lifecycle Stage Thresholds</div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {([
+              ['newMaxOrders', 'New: max orders'],
+              ['newMaxAgeDays', 'New: max age (days)'],
+              ['vipMinOrders', 'VIP: min orders'],
+              ['vipMinRevenue', 'VIP: min revenue (EGP)'],
+              ['atRiskGapMultiplier', 'At Risk: gap × typical interval'],
+              ['dormantGapMultiplier', 'Dormant: gap × typical interval'],
+              ['reactivatedWindowDays', 'Reactivated: window (days)'],
+            ] as const).map(([key, label]) => (
+              <label key={key} className="block text-sm">
+                <span className="text-gray-700 font-medium">{label}</span>
+                <input
+                  type="number"
+                  value={ciConfig.lifecycle[key]}
+                  onChange={(e) =>
+                    setCiConfig({ ...ciConfig, lifecycle: { ...ciConfig.lifecycle, [key]: Number(e.target.value) || 0 } })
+                  }
+                  className="mt-1 w-full px-2 py-1.5 border-2 border-gray-300 rounded-lg text-center"
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Health Score weights */}
+        <div className="rounded-xl border-2 border-gray-200 p-3 space-y-3">
+          <div className="font-bold text-gray-900">Health Score Weights</div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {(Object.keys(ciConfig.healthScore.weights) as Array<keyof CustomerIntelligenceConfig['healthScore']['weights']>).map((key) => (
+              <label key={key} className="block text-sm">
+                <span className="text-gray-700 font-medium capitalize">{key}</span>
+                <input
+                  type="number"
+                  step="0.05"
+                  value={ciConfig.healthScore.weights[key]}
+                  onChange={(e) =>
+                    setCiConfig({
+                      ...ciConfig,
+                      healthScore: {
+                        ...ciConfig.healthScore,
+                        weights: { ...ciConfig.healthScore.weights, [key]: Number(e.target.value) || 0 },
+                      },
+                    })
+                  }
+                  className="mt-1 w-full px-2 py-1.5 border-2 border-gray-300 rounded-lg text-center"
+                />
+              </label>
+            ))}
+          </div>
+          <div className="text-xs text-gray-500">الأوزان لا يشترط أن تجمع إلى 1 — يتم تطبيعها تلقائياً.</div>
+
+          <div className="font-bold text-gray-900 pt-2">Complaint Penalty (points deducted, per complaint)</div>
+          <div className="grid grid-cols-3 gap-3">
+            {(['low', 'medium', 'high'] as const).map((sev) => (
+              <label key={sev} className="block text-sm">
+                <span className="text-gray-700 font-medium capitalize">{sev}</span>
+                <input
+                  type="number"
+                  value={ciConfig.healthScore.complaintSeverityPenalty[sev]}
+                  onChange={(e) =>
+                    setCiConfig({
+                      ...ciConfig,
+                      healthScore: {
+                        ...ciConfig.healthScore,
+                        complaintSeverityPenalty: {
+                          ...ciConfig.healthScore.complaintSeverityPenalty,
+                          [sev]: Number(e.target.value) || 0,
+                        },
+                      },
+                    })
+                  }
+                  className="mt-1 w-full px-2 py-1.5 border-2 border-gray-300 rounded-lg text-center"
+                />
+              </label>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+            <label className="block text-sm">
+              <span className="text-gray-700 font-medium">Unresolved complaint multiplier</span>
+              <input
+                type="number"
+                step="0.1"
+                value={ciConfig.healthScore.unresolvedComplaintMultiplier}
+                onChange={(e) =>
+                  setCiConfig({
+                    ...ciConfig,
+                    healthScore: { ...ciConfig.healthScore, unresolvedComplaintMultiplier: Number(e.target.value) || 0 },
+                  })
+                }
+                className="mt-1 w-full px-2 py-1.5 border-2 border-gray-300 rounded-lg text-center"
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="text-gray-700 font-medium">Neutral survey score (no feedback yet)</span>
+              <input
+                type="number"
+                value={ciConfig.healthScore.neutralSurveyScore}
+                onChange={(e) =>
+                  setCiConfig({
+                    ...ciConfig,
+                    healthScore: { ...ciConfig.healthScore, neutralSurveyScore: Number(e.target.value) || 0 },
+                  })
+                }
+                className="mt-1 w-full px-2 py-1.5 border-2 border-gray-300 rounded-lg text-center"
+              />
+            </label>
+          </div>
+        </div>
+
+        {/* Opportunities */}
+        <div className="rounded-xl border-2 border-gray-200 p-3 space-y-3">
+          <div className="font-bold text-gray-900">Opportunities</div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label className="block text-sm">
+              <span className="text-gray-700 font-medium">Spending Up: min increase %</span>
+              <input
+                type="number"
+                value={ciConfig.opportunities.spendingUpMinIncreasePct}
+                onChange={(e) =>
+                  setCiConfig({
+                    ...ciConfig,
+                    opportunities: { ...ciConfig.opportunities, spendingUpMinIncreasePct: Number(e.target.value) || 0 },
+                  })
+                }
+                className="mt-1 w-full px-2 py-1.5 border-2 border-gray-300 rounded-lg text-center"
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="text-gray-700 font-medium">Reactivation lookback (days)</span>
+              <input
+                type="number"
+                value={ciConfig.opportunities.reactivationLookbackDays}
+                onChange={(e) =>
+                  setCiConfig({
+                    ...ciConfig,
+                    opportunities: { ...ciConfig.opportunities, reactivationLookbackDays: Number(e.target.value) || 0 },
+                  })
+                }
+                className="mt-1 w-full px-2 py-1.5 border-2 border-gray-300 rounded-lg text-center"
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            disabled={savingCiConfig}
+            onClick={async () => {
+              setSavingCiConfig(true)
+              try {
+                const res = await fetch('/api/order-settings', {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ customerIntelligence: ciConfig }),
+                })
+                if (!res.ok) throw new Error('failed')
+                toast.success('تم حفظ إعدادات Customer Intelligence')
+              } catch {
+                toast.error('تعذر حفظ الإعدادات')
+              } finally {
+                setSavingCiConfig(false)
+              }
+            }}
+            className="px-5 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 font-medium"
+          >
+            {savingCiConfig ? 'جاري الحفظ...' : '💾 حفظ إعدادات Customer Intelligence'}
           </button>
         </div>
       </section>
