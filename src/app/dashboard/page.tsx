@@ -96,6 +96,31 @@ export default function DashboardPage() {
   const { catalogues, activeCatalogues } = useCatalogues()
   const [catalogueFilter, setCatalogueFilter] = useState<string>('all')
 
+  // Lifetime "Business Overview" aggregates (avg order interval / avg order
+  // value / avg orders per customer) — precomputed nightly, NOT tied to the
+  // dateFrom/dateTo filter above. Fetched once on mount (small singleton
+  // row, independent of the date-range refetch below). `biMode` lets the
+  // admin toggle avg-order-value/avg-orders-per-customer to the currently
+  // selected period instead (computed client-side from already-loaded
+  // `analytics` — zero extra egress); avg order interval has no period-
+  // scoped equivalent (needs full order history) so it always shows lifetime.
+  const [biSummary, setBiSummary] = useState<{
+    avgOrderIntervalDays: number | null
+    avgOrderValue: number
+    avgOrdersPerCustomer: number
+    totalCustomers: number
+    totalOrders: number
+    computedAt: string
+  } | null>(null)
+  const [biMode, setBiMode] = useState<'lifetime' | 'period'>('lifetime')
+
+  useEffect(() => {
+    fetch('/api/admin/business-intelligence', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((data) => setBiSummary(data?.summary || null))
+      .catch(() => setBiSummary(null))
+  }, [])
+
   const resetDateFilter = () => {
     setDateFrom(firstDayOfMonth)
     setDateTo(today)
@@ -462,6 +487,69 @@ export default function DashboardPage() {
         <div className="md:col-span-2 flex items-end text-sm text-gray-600">
           {isLoading ? '⏳ جاري التحميل...' : `عدد الطلبات في الفترة: ${analytics.totalOrders}`}
         </div>
+      </div>
+
+      {/* ── Business Overview — lifetime aggregates, independent of the date
+          filter above (precomputed nightly, see business_intelligence_summary).
+          Toggle switches avg-order-value / avg-orders-per-customer to the
+          currently selected period instead (computed client-side from the
+          already-loaded `analytics`, zero extra reads); avg order interval
+          has no meaningful period-scoped equivalent so it always shows
+          lifetime regardless of the toggle. */}
+      <div className="bg-white rounded-lg border border-gray-200 p-4">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <h3 className="font-bold text-gray-800">📊 Business Overview</h3>
+          <div className="flex gap-1">
+            {([
+              { key: 'lifetime', label: 'Lifetime' },
+              { key: 'period', label: 'الفترة المحددة' },
+            ] as const).map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => setBiMode(opt.key)}
+                className={`text-xs font-semibold px-3 py-1.5 rounded transition-colors ${
+                  biMode === opt.key ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <KpiCard
+            title="Avg Order Interval"
+            value={biSummary?.avgOrderIntervalDays != null ? `${biSummary.avgOrderIntervalDays.toFixed(0)} يوم` : '—'}
+            tone="purple"
+            subtitle="Lifetime — بين كل طلب والتالي"
+          />
+          <KpiCard
+            title="Avg Order Value"
+            value={
+              biMode === 'lifetime'
+                ? `${(biSummary?.avgOrderValue ?? 0).toFixed(0)} ج.م`
+                : `${analytics.avgOrderValue.toFixed(0)} ج.م`
+            }
+            tone="blue"
+            subtitle={biMode === 'lifetime' ? 'Lifetime' : 'الفترة المحددة'}
+          />
+          <KpiCard
+            title="Avg Orders / Customer"
+            value={
+              biMode === 'lifetime'
+                ? (biSummary?.avgOrdersPerCustomer ?? 0).toFixed(1)
+                : (analytics.uniqueCustomers ? (analytics.totalOrders / analytics.uniqueCustomers).toFixed(1) : '0')
+            }
+            tone="emerald"
+            subtitle={biMode === 'lifetime' ? 'Lifetime' : 'الفترة المحددة'}
+          />
+        </div>
+        {biMode === 'lifetime' && biSummary?.computedAt && (
+          <div className="text-[10px] text-gray-400 mt-2 text-left" dir="ltr">
+            updated: {biSummary.computedAt.split('T')[0]}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

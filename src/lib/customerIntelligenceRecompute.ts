@@ -151,5 +151,28 @@ export async function recomputeCustomerIntelligence(): Promise<{ count: number; 
     if (error) throw new Error(`customer_intelligence_scores upsert failed: ${error.message}`)
   }
 
+  // Global "Business Intelligence" lifetime aggregates for the main Admin
+  // dashboard — reuses the per-customer numbers already computed above
+  // (zero extra reads), single row upsert.
+  const totalCustomers = rows.length
+  const totalOrders = rows.reduce((s, r) => s + r.totalOrders, 0)
+  const totalRevenue = rows.reduce((s, r) => s + r.totalRevenue, 0)
+  const intervals = rows.map((r) => r.typicalIntervalDays).filter((v): v is number => v != null)
+  const avgOrderIntervalDays = intervals.length > 0 ? intervals.reduce((s, v) => s + v, 0) / intervals.length : null
+  const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0
+  const avgOrdersPerCustomer = totalCustomers > 0 ? totalOrders / totalCustomers : 0
+
+  const { error: summaryError } = await supabase.from('business_intelligence_summary').upsert({
+    id: 'global',
+    avgOrderIntervalDays,
+    avgOrderValue,
+    avgOrdersPerCustomer,
+    totalCustomers,
+    totalOrders,
+    totalRevenue,
+    computedAt,
+  })
+  if (summaryError) throw new Error(`business_intelligence_summary upsert failed: ${summaryError.message}`)
+
   return { count: rows.length, computedAt }
 }
