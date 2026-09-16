@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { unstable_noStore as noStore } from 'next/cache'
 import { supabase } from '@/lib/supabase'
 
 // Lifetime "Business Intelligence" aggregates (avg order interval / avg
@@ -8,8 +9,10 @@ import { supabase } from '@/lib/supabase'
 // per-customer scores, see src/lib/customerIntelligenceRecompute.ts. Never
 // recalculated on page load.
 export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 export async function GET() {
+  noStore()
   try {
     const { data, error } = await supabase
       .from('business_intelligence_summary')
