@@ -113,7 +113,7 @@ export default function MonthlyOpsReport({ data, browserUrl }: Props) {
                   value={`${orders.cancellationRatePct}%`}
                   hint={`prev: ${orders.prevCancellationRatePct}%`}
                 />
-                <KpiRow label="New Customers" value={formatNumber(customers.newCustomers)} change={customers.newCustomersPctChange} />
+                <KpiRow label="New Customers (Online/App/B2B)" value={formatNumber(customers.newCustomers)} change={customers.newCustomersPctChange} />
               </tbody>
             </table>
             <Text style={{ ...subtleNote, marginTop: 8 }}>
@@ -234,7 +234,7 @@ export default function MonthlyOpsReport({ data, browserUrl }: Props) {
             <SectionHeading emoji="👥" label="Customers" />
             <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12 }}>
               <tbody>
-                <MiniRow label="New customers this month" value={formatNumber(customers.newCustomers)} />
+                <MiniRow label="New customers this month (Online/App/B2B)" value={formatNumber(customers.newCustomers)} />
                 <MiniRow label="Warning (retention risk)" value={formatNumber(customers.warningCount)} />
                 <MiniRow label="Suspended" value={formatNumber(customers.suspendedCount)} />
               </tbody>
@@ -286,6 +286,34 @@ export default function MonthlyOpsReport({ data, browserUrl }: Props) {
                         <td style={tdStyle}>{c.createdAt.slice(0, 10)}</td>
                         <td style={{ ...tdStyle, textAlign: 'right', direction: 'rtl' }}>{c.customerName}</td>
                         <td style={{ ...tdStyle, textAlign: 'right', direction: 'rtl' }}>{c.source}</td>
+                        <td style={tdStyle}>{c.firstOrderRevenue === null ? '—' : formatCurrency(c.firstOrderRevenue)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
+
+            {/* Instashop is an indirect/marketplace channel — kept as a
+                separate segment, never folded into the primary KPI above. */}
+            {customers.newCustomersInstashop > 0 && (
+              <>
+                <Text style={{ margin: '16px 0 6px', fontSize: 13, fontWeight: 600, color: colors.text }}>
+                  New customers — Instashop ({formatNumber(customers.newCustomersInstashop)})
+                </Text>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={thStyle}>Date</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>Customer</th>
+                      <th style={thStyle}>1st Order Revenue</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {customers.newCustomersInstashopDetail.map((c, i) => (
+                      <tr key={c.customerId} style={i % 2 === 1 ? { backgroundColor: colors.bg } : undefined}>
+                        <td style={tdStyle}>{c.createdAt.slice(0, 10)}</td>
+                        <td style={{ ...tdStyle, textAlign: 'right', direction: 'rtl' }}>{c.customerName}</td>
                         <td style={tdStyle}>{c.firstOrderRevenue === null ? '—' : formatCurrency(c.firstOrderRevenue)}</td>
                       </tr>
                     ))}

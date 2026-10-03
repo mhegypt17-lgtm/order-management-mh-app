@@ -181,6 +181,9 @@ export default function ReportsPage() {
 
   const catalogueFilteredOrders = useMemo(() => {
     if (catalogueFilter === 'all') return orders
+    if (catalogueFilter === 'exclude_instashop') {
+      return orders.filter((o) => resolveCatalogueKey(o.orderType, catalogues) !== 'instashop')
+    }
     return orders.filter((o) => resolveCatalogueKey(o.orderType, catalogues) === catalogueFilter)
   }, [orders, catalogueFilter, catalogues])
 
@@ -612,6 +615,7 @@ export default function ReportsPage() {
               className="px-3 py-2 border border-gray-300 rounded-lg"
             >
               <option value="all">كل القنوات</option>
+              <option value="exclude_instashop">كل القنوات عدا إنستاشوب (Online/App/B2B)</option>
               {activeCatalogues.map((c) => (
                 <option key={c.key} value={c.key}>{c.label}</option>
               ))}

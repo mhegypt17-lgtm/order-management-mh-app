@@ -28,6 +28,30 @@ export interface NewCustomerDetail {
   source: string
   /** orderTotal/netTotal of the customer's first-ever order, or null if they have none yet. */
   firstOrderRevenue: number | null
+  /** orders.orderType (B2B/Online/Instashop/App) of the customer's first-ever
+   *  order, or null if they have no order yet. Drives the primary-vs-Instashop
+   *  New Customers split (see splitNewCustomersByChannel below). */
+  orderType: string | null
+}
+
+/**
+ * Instashop is an indirect/marketplace channel — customers who place their
+ * FIRST order through it don't count toward the primary "New Customers" KPI
+ * (that's reserved for customers acquired via Online/App/B2B, the channels
+ * this business directly owns the relationship for). They're still fully
+ * visible, just in a separate "New Customers (Instashop)" segment. A
+ * customer with no order yet (created via the CRM "+ إضافة" button, say)
+ * hasn't landed via ANY channel and is excluded from both buckets until
+ * their first order exists — re-run the report for whichever day that
+ * happens and they'll show up then.
+ */
+export function splitNewCustomersByChannel(detail: NewCustomerDetail[]): {
+  primary: NewCustomerDetail[]
+  instashop: NewCustomerDetail[]
+} {
+  const primary = detail.filter((d) => d.orderType && d.orderType !== 'Instashop')
+  const instashop = detail.filter((d) => d.orderType === 'Instashop')
+  return { primary, instashop }
 }
 
 export interface DailyReportData {
@@ -58,10 +82,17 @@ export interface DailyReportData {
   }
 
   customers: {
+    /** Primary channel only (Online/App/B2B) — Instashop excluded, see
+     *  splitNewCustomersByChannel. This is the headline KPI number. */
     newCustomers: number
-    /** Admin-only detail: each new customer this period, their acquisition
-     *  source (from their first order), and first-order revenue. */
+    /** Admin-only detail: each new customer this period (primary channels
+     *  only), their acquisition source (from their first order), and
+     *  first-order revenue. */
     newCustomersDetail: NewCustomerDetail[]
+    /** New customers whose first-ever order was Instashop — shown as a
+     *  separate segment, never folded into `newCustomers` above. */
+    newCustomersInstashop: number
+    newCustomersInstashopDetail: NewCustomerDetail[]
   }
 
   topProducts: Array<{
@@ -105,14 +136,14 @@ export async function attachFirstOrderDetails(
   const ids = customerRows.map((c) => c.id)
   const { data: firstOrders, error } = await supabase
     .from('orders')
-    .select('"customerId","customerSource","orderTotal","netTotal","createdAt"')
+    .select('"customerId","customerSource","orderTotal","netTotal","createdAt","orderType"')
     .in('customerId', ids)
     .order('createdAt', { ascending: true })
   if (error) throw new Error(`Supabase query failed: ${error.message}`)
 
   // Rows are ascending by createdAt, so the first hit per customerId is
   // their earliest order.
-  const firstByCustomer = new Map<string, { source: string; revenue: number }>()
+  const firstByCustomer = new Map<string, { source: string; revenue: number; orderType: string | null }>()
   for (const o of firstOrders ?? []) {
     const cid = (o as { customerId?: string }).customerId
     if (!cid || firstByCustomer.has(cid)) continue
@@ -121,6 +152,7 @@ export async function attachFirstOrderDetails(
       revenue: Number(
         (o as { netTotal?: number }).netTotal ?? (o as { orderTotal?: number }).orderTotal ?? 0,
       ),
+      orderType: (o as { orderType?: string }).orderType || null,
     })
   }
 
@@ -133,6 +165,7 @@ export async function attachFirstOrderDetails(
         createdAt: c.createdAt,
         source: first?.source ?? 'لا يوجد طلب بعد',
         firstOrderRevenue: first ? first.revenue : null,
+        orderType: first?.orderType ?? null,
       }
     })
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
@@ -344,7 +377,9 @@ export async function getDailyReportData(
     }))
     .sort((a, b) => b.revenue - a.revenue)
 
-  const newCustomersDetail = await attachFirstOrderDetails(supabase, newCustomerRows ?? [])
+  const allNewCustomersDetail = await attachFirstOrderDetails(supabase, newCustomerRows ?? [])
+  const { primary: newCustomersDetail, instashop: newCustomersInstashopDetail } =
+    splitNewCustomersByChannel(allNewCustomersDetail)
 
   return {
     reportDate,
@@ -359,8 +394,10 @@ export async function getDailyReportData(
     },
     orders: statuses,
     customers: {
-      newCustomers: (newCustomerRows ?? []).length,
+      newCustomers: newCustomersDetail.length,
       newCustomersDetail,
+      newCustomersInstashop: newCustomersInstashopDetail.length,
+      newCustomersInstashopDetail,
     },
     topProducts,
     revenueByOrderType,
@@ -379,6 +416,6 @@ export function formatDailyReportSummary(d: DailyReportData): string {
     `Sales: ${formatCurrency(d.revenue.totalSales)} (${d.revenue.salesPctChange.text})`,
     `Collected: ${formatCurrency(d.revenue.revenueCollected)} (${d.revenue.revenueCollectedPctChange.text})`,
     `Orders: ${formatNumber(d.orders.total)} (${d.revenue.ordersPctChange.text})`,
-    `New customers: ${d.customers.newCustomers}`,
+    `New customers: ${d.customers.newCustomers}${d.customers.newCustomersInstashop > 0 ? ` (+${d.customers.newCustomersInstashop} Instashop)` : ''}`,
   ].join(' · ')
 }

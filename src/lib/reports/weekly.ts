@@ -7,7 +7,7 @@ import {
   formatCurrency,
   formatNumber,
 } from './format'
-import { ORDER_STATUS, attachFirstOrderDetails, type NewCustomerDetail } from './daily'
+import { ORDER_STATUS, attachFirstOrderDetails, splitNewCustomersByChannel, type NewCustomerDetail } from './daily'
 
 /**
  * Weekly ops digest — covers the 7 days ending "yesterday" (Cairo).
@@ -77,16 +77,21 @@ export interface WeeklyReportData {
   }>
 
   customers: {
+    /** Primary channel only (Online/App/B2B) — Instashop excluded. */
     newCustomers: number
     newCustomersPctChange: ReturnType<typeof pctChange>
+    /** New customers whose first-ever order was Instashop — separate segment. */
+    newCustomersInstashop: number
     /** Suspended = customers in warning/suspended status right now (not week-scoped). */
     warningCount: number
     suspendedCount: number
     /** Top 5 buyers this week by revenue. */
     topBuyers: Array<{ customerName: string; ordersCount: number; revenue: number }>
-    /** Admin-only detail: each new customer this week, their acquisition
-     *  source (from their first order), and first-order revenue. */
+    /** Admin-only detail: each new customer this week (primary channels only),
+     *  their acquisition source (from their first order), and first-order
+     *  revenue. */
     newCustomersDetail: NewCustomerDetail[]
+    newCustomersInstashopDetail: NewCustomerDetail[]
   }
 
   complaints: {
@@ -167,7 +172,7 @@ export async function getWeeklyReportData(
     { data: thisWeekOrders, error: thisWeekErr },
     { data: prevWeekOrders, error: prevWeekErr },
     { data: newCustomerRowsThis, error: newCustThisErr },
-    { count: newCustomersPrev, error: newCustPrevErr },
+    { data: newCustomerRowsPrev, error: newCustPrevErr },
     { count: warningCount, error: warningErr },
     { count: suspendedCount, error: suspendedErr },
     { data: openedThisWeekComplaints, error: openedComplaintsErr },
@@ -199,7 +204,7 @@ export async function getWeeklyReportData(
 
     supabase
       .from('customers')
-      .select('id', { count: 'exact', head: true })
+      .select('id,"customerName","createdAt"')
       .gte('createdAt', `${prevWeekStart}T00:00:00+02:00`)
       .lte('createdAt', `${prevWeekEnd}T23:59:59+02:00`),
 
@@ -542,7 +547,11 @@ export async function getWeeklyReportData(
   const zeroSalesTotal = zeroSalesActive.length
   const zeroSalesProducts = zeroSalesActive.slice(0, 10)
 
-  const newCustomersDetail = await attachFirstOrderDetails(supabase, newCustomerRowsThis ?? [])
+  const allNewCustomersDetailThis = await attachFirstOrderDetails(supabase, newCustomerRowsThis ?? [])
+  const { primary: newCustomersDetail, instashop: newCustomersInstashopDetail } =
+    splitNewCustomersByChannel(allNewCustomersDetailThis)
+  const allNewCustomersDetailPrev = await attachFirstOrderDetails(supabase, newCustomerRowsPrev ?? [])
+  const { primary: newCustomersPrevPrimary } = splitNewCustomersByChannel(allNewCustomersDetailPrev)
 
   return {
     weekStart,
@@ -565,12 +574,14 @@ export async function getWeeklyReportData(
     revenueByOrderType,
     topProducts,
     customers: {
-      newCustomers: (newCustomerRowsThis ?? []).length,
-      newCustomersPctChange: pctChange((newCustomerRowsThis ?? []).length, newCustomersPrev ?? 0),
+      newCustomers: newCustomersDetail.length,
+      newCustomersPctChange: pctChange(newCustomersDetail.length, newCustomersPrevPrimary.length),
+      newCustomersInstashop: newCustomersInstashopDetail.length,
       warningCount: warningCount ?? 0,
       suspendedCount: suspendedCount ?? 0,
       topBuyers,
       newCustomersDetail,
+      newCustomersInstashopDetail,
     },
     complaints: {
       opened: openedRows.length,
@@ -598,7 +609,7 @@ export async function getWeeklyReportData(
 
 /** Short one-line summary for the email subject / log line. */
 export function formatWeeklyReportSummary(d: WeeklyReportData): string {
-  return `Sales ${formatCurrency(d.revenue.totalSales)} · ${formatNumber(d.revenue.deliveredCount)} delivered · ${formatNumber(d.customers.newCustomers)} new`
+  return `Sales ${formatCurrency(d.revenue.totalSales)} · ${formatNumber(d.revenue.deliveredCount)} delivered · ${formatNumber(d.customers.newCustomers)} new${d.customers.newCustomersInstashop > 0 ? ` (+${d.customers.newCustomersInstashop} Instashop)` : ''}`
 }
 
 // Suppress unused-import warnings for constants exported for other modules.

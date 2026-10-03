@@ -193,7 +193,7 @@ export default function DailyOpsReport({ data, browserUrl }: Props) {
           {/* Customers */}
           <Section style={sectionStyle}>
             <SectionHeading emoji="👥" label="Customers" />
-            <Metric label="New Customers" value={formatNumber(customers.newCustomers)} />
+            <Metric label="New Customers (Online/App/B2B)" value={formatNumber(customers.newCustomers)} />
             {customers.newCustomersDetail.length === 0 ? (
               <Text style={{ ...subtleNote, marginTop: 12 }}>No new customers yesterday.</Text>
             ) : (
@@ -216,7 +216,32 @@ export default function DailyOpsReport({ data, browserUrl }: Props) {
                 </tbody>
               </table>
             )}
+
+            {/* Instashop is an indirect/marketplace channel — kept as a
+                separate segment, never folded into the primary KPI above. */}
+            {customers.newCustomersInstashop > 0 && (
+              <>
+                <Metric label="New Customers (Instashop)" value={formatNumber(customers.newCustomersInstashop)} />
+                <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 12 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...thStyle, textAlign: 'left' }}>Customer</th>
+                      <th style={thStyle}>1st Order Revenue</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {customers.newCustomersInstashopDetail.map((c, i) => (
+                      <tr key={c.customerId} style={i % 2 === 1 ? { backgroundColor: colors.bg } : undefined}>
+                        <td style={{ ...tdStyle, textAlign: 'left', direction: 'rtl' }}>{c.customerName}</td>
+                        <td style={tdStyle}>{c.firstOrderRevenue === null ? '—' : formatCurrency(c.firstOrderRevenue)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
           </Section>
+
 
           <Hr style={hrStyle} />
 

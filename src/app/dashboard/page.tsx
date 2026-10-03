@@ -202,7 +202,11 @@ export default function DashboardPage() {
     return orders.filter((o) => {
       if (dateFrom && o.orderDate < dateFrom) return false
       if (dateTo && o.orderDate > dateTo) return false
-      if (catalogueFilter !== 'all' && resolveCatalogueKey(o.orderType, catalogues) !== catalogueFilter) return false
+      if (catalogueFilter === 'exclude_instashop') {
+        if (resolveCatalogueKey(o.orderType, catalogues) === 'instashop') return false
+      } else if (catalogueFilter !== 'all' && resolveCatalogueKey(o.orderType, catalogues) !== catalogueFilter) {
+        return false
+      }
       return true
     })
   }, [orders, dateFrom, dateTo, catalogueFilter, catalogues])
@@ -480,6 +484,7 @@ export default function DashboardPage() {
             className="w-full px-3 py-2 border border-gray-300 rounded-lg"
           >
             <option value="all">كل القنوات</option>
+            <option value="exclude_instashop">كل القنوات عدا إنستاشوب (Online/App/B2B)</option>
             {activeCatalogues.map((c) => (
               <option key={c.key} value={c.key}>{c.label}</option>
             ))}
