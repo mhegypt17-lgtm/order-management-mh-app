@@ -1211,6 +1211,42 @@ export async function refreshOrderItemPriceSnapshots(
       : effectivePrice
     const nextLineTotal = (Number(item.quantity) || 0) * nextUnitPrice
 
+    // B2B/negotiated manual override detection: compare the item's CURRENT
+    // unitPrice against what the OLD snapshot (basePriceSnapshot/
+    // offerPriceSnapshot) would itself compute. If they differ, a human
+    // typed a custom سعر الوحدة that doesn't match the catalogue formula —
+    // most commonly a B2B negotiated price. That manual price must never be
+    // silently overwritten back to سعر البرومو by this auto-refresh; only
+    // the base/offer snapshot (reference display values) move, so the
+    // negotiated unitPrice/lineTotal the customer agreed to stays intact.
+    const oldEffectivePrice =
+      item.offerPriceSnapshot != null && item.offerPriceSnapshot > 0 &&
+      (item.basePriceSnapshot == null || item.offerPriceSnapshot < item.basePriceSnapshot)
+        ? item.offerPriceSnapshot
+        : item.basePriceSnapshot ?? null
+    const oldComputedUnitPrice =
+      oldEffectivePrice == null
+        ? null
+        : isWeightMode
+          ? Math.round(oldEffectivePrice * ((Number(item.weightGrams) || 0) / 1000) * 100) / 100
+          : oldEffectivePrice
+    const wasManuallyOverridden =
+      oldComputedUnitPrice != null && Math.abs((Number(item.unitPrice) || 0) - oldComputedUnitPrice) > 0.009
+
+    if (wasManuallyOverridden) {
+      const snapshotUnchanged =
+        nextBase === (item.basePriceSnapshot ?? null) && nextOffer === (item.offerPriceSnapshot ?? null)
+      if (snapshotUnchanged) return item
+      writes.push({
+        id: item.id,
+        basePriceSnapshot: nextBase,
+        offerPriceSnapshot: nextOffer,
+        unitPrice: Number(item.unitPrice) || 0,
+        lineTotal: Number(item.lineTotal) || 0,
+      })
+      return { ...item, basePriceSnapshot: nextBase, offerPriceSnapshot: nextOffer }
+    }
+
     const unchanged =
       nextBase === (item.basePriceSnapshot ?? null) &&
       nextOffer === (item.offerPriceSnapshot ?? null) &&
