@@ -79,12 +79,14 @@ export default function DashboardPage() {
   const [targetedStats, setTargetedStats] = useState<{
     monthLabel: string
     totalUnits: number
+    branchUnits: number
+    bySource: { orderType: string; units: number }[]
     productCount: number
     targetedProducts: { id: string; productName: string }[]
     perAgent: { agent: string; units: number }[]
     monthlyGoal: number
     achievementPct: number
-  }>({ monthLabel: '', totalUnits: 0, productCount: 0, targetedProducts: [], perAgent: [], monthlyGoal: 0, achievementPct: 0 })
+  }>({ monthLabel: '', totalUnits: 0, branchUnits: 0, bySource: [], productCount: 0, targetedProducts: [], perAgent: [], monthlyGoal: 0, achievementPct: 0 })
   const firstDayOfMonth = cairoFirstDayOfMonth()
   const today = cairoDateString()
 
@@ -174,6 +176,8 @@ export default function DashboardPage() {
         setTargetedStats({
           monthLabel: String(tData?.monthLabel || ''),
           totalUnits: Number(tData?.totalUnits) || 0,
+          branchUnits: Number(tData?.branchUnits) || 0,
+          bySource: Array.isArray(tData?.bySource) ? tData.bySource : [],
           productCount: Number(tData?.productCount) || 0,
           targetedProducts: Array.isArray(tData?.targetedProducts) ? tData.targetedProducts : [],
           perAgent: Array.isArray(tData?.perAgent) ? tData.perAgent : [],
@@ -589,7 +593,7 @@ export default function DashboardPage() {
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div>
             <h2 className="font-bold text-gray-900">🎯 أداء الوكلاء على المنتجات المستهدفة</h2>
-            <p className="text-xs text-gray-500">وحدات مباعة خلال الشهر الحالي (طلبات تمت فقط)</p>
+            <p className="text-xs text-gray-500">وحدات مباعة خلال الشهر الحالي (طلبات تمت فقط) — وكلاء الفرع غير محسوبة ضمن هدف الفريق</p>
           </div>
           <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1">
             {targetedStats.productCount === 0
@@ -640,6 +644,26 @@ export default function DashboardPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Segmentation by source — admin-only visibility, never folded into
+            the team goal above. branchUnits (orderReceiver = الفرع, covers
+            both Branch-type walk-ins and Instashop) is shown separately so
+            nothing is hidden, just kept out of the agents' % calculation. */}
+        {(targetedStats.bySource.length > 0 || targetedStats.branchUnits > 0) && (
+          <div className="pt-3 border-t border-gray-100 text-xs text-gray-600 space-y-1">
+            {targetedStats.bySource.length > 0 && (
+              <div>
+                <span className="font-semibold">حسب المصدر:</span>{' '}
+                {targetedStats.bySource.map((s) => `${s.orderType}: ${s.units.toLocaleString()}`).join(' · ')}
+              </div>
+            )}
+            {targetedStats.branchUnits > 0 && (
+              <div className="text-gray-500">
+                وحدات الفرع (Instashop + طلبات الفرع المباشرة، غير محسوبة ضمن هدف الفريق): {targetedStats.branchUnits.toLocaleString()}
+              </div>
+            )}
           </div>
         )}
       </section>

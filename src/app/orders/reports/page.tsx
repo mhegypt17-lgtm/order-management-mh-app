@@ -5,6 +5,7 @@ import { calculateComplaintAnalytics, type ComplaintAnalyticsRecord } from '@/li
 import { cairoDateString, cairoFirstDayOfMonth } from '@/lib/cairoTime'
 import { useCatalogues } from '@/lib/useCatalogues'
 import { resolveCatalogueKey } from '@/lib/catalogue'
+import { useAuthStore } from '@/lib/auth'
 type OrderItem = {
   id: string
   productName: string
@@ -67,6 +68,8 @@ function countBy<T extends string>(list: T[]) {
 }
 
 export default function ReportsPage() {
+  const { user } = useAuthStore()
+  const role = user?.role
   const [isLoading, setIsLoading] = useState(true)
   const [orders, setOrders] = useState<OrderRecord[]>([])
   const [complaints, setComplaints] = useState<ReportComplaint[]>([])
@@ -75,12 +78,14 @@ export default function ReportsPage() {
   const [targetedStats, setTargetedStats] = useState<{
     monthLabel: string
     totalUnits: number
+    branchUnits: number
+    bySource: { orderType: string; units: number }[]
     productCount: number
     targetedProducts: { id: string; productName: string }[]
     perAgent: { agent: string; units: number }[]
     monthlyGoal: number
     achievementPct: number
-  }>({ monthLabel: '', totalUnits: 0, productCount: 0, targetedProducts: [], perAgent: [], monthlyGoal: 0, achievementPct: 0 })
+  }>({ monthLabel: '', totalUnits: 0, branchUnits: 0, bySource: [], productCount: 0, targetedProducts: [], perAgent: [], monthlyGoal: 0, achievementPct: 0 })
   const [megaOrders, setMegaOrders] = useState<{
     threshold: number
     currentMonth: { label: string; rows: { agent: string; count: number }[] }
@@ -166,6 +171,8 @@ export default function ReportsPage() {
         setTargetedStats({
           monthLabel: data.monthLabel || '',
           totalUnits: Number(data.totalUnits) || 0,
+          branchUnits: Number(data.branchUnits) || 0,
+          bySource: Array.isArray(data.bySource) ? data.bySource : [],
           productCount: Number(data.productCount) || 0,
           targetedProducts: Array.isArray(data.targetedProducts) ? data.targetedProducts : [],
           perAgent: Array.isArray(data.perAgent) ? data.perAgent : [],
@@ -401,6 +408,24 @@ export default function ReportsPage() {
                     </tr>
                   </tfoot>
                 </table>
+              </div>
+            )}
+            {/* Segmentation by source — admin-only, never folded into the team
+                goal above. branchUnits covers الفرع (Branch-type walk-ins +
+                Instashop, which is always auto-received by الفرع). */}
+            {role === 'admin' && (targetedStats.bySource.length > 0 || targetedStats.branchUnits > 0) && (
+              <div className="pt-2 border-t border-amber-100 text-xs text-gray-600 space-y-1">
+                {targetedStats.bySource.length > 0 && (
+                  <div>
+                    <span className="font-semibold">حسب المصدر:</span>{' '}
+                    {targetedStats.bySource.map((s) => `${s.orderType}: ${s.units.toLocaleString()}`).join(' · ')}
+                  </div>
+                )}
+                {targetedStats.branchUnits > 0 && (
+                  <div className="text-gray-500">
+                    وحدات الفرع (Instashop + طلبات الفرع المباشرة، غير محسوبة ضمن هدف الفريق): {targetedStats.branchUnits.toLocaleString()}
+                  </div>
+                )}
               </div>
             )}
           </>
