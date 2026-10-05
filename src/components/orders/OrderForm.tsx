@@ -1662,7 +1662,7 @@ export default function OrderForm({ mode, orderId }: Props) {
                 <th className="p-2 text-right text-sm">سعر البرومو</th>
                 <th className="p-2 text-right text-sm">الكمية</th>
                 <th className="p-2 text-right text-sm">الوزن (كج / جم)</th>
-                <th className="p-2 text-right text-sm">سعر الوحدة</th>
+                <th className="p-2 text-right text-sm">{form.orderType === 'B2B' ? 'سعر الوحدة X الوزن' : 'سعر الوحدة'}</th>
                 <th className="p-2 text-right text-sm">الإجمالي</th>
                 <th className="p-2 text-center text-sm">حذف</th>
               </tr>
