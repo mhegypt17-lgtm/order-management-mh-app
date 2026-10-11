@@ -599,8 +599,14 @@ export async function PUT(
     // التوصيل" list action, which never includes these keys) must not risk
     // wiping photos via a stale/incomplete `existing` read. Same discipline
     // as CS's `attachmentsOnly` path in /api/orders/[id].
-    const photosProvided = Array.isArray(body.productPhotos)
-    const invoiceProvided = body.invoicePhoto !== undefined
+    // Once the order is already saved as delivered, photos/invoice are
+    // frozen: any photo fields in the request are ignored (the partial-patch
+    // below then never touches those columns). Uses the `existing` row read
+    // above — no extra query. A request that is itself the transition TO
+    // delivered still passes, since `existing` isn't delivered yet.
+    const photosLocked = index >= 0 && existing.deliveryStatus === 'تم التوصيل'
+    const photosProvided = !photosLocked && Array.isArray(body.productPhotos)
+    const invoiceProvided = !photosLocked && body.invoicePhoto !== undefined
     const storedProductPhotos = photosProvided
       ? await Promise.all(body.productPhotos.map((p: string) => persistAttachment(p, `order-photos/${params.id}`)))
       : existing.productPhotos

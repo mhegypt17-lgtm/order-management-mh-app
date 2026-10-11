@@ -104,6 +104,9 @@ export default function BranchOrderDetailPage() {
   const [isSavingItems, setIsSavingItems] = useState(false)
 
   const isLocked = deliveryStatus === 'في الطريق' || deliveryStatus === 'تم التوصيل'
+  // Photos/invoice freeze once delivery is SAVED (persisted status, not the
+  // dropdown draft). The API enforces the same rule; this just hides controls.
+  const photosLocked = order?.delivery?.deliveryStatus === 'تم التوصيل'
 
   const statusClass = useMemo(() => {
     return {
@@ -293,6 +296,7 @@ export default function BranchOrderDetailPage() {
   // FileList reference goes empty after that reset, which used to silently
   // swallow the upload once we introduced `await ensurePhotosLoaded()`.
   const handleAddProductPhotos = async (files: File[]) => {
+    if (photosLocked) return
     if (!files || files.length === 0) return
     const ok = await ensurePhotosLoaded()
     if (!ok) return
@@ -302,6 +306,7 @@ export default function BranchOrderDetailPage() {
   }
 
   const handleInvoicePhoto = async (files: File[]) => {
+    if (photosLocked) return
     if (!files || files.length === 0) return
     const ok = await ensurePhotosLoaded()
     if (!ok) return
@@ -310,6 +315,7 @@ export default function BranchOrderDetailPage() {
   }
 
   const handleRemoveProductPhoto = async (idx: number) => {
+    if (photosLocked) return
     const ok = window.confirm('هل تريد حذف هذه الصورة؟')
     if (!ok) return
     const loaded = await ensurePhotosLoaded()
@@ -319,6 +325,7 @@ export default function BranchOrderDetailPage() {
   }
 
   const handleRemoveInvoicePhoto = async () => {
+    if (photosLocked) return
     const ok = window.confirm('هل تريد حذف صورة الفاتورة؟')
     if (!ok) return
     const loaded = await ensurePhotosLoaded()
@@ -867,6 +874,7 @@ export default function BranchOrderDetailPage() {
               type="file"
               accept="image/*"
               multiple
+              hidden={photosLocked}
               onChange={(e) => {
                 // Snapshot into a File[] BEFORE clearing the input, because the
                 // clear invalidates the live FileList reference we'd otherwise
@@ -877,6 +885,9 @@ export default function BranchOrderDetailPage() {
               }}
               className="w-full"
             />
+            {photosLocked && (
+              <p className="text-xs text-gray-500">🔒 تم التوصيل — لا يمكن تعديل الصور بعد التسليم</p>
+            )}
             <div className="mt-2 grid grid-cols-3 gap-2">
               {productPhotos.map((photo, idx) => (
                 <div key={idx} className="relative group">
@@ -887,6 +898,7 @@ export default function BranchOrderDetailPage() {
                     className="w-full h-20 object-cover rounded border border-gray-200 cursor-zoom-in"
                     title="عرض الصورة"
                   />
+                  {!photosLocked && (
                   <button
                     type="button"
                     onClick={() => handleRemoveProductPhoto(idx)}
@@ -896,6 +908,7 @@ export default function BranchOrderDetailPage() {
                   >
                     ✕
                   </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -919,6 +932,7 @@ export default function BranchOrderDetailPage() {
             <input
               type="file"
               accept="image/*"
+              hidden={photosLocked}
               onChange={(e) => {
                 const captured = e.target.files ? Array.from(e.target.files) : []
                 e.target.value = ''
@@ -936,6 +950,7 @@ export default function BranchOrderDetailPage() {
                     className="w-full h-28 object-cover rounded border border-gray-200 cursor-zoom-in"
                     title="عرض صورة الفاتورة"
                   />
+                  {!photosLocked && (
                   <button
                     type="button"
                     onClick={handleRemoveInvoicePhoto}
@@ -945,6 +960,7 @@ export default function BranchOrderDetailPage() {
                   >
                     ✕
                   </button>
+                  )}
                 </div>
               ) : (
                 <div className="w-full h-28 border border-dashed border-gray-300 rounded flex items-center justify-center text-sm text-gray-500">
