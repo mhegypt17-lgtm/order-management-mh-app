@@ -346,6 +346,7 @@ export default function BranchOrderDetailPage() {
         deliveryStatus: newStatus,
         branchComments,
         updatedBy: user?.id || 'branch',
+        role: user?.role,
       }
       if (photosLoaded) {
         payload.productPhotos = productPhotos
@@ -391,6 +392,7 @@ export default function BranchOrderDetailPage() {
         deliveryStatus,
         branchComments,
         updatedBy: user?.id || 'branch',
+        role: user?.role,
       }
       if (photosLoaded) {
         payload.productPhotos = productPhotos
@@ -814,7 +816,8 @@ export default function BranchOrderDetailPage() {
               <select
                 value={deliveryStatus}
                 onChange={(e) => handleStatusChange(e.target.value as OrderDetail['delivery']['deliveryStatus'])}
-                disabled={isSaving}
+                disabled={isSaving || (photosLocked && user?.role !== 'admin')}
+                title={photosLocked && user?.role !== 'admin' ? 'تغيير حالة طلب تم توصيله يتطلب صلاحية الإدارة' : undefined}
                 className="flex-1 px-3 py-2 border border-gray-300 rounded-lg disabled:bg-gray-100"
                 dir="rtl"
               >

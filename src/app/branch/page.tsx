@@ -175,7 +175,7 @@ export default function BranchPage() {
       const res = await fetch(`/api/branch/orders/${order.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deliveryStatus: nextStatus, updatedBy: 'branch' }),
+        body: JSON.stringify({ deliveryStatus: nextStatus, updatedBy: 'branch', role: 'branch' }),
       })
       if (!res.ok) throw new Error('failed')
     } catch {
@@ -410,7 +410,8 @@ export default function BranchPage() {
                   <td className="px-4 py-3 text-sm">
                     <select
                       value={order.delivery.deliveryStatus}
-                      disabled={savingId === order.id}
+                      disabled={savingId === order.id || order.delivery.deliveryStatus === 'تم التوصيل'}
+                      title={order.delivery.deliveryStatus === 'تم التوصيل' ? 'تغيير حالة طلب تم توصيله يتطلب صلاحية الإدارة' : undefined}
                       onChange={(e) => updateDeliveryStatus(order, e.target.value as DeliveryStatus)}
                       onClick={(e) => e.stopPropagation()}
                       className={`px-2 py-1 rounded-full text-xs font-semibold border ${deliveryClasses[order.delivery.deliveryStatus]} disabled:opacity-60`}

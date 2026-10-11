@@ -351,6 +351,16 @@ export async function PUT(
 
     const nextStatus = body.deliveryStatus || existing.deliveryStatus
 
+    // Once delivered, only an admin may move the order back out of
+    // 'تم التوصيل' (same body/query `role` convention as /api/orders/[id]).
+    const requesterRole = String(body.role || new URL(request.url).searchParams.get('role') || '').toLowerCase()
+    const isAdmin = requesterRole === 'admin'
+    if (index >= 0 && existing.deliveryStatus === 'تم التوصيل' && nextStatus !== 'تم التوصيل' && !isAdmin) {
+      return NextResponse.json(
+        { error: 'لا يمكن تغيير حالة طلب تم توصيله — يتطلب صلاحية الإدارة' },
+        { status: 403 },
+      )
+    }
     // ── Branch line edits (qty/weight) ──────────────────────────────────────
     // The branch can amend each line's quantity, and — for weight-mode lines
     // — the actual weighed grams once the product is weighed. We snapshot the
@@ -604,7 +614,7 @@ export async function PUT(
     // below then never touches those columns). Uses the `existing` row read
     // above — no extra query. A request that is itself the transition TO
     // delivered still passes, since `existing` isn't delivered yet.
-    const photosLocked = index >= 0 && existing.deliveryStatus === 'تم التوصيل'
+    const photosLocked = index >= 0 && existing.deliveryStatus === 'تم التوصيل' && !isAdmin
     const photosProvided = !photosLocked && Array.isArray(body.productPhotos)
     const invoiceProvided = !photosLocked && body.invoicePhoto !== undefined
     const storedProductPhotos = photosProvided
