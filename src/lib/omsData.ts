@@ -295,6 +295,9 @@ export interface LookupValueRecord {
   // Every other lookup category ignores this field — it stays undefined and
   // costs nothing on the wire.
   subReasons?: LookupValueRecord[]
+  // Optional: the value pre-selected on a NEW order form (at most one per
+  // list). Omitted entirely when false so it costs nothing on the wire.
+  isDefault?: boolean
 }
 
 export interface AgentNoticeRecord {
@@ -707,6 +710,7 @@ export function normalizeLookupRows(rows: unknown): LookupValueRecord[] {
         sortOrder: Number(source.sortOrder) || idx + 1,
         createdAt: source.createdAt || now,
         updatedAt: now,
+        ...(source.isDefault === true ? { isDefault: true } : {}),
       }
     })
     .filter((row): row is LookupValueRecord => Boolean(row))

@@ -59,7 +59,11 @@ type LookupItem = {
   // nested list of sub-reasons the CS agent picks from. Other sections
   // leave this undefined and it never gets sent to the server.
   subReasons?: LookupItem[]
+  isDefault?: boolean
 }
+
+// Lists that feed the new-order form and can have a pre-selected default.
+const DEFAULTABLE_SECTIONS: SectionKey[] = ['orderReceivers', 'orderMethods', 'orderTypes', 'customerSources', 'paymentMethods', 'orderStatuses']
 
 type SettingsState = Record<SectionKey, LookupItem[]>
 
@@ -252,6 +256,19 @@ export default function OrderSettingsView() {
     setSettings((prev) => ({
       ...prev,
       [section]: prev[section].map((item) => (item.id === id ? { ...item, ...patch } : item)),
+    }))
+  }
+
+  // Only one default per list; clicking the current default clears it.
+  const toggleDefault = (section: SectionKey, id: string) => {
+    setSettings((prev) => ({
+      ...prev,
+      [section]: prev[section].map((item) => {
+        const next = { ...item }
+        if (item.id === id && !item.isDefault) next.isDefault = true
+        else delete next.isDefault
+        return next
+      }),
     }))
   }
 
@@ -515,13 +532,26 @@ export default function OrderSettingsView() {
           <div className="space-y-2">
             {settings[meta.key].map((item, index) => (
               <div key={item.id} className="border border-gray-200 rounded-lg p-2 space-y-2">
-                <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_auto_auto_auto] gap-2 items-center">
+                <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_auto_auto_auto_auto] gap-2 items-center">
                 <input
                   value={item.label}
                   onChange={(e) => updateItem(meta.key, item.id, { label: e.target.value })}
                   className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                   dir="rtl"
                 />
+                {DEFAULTABLE_SECTIONS.includes(meta.key) && (
+                  <button
+                    type="button"
+                    onClick={() => toggleDefault(meta.key, item.id)}
+                    disabled={!item.isActive}
+                    title={item.isActive ? 'القيمة المختارة تلقائياً عند إنشاء طلب جديد' : 'فعّل القيمة أولاً'}
+                    className={`inline-flex items-center gap-1 px-2 py-1 rounded text-sm disabled:opacity-40 ${
+                      item.isDefault && item.isActive ? 'bg-amber-100 text-amber-800 font-semibold' : 'bg-gray-50 text-gray-600'
+                    }`}
+                  >
+                    {item.isDefault && item.isActive ? '★' : '☆'} افتراضي
+                  </button>
+                )}
                 <label className="inline-flex items-center gap-2 text-sm text-gray-700">
                   <input
                     type="checkbox"

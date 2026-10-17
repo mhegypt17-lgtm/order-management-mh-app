@@ -75,6 +75,7 @@ function normalizeRows(rows: unknown, section?: SectionKey): LookupValueRecord[]
         createdAt: source.createdAt || now,
         updatedAt: now,
       }
+      if (source.isDefault === true && base.isActive) base.isDefault = true
 
       if (preserveSubReasons) {
         const rawSub = (source as any).subReasons
@@ -94,6 +95,12 @@ function normalizeRows(rows: unknown, section?: SectionKey): LookupValueRecord[]
 
 function activeLabels(rows: LookupValueRecord[]) {
   return rows.filter((row) => row.isActive).sort((a, b) => a.sortOrder - b.sortOrder).map((row) => row.label)
+}
+
+// Label of the admin-chosen default for a list (only if still active).
+function defaultLabel(rows: LookupValueRecord[] | undefined): string | null {
+  const row = (rows || []).find((r) => r.isDefault && r.isActive)
+  return row ? row.label : null
 }
 
 export async function GET() {
@@ -116,6 +123,14 @@ export async function GET() {
           complaintOwners: activeLabels((settings as any).complaintOwners || []),
           complaintClosureActions: activeLabels((settings as any).complaintClosureActions || []),
           agentNotice: settings.agentNotice,
+          defaults: {
+            orderReceiver: defaultLabel(settings.orderReceivers),
+            orderMethod: defaultLabel(settings.orderMethods),
+            customerSource: defaultLabel(settings.customerSources),
+            orderType: defaultLabel(settings.orderTypes),
+            paymentMethod: defaultLabel(settings.paymentMethods),
+            orderStatus: defaultLabel(settings.orderStatuses),
+          },
         },
       },
       { status: 200, headers: CACHE_HEADERS }

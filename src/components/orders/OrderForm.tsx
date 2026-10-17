@@ -445,14 +445,19 @@ export default function OrderForm({ mode, orderId }: Props) {
           setOrderStatuses(statuses.length > 0 ? statuses : ORDER_STATUSES_FALLBACK)
 
           if (mode === 'create') {
+            // Admin-chosen defaults (Settings → "افتراضي") win; otherwise
+            // the previous behaviour (built-in default / first active value).
+            const d = settingsData.options?.defaults || {}
+            const pick = (list: string[], def: unknown, prevVal: string, fallback: string) =>
+              typeof def === 'string' && list.includes(def) ? def : list.includes(prevVal) ? prevVal : fallback
             setForm((prev) => ({
               ...prev,
-              orderReceiver: receivers.includes(prev.orderReceiver) ? prev.orderReceiver : receivers[0] || ORDER_RECEIVERS_FALLBACK[0],
-              orderMethod: methods.includes(prev.orderMethod) ? prev.orderMethod : methods[0] || ORDER_METHODS_FALLBACK[1],
-              customerSource: sources.includes(prev.customerSource) ? prev.customerSource : sources[0] || CUSTOMER_SOURCES_FALLBACK[0],
-              orderType: types.includes(prev.orderType) ? prev.orderType : types[1] || ORDER_TYPES_FALLBACK[1],
-              paymentMethod: payments.includes(prev.paymentMethod) ? prev.paymentMethod : payments[0] || PAYMENT_METHODS_FALLBACK[1],
-              orderStatus: statuses.includes(prev.orderStatus) ? prev.orderStatus : statuses[0] || ORDER_STATUSES_FALLBACK[0],
+              orderReceiver: pick(receivers, d.orderReceiver, prev.orderReceiver, receivers[0] || ORDER_RECEIVERS_FALLBACK[0]),
+              orderMethod: pick(methods, d.orderMethod, prev.orderMethod, methods[0] || ORDER_METHODS_FALLBACK[1]),
+              customerSource: pick(sources, d.customerSource, prev.customerSource, sources[0] || CUSTOMER_SOURCES_FALLBACK[0]),
+              orderType: pick(types, d.orderType, prev.orderType, types[1] || ORDER_TYPES_FALLBACK[1]),
+              paymentMethod: pick(payments, d.paymentMethod, prev.paymentMethod, payments[0] || PAYMENT_METHODS_FALLBACK[1]),
+              orderStatus: pick(statuses, d.orderStatus, prev.orderStatus, statuses[0] || ORDER_STATUSES_FALLBACK[0]),
             }))
           }
         }
