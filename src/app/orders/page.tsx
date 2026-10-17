@@ -6,6 +6,7 @@ import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
 import { DeliveryProgressBar } from '@/components/orders/DeliveryProgressBar'
 import { cairoDateString, addDays } from '@/lib/cairoTime'
+import MultiSelectFilter from '@/components/MultiSelectFilter'
 
 export default function OrdersPage() {
   const router = useRouter()
@@ -24,8 +25,14 @@ export default function OrdersPage() {
   }>({ monthLabel: '', productCount: 0, targetedProducts: [], totalUnits: 0, perAgent: [], monthlyGoal: 0, achievementPct: 0 })
 
   const [searchTerm, setSearchTerm] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [orderTypeFilter, setOrderTypeFilter] = useState('all')
+  // Multi-select filters: empty array = no filtering ("all").
+  const [statusFilter, setStatusFilter] = useState<string[]>([])
+  const [orderTypeFilter, setOrderTypeFilter] = useState<string[]>([])
+  const [orderMethodFilter, setOrderMethodFilter] = useState<string[]>([])
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState<string[]>([])
+  const [areaFilter, setAreaFilter] = useState<string[]>([])
+  const [orderMethodOptions, setOrderMethodOptions] = useState<string[]>([])
+  const [paymentMethodOptions, setPaymentMethodOptions] = useState<string[]>([])
   const [scheduleFilter, setScheduleFilter] = useState<'all' | 'today' | 'scheduled'>('all')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -43,18 +50,21 @@ export default function OrdersPage() {
   // hardcoded <option> list that drifted from admin-added order types
   // (Settings → نوع الطلب), e.g. missing 'Branch' after it was added there.
   const [orderTypeOptions, setOrderTypeOptions] = useState<string[]>(['B2B', 'Online', 'Instashop', 'App'])
-  const [orderReceiverFilter, setOrderReceiverFilter] = useState('all')
+  const [orderReceiverFilter, setOrderReceiverFilter] = useState<string[]>([])
   const [orderReceiverOptions, setOrderReceiverOptions] = useState<string[]>([])
 
   const clearFilters = () => {
     setSearchTerm('')
-    setStatusFilter('all')
-    setOrderTypeFilter('all')
+    setStatusFilter([])
+    setOrderTypeFilter([])
+    setOrderMethodFilter([])
+    setPaymentMethodFilter([])
+    setAreaFilter([])
     setScheduleFilter('all')
     setDateFrom('')
     setDateTo('')
     setDeliveredOnly(false)
-    setOrderReceiverFilter('all')
+    setOrderReceiverFilter([])
   }
 
   const fetchOrders = async () => {
@@ -115,6 +125,10 @@ export default function OrdersPage() {
         if (types.length > 0) setOrderTypeOptions(types)
         const receivers = Array.isArray(d?.options?.orderReceivers) ? d.options.orderReceivers : []
         setOrderReceiverOptions(receivers)
+        const methods = Array.isArray(d?.options?.orderMethods) ? d.options.orderMethods : []
+        setOrderMethodOptions(methods)
+        const payments = Array.isArray(d?.options?.paymentMethods) ? d.options.paymentMethods : []
+        setPaymentMethodOptions(payments)
       })
       .catch(() => {/* keep fallback list */})
   }, [])
@@ -148,8 +162,11 @@ export default function OrdersPage() {
         String(order.customer?.phone || '').toLowerCase().includes(term) ||
         String(order.customer?.customerName || '').toLowerCase().includes(term)
 
-      const matchesStatus = statusFilter === 'all' || order.orderStatus === statusFilter
-      const matchesType = orderTypeFilter === 'all' || order.orderType === orderTypeFilter
+      const matchesStatus = statusFilter.length === 0 || statusFilter.includes(order.orderStatus)
+      const matchesType = orderTypeFilter.length === 0 || orderTypeFilter.includes(order.orderType)
+      const matchesMethod = orderMethodFilter.length === 0 || orderMethodFilter.includes(order.orderMethod)
+      const matchesPayment = paymentMethodFilter.length === 0 || paymentMethodFilter.includes(order.paymentMethod)
+      const matchesArea = areaFilter.length === 0 || areaFilter.includes(String(order.address?.area || '').trim())
       const matchesFrom = !dateFrom || orderDate >= dateFrom
       const matchesTo = !dateTo || orderDate <= dateTo
       const matchesSchedule =
@@ -160,11 +177,20 @@ export default function OrdersPage() {
           (!order.isScheduled && orderDate === today)
         ))
       const matchesDelivered = !deliveredOnly || order.delivery?.deliveryStatus === 'تم التوصيل'
-      const matchesReceiver = orderReceiverFilter === 'all' || order.orderReceiver === orderReceiverFilter
+      const matchesReceiver = orderReceiverFilter.length === 0 || orderReceiverFilter.includes(order.orderReceiver)
 
-      return matchesSearch && matchesStatus && matchesType && matchesFrom && matchesTo && matchesSchedule && matchesDelivered && matchesReceiver
+      return matchesSearch && matchesStatus && matchesType && matchesMethod && matchesPayment && matchesArea && matchesFrom && matchesTo && matchesSchedule && matchesDelivered && matchesReceiver
     })
-  }, [orders, searchTerm, statusFilter, orderTypeFilter, scheduleFilter, dateFrom, dateTo, deliveredOnly, orderReceiverFilter])
+  }, [orders, searchTerm, statusFilter, orderTypeFilter, orderMethodFilter, paymentMethodFilter, areaFilter, scheduleFilter, dateFrom, dateTo, deliveredOnly, orderReceiverFilter])
+
+  // Areas come from the already-loaded orders (no extra fetch).
+  const areaOptions = useMemo(
+    () =>
+      Array.from(new Set(orders.map((o) => String(o.address?.area || '').trim()).filter(Boolean))).sort((a, b) =>
+        a.localeCompare(b, 'ar'),
+      ),
+    [orders],
+  )
 
   const statusClasses: Record<string, string> = {
     ساري: 'bg-indigo-100 text-indigo-800',
@@ -276,35 +302,15 @@ export default function OrdersPage() {
           dir="rtl"
         />
 
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-          dir="rtl"
-        >
-          <option value="all">كل الحالات</option>
-          {(orderStatusOptions.includes(statusFilter) || statusFilter === 'all'
-            ? orderStatusOptions
-            : [statusFilter, ...orderStatusOptions]
-          ).map((status) => (
-            <option key={status} value={status}>{status}</option>
-          ))}
-        </select>
+        <MultiSelectFilter allLabel="كل الحالات" options={orderStatusOptions} selected={statusFilter} onChange={setStatusFilter} />
 
-        <select
-          value={orderTypeFilter}
-          onChange={(e) => setOrderTypeFilter(e.target.value)}
-          className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-          dir="rtl"
-        >
-          <option value="all">كل الأنواع</option>
-          {(orderTypeOptions.includes(orderTypeFilter) || orderTypeFilter === 'all'
-            ? orderTypeOptions
-            : [orderTypeFilter, ...orderTypeOptions]
-          ).map((type) => (
-            <option key={type} value={type}>{type}</option>
-          ))}
-        </select>
+        <MultiSelectFilter allLabel="كل الأنواع" options={orderTypeOptions} selected={orderTypeFilter} onChange={setOrderTypeFilter} />
+
+        <MultiSelectFilter allLabel="كل طرق الطلب" options={orderMethodOptions} selected={orderMethodFilter} onChange={setOrderMethodFilter} />
+
+        <MultiSelectFilter allLabel="كل طرق الدفع" options={paymentMethodOptions} selected={paymentMethodFilter} onChange={setPaymentMethodFilter} />
+
+        <MultiSelectFilter allLabel="كل المناطق" options={areaOptions} selected={areaFilter} onChange={setAreaFilter} />
 
         <select
           value={scheduleFilter}
@@ -317,20 +323,7 @@ export default function OrdersPage() {
           <option value="scheduled">طلبات مجدولة</option>
         </select>
 
-        <select
-          value={orderReceiverFilter}
-          onChange={(e) => setOrderReceiverFilter(e.target.value)}
-          className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-          dir="rtl"
-        >
-          <option value="all">كل متلقي الطلب</option>
-          {(orderReceiverOptions.includes(orderReceiverFilter) || orderReceiverFilter === 'all'
-            ? orderReceiverOptions
-            : [orderReceiverFilter, ...orderReceiverOptions]
-          ).map((receiver) => (
-            <option key={receiver} value={receiver}>{receiver}</option>
-          ))}
-        </select>
+        <MultiSelectFilter allLabel="كل متلقي الطلب" options={orderReceiverOptions} selected={orderReceiverFilter} onChange={setOrderReceiverFilter} />
 
         <label className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg cursor-pointer select-none" dir="rtl">
           <input
