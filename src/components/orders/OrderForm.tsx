@@ -716,6 +716,99 @@ export default function OrderForm({ mode, orderId }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, isLoading])
 
+  // Reorder: /orders/new?reorderFrom=<orderId> opens a NEW (unsaved) order
+  // pre-filled from the previous order so CS can review/edit then save.
+  // Copies customer, address, order type/method/receiver/source, payment,
+  // notes, line items (with their previous prices) and any B2B negotiated
+  // discount. Does NOT copy: date/time (today), status (default), schedule,
+  // attachments, voucher code, wallet usage, follow-up.
+  useEffect(() => {
+    if (mode !== 'create' || isLoading) return
+    const sourceId = (searchParams.get('reorderFrom') || '').trim()
+    if (!sourceId) return
+
+    let cancelled = false
+    const run = async () => {
+      try {
+        setIsLookupLoading(true)
+        const res = await fetch(`/api/orders/${encodeURIComponent(sourceId)}`, { cache: 'no-store' })
+        if (!res.ok) throw new Error('Failed to load source order')
+        const data = await res.json()
+        const src = data?.order
+        if (cancelled || !src) return
+
+        setForm((prev) => ({
+          ...prev,
+          orderType: src.orderType || prev.orderType,
+          orderReceiver: src.orderReceiver || prev.orderReceiver,
+          orderMethod: src.orderMethod || prev.orderMethod,
+          customerSource: src.customerSource || prev.customerSource,
+          phone: src.customer?.phone || '',
+          customerName: src.customer?.customerName || '',
+          customerType: 'قديم',
+          deliveryAddressId: src.address?.id || '__new',
+          addressLabel: src.address?.addressLabel || 'Home',
+          deliveryArea: src.address?.area || '',
+          deliverySubArea: src.address?.subArea || '',
+          streetAddress: src.address?.streetAddress || '',
+          googleMapsLink: src.address?.googleMapsLink || '',
+          paymentMethod: src.paymentMethod || prev.paymentMethod,
+          notes: src.notes || '',
+        }))
+
+        const mapped = (Array.isArray(src.items) ? src.items : []).map((item: any) => ({
+          ...emptyItem(),
+          productId: item.isCustomItem ? '' : item.productId || '',
+          productNameInput: item.productName || '',
+          quantity: item.quantity,
+          weightGrams: item.weightGrams,
+          unitPrice: item.unitPrice,
+          specialInstructions: item.specialInstructions || '',
+          basePriceSnapshot: item.basePriceSnapshot ?? null,
+          offerPriceSnapshot: item.offerPriceSnapshot ?? null,
+          isCustomItem: item.isCustomItem ?? false,
+          priceAdjustmentPct: item.priceAdjustmentPct ?? null,
+          priceAdjustmentReason: item.priceAdjustmentReason || '',
+        }))
+        setItems(mapped.length > 0 ? mapped : [emptyItem()])
+
+        if (src.orderType === 'B2B' && src.manualDiscountType && Number(src.manualDiscountAmount) > 0) {
+          setManualDiscountType(src.manualDiscountType)
+          setManualDiscountValueInput(String(src.manualDiscountValue ?? ''))
+          setManualDiscountReason(src.manualDiscountReason || '')
+        }
+
+        // Same customer lookup the manual "بحث" does: addresses list,
+        // status banner and current wallet balance.
+        const phone = String(src.customer?.phone || '').trim()
+        if (phone) {
+          const lookupRes = await fetch(`/api/customers?phone=${encodeURIComponent(phone)}`)
+          const lookup = lookupRes.ok ? await lookupRes.json() : null
+          if (!cancelled && lookup?.customer) {
+            setAddresses(Array.isArray(lookup.addresses) ? lookup.addresses : [])
+            const st = (lookup.customer.status as 'active' | 'warning' | 'suspended') || 'active'
+            setCustomerStatus({ status: st, reason: lookup.customer.statusReason || null })
+            setLoadedCustomerId(String(lookup.customer.id))
+            setCustomerWalletBalance(Number(lookup.customer.wallet) || 0)
+          }
+        }
+
+        setDirtyFlag(true)
+        toast.success(`🔄 تم نسخ بيانات الطلب ${src.appOrderNo || ''} — راجع ثم احفظ`)
+      } catch (err) {
+        console.warn('[OrderForm] reorder prefill failed', err)
+        toast.error('تعذر تحميل بيانات الطلب السابق')
+      } finally {
+        if (!cancelled) setIsLookupLoading(false)
+      }
+    }
+    run()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, isLoading])
+
   useEffect(() => {
     setDirtyFlag(false)
     return () => setDirtyFlag(false)
@@ -1193,16 +1286,11 @@ export default function OrderForm({ mode, orderId }: Props) {
   // `form.csAttachments` here IS authoritative and safe to send.
   const saveAttachmentsOnly = async () => {
     if (!orderId) return
-    // The attachments we will persist. When the existing set hasn't been
-    // hydrated yet, we MUST use the list returned by ensurePhotosLoaded —
-    // reading `form.csAttachments` here would be the stale (empty) array from
-    // this render closure and would wipe the saved attachments.
-    let csToSave = form.csAttachments || []
-    if (!photosLoaded) {
-      const loaded = await ensurePhotosLoaded()
-      if (loaded === null) return
-      csToSave = loaded
-    }
+    // Attachments are only sent when they were loaded in this session (the
+    // upload/remove flow always loads them first). If they were never
+    // opened, nothing changed — skip them so a payment/notes-only save
+    // doesn't download every attachment (egress) just to re-send it.
+    const csToSave = photosLoaded ? form.csAttachments || [] : null
     setIsSaving(true)
     try {
       const response = await fetch(`/api/orders/${orderId}`, {
@@ -1210,11 +1298,13 @@ export default function OrderForm({ mode, orderId }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           attachmentsOnly: true,
-          csAttachments: csToSave,
+          ...(csToSave ? { csAttachments: csToSave } : {}),
           // General comments (ملاحظات) stay editable on a locked/delivered
           // order so CS can always record follow-ups, complaints context,
-          // payment notes, etc. Everything else on the order stays frozen.
+          // payment notes, etc. Payment method is also correctable.
+          // Everything else on the order stays frozen.
           notes: form.notes || '',
+          paymentMethod: form.paymentMethod || '',
           createdBy: user?.name || user?.id || 'unknown',
           role: user?.role || '',
         }),
@@ -1446,7 +1536,7 @@ export default function OrderForm({ mode, orderId }: Props) {
         <div className="bg-amber-50 border border-amber-300 rounded-lg p-4 text-amber-900">
           <p className="font-bold">🔒 هذا الطلب مقفل للتعديل</p>
           <p className="text-sm mt-1">لأن الفرع بدأ التوصيل (الحالة: <span className="font-semibold">{deliveryData?.deliveryStatus}</span>). يمكن للأدمن فقط إجراء تعديلات على بقية الحقول.</p>
-          <p className="text-sm mt-1">📎 <span className="font-semibold">يمكنك إضافة أو تعديل المرفقات (الصور والإيصالات) والملاحظات العامة فقط</span> — ثم اضغط "حفظ".</p>
+          <p className="text-sm mt-1">📎 <span className="font-semibold">يمكنك إضافة أو تعديل المرفقات (الصور والإيصالات) والملاحظات العامة وطريقة الدفع فقط</span> — ثم اضغط "حفظ".</p>
         </div>
       )}
       <details open className="bg-white rounded-lg border border-gray-200 p-4">
@@ -2474,7 +2564,7 @@ export default function OrderForm({ mode, orderId }: Props) {
         <button
           type="submit"
           disabled={isSaving}
-          title={isLocked ? 'الطلب مقفل — سيتم حفظ المرفقات والملاحظات العامة فقط' : undefined}
+          title={isLocked ? 'الطلب مقفل — سيتم حفظ المرفقات والملاحظات العامة وطريقة الدفع فقط' : undefined}
           className={`px-5 py-2 rounded-lg disabled:cursor-not-allowed text-white font-semibold ${
             isLocked
               ? 'bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300'
@@ -2484,7 +2574,7 @@ export default function OrderForm({ mode, orderId }: Props) {
           {isSaving
             ? '... جاري الحفظ'
             : isLocked
-              ? '💾 حفظ المرفقات والملاحظات'
+              ? '💾 حفظ المرفقات والملاحظات وطريقة الدفع'
               : mode === 'create'
                 ? 'حفظ الطلب'
                 : 'تحديث الطلب'}

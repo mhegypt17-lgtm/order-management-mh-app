@@ -389,7 +389,11 @@ export async function PUT(
         // `attachmentsOnly: true` to opt into this narrow patch; nothing
         // else on the order is touched.
         if (body.attachmentsOnly === true) {
-          const incomingAttachments = Array.isArray(body.csAttachments) ? body.csAttachments : []
+          // csAttachments is only touched when the client actually sent the
+          // array (it skips it when attachments were never loaded/changed,
+          // e.g. a payment-method-only edit) so nothing is wiped by accident.
+          const attachmentsProvided = Array.isArray(body.csAttachments)
+          const incomingAttachments = attachmentsProvided ? body.csAttachments : []
           // New (base64) uploads move to Storage; already-saved attachments
           // being re-sent unchanged (already a URL) pass through untouched.
           const storedAttachments = await Promise.all(
@@ -400,8 +404,14 @@ export async function PUT(
           // `notes` in the patch when the client actually sent the key so we
           // never blank out existing notes by accident.
           const notesProvided = typeof body.notes === 'string'
-          const patch: Record<string, unknown> = { csAttachments: storedAttachments, updatedAt: now }
+          // Payment method (طريقة الدفع) is also correctable after delivery
+          // (e.g. customer paid cash instead of card). Nothing else is.
+          const incomingPayment = typeof body.paymentMethod === 'string' ? body.paymentMethod.trim().slice(0, 100) : ''
+          const paymentChanged = incomingPayment !== '' && incomingPayment !== String(existing.paymentMethod || '')
+          const patch: Record<string, unknown> = { updatedAt: now }
+          if (attachmentsProvided) patch.csAttachments = storedAttachments
           if (notesProvided) patch.notes = body.notes
+          if (paymentChanged) patch.paymentMethod = incomingPayment
           const attUpd = await supabase
             .from('orders')
             .update(patch)
@@ -412,10 +422,13 @@ export async function PUT(
               // csAttachments column missing — still try to persist the notes
               // so the general comment is not silently lost, then report the
               // attachment-column problem to the operator.
-              if (notesProvided) {
+              if (notesProvided || paymentChanged) {
+                const fallbackPatch: Record<string, unknown> = { updatedAt: now }
+                if (notesProvided) fallbackPatch.notes = body.notes
+                if (paymentChanged) fallbackPatch.paymentMethod = incomingPayment
                 await supabase
                   .from('orders')
-                  .update({ notes: body.notes, updatedAt: now })
+                  .update(fallbackPatch)
                   .eq('id', params.id)
               }
               return NextResponse.json(
@@ -435,20 +448,28 @@ export async function PUT(
           // Bust the shared photos/attachments cache tag so the very next
           // "عرض المرفقات" fetch (CS or branch) reads this fresh write —
           // see photosCache.ts for why this must happen on every save.
-          revalidateTag(orderPhotosTag(params.id))
+          if (attachmentsProvided) revalidateTag(orderPhotosTag(params.id))
           await appendEditHistory({
             entityType: 'order',
             entityId: params.id,
             orderId: params.id,
             action: 'updated',
             changedBy: body.createdBy || 'unknown',
-            summary: 'تم تحديث مرفقات/ملاحظات خدمة العملاء (الطلب مقفل بعد التوصيل)',
-            details: { attachmentCount: storedAttachments.length, notesUpdated: notesProvided, lockedStatus: (currentDelivery as any).deliveryStatus },
+            summary: paymentChanged
+              ? `تم تغيير طريقة الدفع من "${existing.paymentMethod || '-'}" إلى "${incomingPayment}" (الطلب مقفل بعد التوصيل)`
+              : 'تم تحديث مرفقات/ملاحظات خدمة العملاء (الطلب مقفل بعد التوصيل)',
+            details: {
+              attachmentCount: attachmentsProvided ? storedAttachments.length : null,
+              notesUpdated: notesProvided,
+              ...(paymentChanged ? { paymentMethodFrom: existing.paymentMethod || null, paymentMethodTo: incomingPayment } : {}),
+              lockedStatus: (currentDelivery as any).deliveryStatus,
+            },
           })
           const refreshed = {
             ...existing,
-            csAttachments: storedAttachments,
+            ...(attachmentsProvided ? { csAttachments: storedAttachments } : {}),
             ...(notesProvided ? { notes: body.notes } : {}),
+            ...(paymentChanged ? { paymentMethod: incomingPayment } : {}),
             updatedAt: now,
           } as OrderRecord
           return NextResponse.json(

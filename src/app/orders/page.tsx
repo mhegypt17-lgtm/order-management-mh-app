@@ -2,18 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import toast from 'react-hot-toast'
-import { useAuthStore } from '@/lib/auth'
 import { DeliveryProgressBar } from '@/components/orders/DeliveryProgressBar'
 import { cairoDateString, addDays } from '@/lib/cairoTime'
 import MultiSelectFilter from '@/components/MultiSelectFilter'
 
 export default function OrdersPage() {
   const router = useRouter()
-  const { user } = useAuthStore()
   const [isLoading, setIsLoading] = useState(true)
   const [orders, setOrders] = useState<any[]>([])
-  const [duplicatingId, setDuplicatingId] = useState<string | null>(null)
   const [targetedWidget, setTargetedWidget] = useState<{
     monthLabel: string
     productCount: number
@@ -493,33 +489,14 @@ export default function OrdersPage() {
                 })()}
                 <span className="text-xs text-gray-500">👤 {order.createdBy || '-'}</span>
                 <button
-                  disabled={duplicatingId === order.id}
-                  onClick={async (e) => {
+                  onClick={(e) => {
                     e.stopPropagation()
-                    if (duplicatingId) return
-                    setDuplicatingId(order.id)
-                    const t = toast.loading('جاري إعادة الطلب...')
-                    try {
-                      const res = await fetch(`/api/orders/${order.id}/duplicate`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ createdBy: user?.name || user?.id || 'unknown' }),
-                      })
-                      if (!res.ok) throw new Error('Failed')
-                      const data = await res.json()
-                      toast.dismiss(t)
-                      toast.success(`✅ تم إنشاء الطلب ${data.order?.appOrderNo || ''}`)
-                      await fetchOrders()
-                    } catch {
-                      toast.dismiss(t)
-                      toast.error('تعذرت إعادة الطلب')
-                    } finally {
-                      setDuplicatingId(null)
-                    }
+                    router.push(`/orders/new?reorderFrom=${encodeURIComponent(order.id)}&reset=${Date.now()}`)
                   }}
+                  title="فتح طلب جديد بنفس بيانات هذا الطلب للمراجعة ثم الحفظ"
                   className="px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50 text-emerald-700 text-xs font-semibold min-h-[36px]"
                 >
-                  {duplicatingId === order.id ? '⏳ ...' : '🔄 إعادة'}
+                  🔄 إعادة
                 </button>
               </div>
             </div>
@@ -632,44 +609,14 @@ export default function OrdersPage() {
                   <td className="px-4 py-3 text-sm text-gray-700">{order.createdBy || '-'}</td>
                   <td className="px-4 py-3 text-center">
                     <button
-                      disabled={duplicatingId === order.id}
-                      onClick={async (e) => {
+                      onClick={(e) => {
                         e.stopPropagation()
-                        if (duplicatingId) return
-                        setDuplicatingId(order.id)
-                        const t = toast.loading('جاري إعادة الطلب...')
-                        try {
-                          const res = await fetch(`/api/orders/${order.id}/duplicate`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ createdBy: user?.name || user?.id || 'unknown' }),
-                          })
-                          if (!res.ok) throw new Error('Failed')
-                          const data = await res.json()
-                          toast.dismiss(t)
-                          toast.success(`✅ تم إنشاء الطلب ${data.order?.appOrderNo || ''}`)
-                          const w = data.warnings || {}
-                          if (w.inactiveProductCount > 0) {
-                            toast(`⚠️ ${w.inactiveProductCount} منتج غير متاح حالياً`, { duration: 5000 })
-                          }
-                          if (w.priceChangedCount > 0) {
-                            toast(`💰 تم تحديث أسعار ${w.priceChangedCount} منتج`, { duration: 5000 })
-                          }
-                          if (w.skippedItemCount > 0) {
-                            toast(`ℹ️ تم تجاهل ${w.skippedItemCount} منتج غير موجود في الكتالوج`, { duration: 5000 })
-                          }
-                          await fetchOrders()
-                        } catch {
-                          toast.dismiss(t)
-                          toast.error('تعذرت إعادة الطلب')
-                        } finally {
-                          setDuplicatingId(null)
-                        }
+                        router.push(`/orders/new?reorderFrom=${encodeURIComponent(order.id)}&reset=${Date.now()}`)
                       }}
-                      title="إعادة الطلب بنقرة واحدة"
+                      title="فتح طلب جديد بنفس بيانات هذا الطلب للمراجعة ثم الحفظ"
                       className="px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50 text-emerald-700 text-xs font-semibold"
                     >
-                      {duplicatingId === order.id ? '⏳ ...' : '🔄 إعادة'}
+                      🔄 إعادة
                     </button>
                   </td>
                 </tr>
