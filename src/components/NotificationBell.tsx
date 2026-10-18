@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
+import type { CSSProperties } from 'react'
 import { useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
 import type { User } from '@/lib/auth'
@@ -124,6 +125,8 @@ export default function NotificationBell({ user }: NotificationBellProps) {
   const knownIdsRef = useRef<Set<string>>(new Set())
   const initialLoadRef = useRef(true)
   const dropdownRef = useRef<HTMLDivElement | null>(null)
+  const buttonRef = useRef<HTMLButtonElement | null>(null)
+  const [dropdownStyle, setDropdownStyle] = useState<CSSProperties>({})
   const audioCtxRef = useRef<AudioContext | null>(null)
   // Read lastSeen from a ref inside fetchNotifications so the callback
   // stays stable — was being re-created (and re-firing the effect)
@@ -314,6 +317,44 @@ export default function NotificationBell({ user }: NotificationBellProps) {
   const unreadItems = items.filter((n) => new Date(n.createdAt).getTime() > lastSeen)
   const unreadCount = unreadItems.length
 
+  const positionDropdown = useCallback(() => {
+    const button = buttonRef.current
+    if (!button) return
+
+    const margin = 12
+    const width = Math.min(384, Math.max(0, window.innerWidth - margin * 2))
+    const rect = button.getBoundingClientRect()
+    const left = Math.min(
+      Math.max(rect.right - width, margin),
+      window.innerWidth - width - margin,
+    )
+    const maxHeight = Math.min(480, Math.max(0, window.innerHeight - margin * 2))
+    const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - margin - 8)
+    const spaceAbove = Math.max(0, rect.top - margin - 8)
+    const openBelow = spaceBelow >= Math.min(320, maxHeight) || spaceBelow >= spaceAbove
+    const availableHeight = Math.min(maxHeight, openBelow ? spaceBelow : spaceAbove)
+    const top = openBelow ? rect.bottom + 8 : rect.top - availableHeight - 8
+
+    setDropdownStyle({
+      left,
+      top,
+      width,
+      maxHeight: availableHeight,
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+
+    positionDropdown()
+    window.addEventListener('resize', positionDropdown)
+    window.addEventListener('scroll', positionDropdown, true)
+    return () => {
+      window.removeEventListener('resize', positionDropdown)
+      window.removeEventListener('scroll', positionDropdown, true)
+    }
+  }, [open, positionDropdown])
+
   const markAllRead = () => {
     const now = Date.now()
     window.localStorage.setItem(lastSeenKey(user.id), String(now))
@@ -342,12 +383,14 @@ export default function NotificationBell({ user }: NotificationBellProps) {
   return (
     <div className="relative" ref={dropdownRef}>
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => {
           // First user gesture also unlocks AudioContext on most browsers
           if (audioCtxRef.current?.state === 'suspended') {
             audioCtxRef.current.resume().catch(() => {})
           }
+          if (!open) positionDropdown()
           setOpen((v) => !v)
         }}
         className="relative p-2 rounded-lg hover:bg-gray-100 transition"
@@ -364,10 +407,11 @@ export default function NotificationBell({ user }: NotificationBellProps) {
 
       {open && (
         <div
-          className="absolute left-0 rtl:left-auto rtl:right-0 mt-2 w-80 sm:w-96 bg-white border border-gray-200 rounded-xl shadow-lg z-50 overflow-hidden"
+          style={dropdownStyle}
+          className="fixed flex flex-col bg-white border border-gray-200 rounded-xl shadow-lg z-50 overflow-hidden"
           dir="rtl"
         >
-          <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+          <div className="flex shrink-0 items-center justify-between gap-2 px-4 py-2.5 border-b border-gray-100 bg-gray-50">
             <span className="text-sm font-bold text-gray-800">🔔 الإشعارات</span>
             <div className="flex items-center gap-3">
               <button
@@ -388,7 +432,7 @@ export default function NotificationBell({ user }: NotificationBellProps) {
             </div>
           </div>
 
-          <div className="max-h-96 overflow-y-auto">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             {items.length === 0 ? (
               <div className="p-6 text-center text-gray-400 text-sm">
                 لا توجد إشعارات
@@ -402,26 +446,26 @@ export default function NotificationBell({ user }: NotificationBellProps) {
                     <li key={n.id}>
                       <button
                         onClick={() => handleItemClick(n)}
-                        className={`w-full text-right px-4 py-3 hover:bg-gray-50 transition flex flex-col gap-0.5 ${
+                        className={`w-full min-w-0 text-right px-4 py-3 hover:bg-gray-50 transition flex flex-col gap-0.5 ${
                           isUrgent ? 'bg-red-50 border-r-4 border-r-red-500' : isUnread ? 'bg-blue-50/50' : ''
                         }`}
                       >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-[10px] text-gray-400">
+                        <div className="flex min-w-0 items-start justify-between gap-2">
+                          <span className="shrink-0 text-[10px] text-gray-400">
                             {formatRelative(n.createdAt)}
                           </span>
-                          <span className={`text-sm font-semibold flex items-center gap-1 ${isUrgent ? 'text-red-800' : 'text-gray-900'}`}>
+                          <span className={`min-w-0 break-words [overflow-wrap:anywhere] text-sm font-semibold flex items-start gap-1 ${isUrgent ? 'text-red-800' : 'text-gray-900'}`}>
                             {isUnread && (
                               <span className={`w-2 h-2 rounded-full inline-block ${isUrgent ? 'bg-red-600 animate-pulse' : 'bg-blue-500'}`} />
                             )}
                             {n.title}
                           </span>
                         </div>
-                        <p className="text-xs text-gray-600 line-clamp-2 leading-snug">
+                        <p className="min-w-0 break-words [overflow-wrap:anywhere] text-xs text-gray-600 line-clamp-2 leading-snug">
                           {n.body}
                         </p>
                         {n.actor && (
-                          <p className="text-[10px] text-gray-400">من: {n.actor}</p>
+                          <p className="min-w-0 break-words [overflow-wrap:anywhere] text-[10px] text-gray-400">من: {n.actor}</p>
                         )}
                       </button>
                     </li>
