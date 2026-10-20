@@ -6,6 +6,7 @@ import { persistAttachment } from '@/lib/attachmentStorage'
 import {
   OrderDeliveryRecord,
   OrderItemRecord,
+  OrderRecord,
   appendEditHistory,
   computeDeliveryFee,
   evaluateDiscountCode,
@@ -32,6 +33,7 @@ import {
   computeOrderTotals,
 } from '@/lib/omsData'
 import { DEFAULT_CATALOGUES } from '@/lib/catalogue'
+import { committedB2BPricePerKg } from '@/lib/b2bWeightPrice'
 
 async function readProducts() {
   try {
@@ -160,10 +162,8 @@ async function enrich(orderId: string, opts: { includePhotos: boolean }) {
     const pricingMode: 'unit' | 'weight' =
       product?.pricingMode === 'weight' ? 'weight' : 'unit'
 
-    // Frozen-price resolution. Snapshot (captured at order placement) always
-    // wins. If snapshot is missing (pre-migration row) we derive from the
-    // already-frozen unitPrice so the displayed price reflects what the
-    // customer actually committed to — NEVER today's product price.
+    // Snapshots supply reference base/offer labels. B2B calculations use
+    // the saved CS agreement; other order types retain snapshot pricing.
     const snapshotBase = (item as any).basePriceSnapshot != null
       ? Number((item as any).basePriceSnapshot)
       : null
@@ -183,7 +183,7 @@ async function enrich(orderId: string, opts: { includePhotos: boolean }) {
     const effectiveOffer = snapshotBase != null ? snapshotOffer : null
 
     const pricePerKg = pricingMode === 'weight'
-      ? Number(
+      ? committedB2BPricePerKg(order.orderType, item) ?? Number(
           (effectiveOffer != null && effectiveOffer > 0 && effectiveBase != null && effectiveOffer < effectiveBase)
             ? effectiveOffer
             : (effectiveBase ?? 0)
@@ -313,7 +313,8 @@ export async function GET(
     }
 
     return NextResponse.json({ order }, { status: 200 })
-  } catch {
+  } catch (error) {
+    console.error('[branch GET] failed to load order:', error)
     return NextResponse.json({ error: 'Failed to fetch branch order' }, { status: 500 })
   }
 }
@@ -396,6 +397,38 @@ export async function PUT(
       const products: any[] =
         productIdsForOrder.length > 0 ? await readProductsByIds(productIdsForOrder, PRODUCT_COLUMNS) : []
 
+      // Reuse this order lookup for pricing and the totals update below.
+      const { data: orderRow, error: orderError } = await supabase
+        .from('orders')
+        .select(ORDER_COLUMNS_LIST)
+        .eq('id', params.id)
+        .returns<OrderRecord[]>()
+        .maybeSingle()
+      if (orderError || !orderRow) {
+        console.error('[branch PUT] failed to read order for line edits:', orderError)
+        return NextResponse.json({ error: 'تعذر تحميل الطلب لحساب أسعار البنود' }, { status: 500 })
+      }
+      // Validate the whole B2B batch before writing any lines. A zero weight
+      // would erase the rate encoded in unitPrice / weightGrams.
+      const committedRates = new Map<string, number>()
+      if (orderRow.orderType === 'B2B') {
+        for (const edit of body.items) {
+          const item = orderItemRows.find((r) => r.id === edit.id)
+          if (!item || products.find((p) => p.id === item.productId)?.pricingMode !== 'weight') continue
+          if (!Number.isFinite(Number(edit.weightGrams)) || Number(edit.weightGrams) <= 0) {
+            return NextResponse.json({ error: 'وزن بند B2B يجب أن يكون أكبر من صفر للحفاظ على السعر المتفق عليه' }, { status: 400 })
+          }
+          try {
+            const rate = committedB2BPricePerKg(orderRow.orderType, item)
+            if (rate !== null) committedRates.set(item.id, rate)
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'تعذر تحديد سعر الكيلو المتفق عليه'
+            console.error('[branch PUT] invalid saved B2B price/weight:', item.id, message)
+            return NextResponse.json({ error: message }, { status: 409 })
+          }
+        }
+      }
+
       for (const edit of body.items) {
         const existingItem = orderItemRows.find((r) => r.id === edit.id)
         if (!existingItem) continue
@@ -404,7 +437,8 @@ export async function PUT(
         const pricingMode: 'unit' | 'weight' =
           product?.pricingMode === 'weight' ? 'weight' : 'unit'
 
-        // Weight recompute pricePerKg resolution — ANTI-DRIFT rules.
+        // B2B retains its saved agreement. For other order types, preserve
+        // the existing weight recompute pricePerKg resolution below.
         // A branch weight-adjust MUST use the price the customer committed
         // to, never today's product price. Fallback chain:
         //   1. snapshot offer (if a valid offer was locked at placement)
@@ -432,7 +466,10 @@ export async function PUT(
             ? (Number(existingItem.unitPrice) || 0) / (originalKg / 1000)
             : 0
 
-          if (validSnapshotOffer != null) {
+          const committedRate = committedRates.get(existingItem.id)
+          if (committedRate !== undefined) {
+            pricePerKg = committedRate
+          } else if (validSnapshotOffer != null) {
             pricePerKg = validSnapshotOffer
           } else if (snapshotBase != null) {
             pricePerKg = snapshotBase
@@ -524,12 +561,7 @@ export async function PUT(
           (sum, r) => sum + Number(r.lineTotal || 0),
           0
         )
-        // Scoped order + address lookup (was: two full-table scans).
-        const { data: orderRow } = (await supabase
-          .from('orders')
-          .select(ORDER_COLUMNS_LIST)
-          .eq('id', params.id)
-          .maybeSingle()) as { data: any }
+        // Scoped address lookup; orderRow was already read for line pricing.
         let addr: any = null
         if (orderRow?.deliveryAddressId) {
           const { data: addrData } = await supabase

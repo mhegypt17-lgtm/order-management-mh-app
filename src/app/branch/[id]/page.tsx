@@ -29,6 +29,7 @@ type OrderItemDetail = {
 
 type OrderDetail = {
   id: string
+  orderType: string
   appOrderNo: string
   orderDate: string
   orderTime: string
@@ -188,6 +189,7 @@ export default function BranchOrderDetailPage() {
           return {
             ...prev,
             notes: fresh.notes,
+            orderType: fresh.orderType,
             customer: fresh.customer,
             address: fresh.address,
             subtotal: fresh.subtotal,
@@ -440,6 +442,13 @@ export default function BranchOrderDetailPage() {
         weightGrams: draft ? draft.weightGrams : it.weightGrams,
       }
     })
+    if (order.orderType === 'B2B' && payloadItems.some((edit) =>
+      order.items.find((item) => item.id === edit.id)?.pricingMode === 'weight' &&
+      (!Number.isFinite(edit.weightGrams) || edit.weightGrams <= 0),
+    )) {
+      toast.error('وزن بند B2B يجب أن يكون أكبر من صفر للحفاظ على السعر المتفق عليه')
+      return
+    }
     setIsSavingItems(true)
     try {
       const res = await fetch(`/api/branch/orders/${order.id}`, {

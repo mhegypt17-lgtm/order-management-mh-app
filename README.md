@@ -31,6 +31,17 @@ are not resubmitted, and the server assigns the update timestamp.
 Run the isolated recovery/save regression tests with
 `node --test scripts/product-recovery.test.cjs` (mocked requests; no database writes).
 
+### B2B branch weight changes
+
+Branch weight previews and saves retain the CS-agreed B2B per-kg rate, derived
+from the saved line price and its current weight, rather than choosing the promo
+snapshot. Repeated weigh-ins use the current weight, not the original CS weight.
+Other order types retain their existing snapshot pricing. B2B weight lines must
+have a positive weight; invalid saved price/weight requires CS review rather
+than silently substituting a catalogue price. No new columns or price queries
+are required. Existing incorrectly repriced orders are not automatically repaired.
+Regression tests: `node --test scripts/b2b-weight-price.test.cjs`.
+
 ---
 
 ## 📋 Phase Roadmap
