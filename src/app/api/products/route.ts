@@ -250,28 +250,34 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Product not found' }, { status: 404 })
     }
 
-    // `prices` is a virtual, GET-only field (per-catalogue rows folded from
-    // `product_prices` — see foldPricesEmbed) that the client re-embeds onto
-    // every product it fetches. Several UI call sites (targeted/active-status
-    // toggles, the inline price cell, the edit modal while the Online tab is
-    // active) round-trip that whole product object back into a PUT body, so
-    // it can carry `prices` right along with it. Passing it to `.update()`
-    // makes Supabase reject the ENTIRE write with a "Could not find the
-    // 'prices' column of 'products' in the schema cache" error — surfaced to
-    // the admin as a generic, unhelpful "Failed to update product" toast.
-    // Always strip it here so no caller can accidentally break a save this way.
-    const { prices: _prices, ...bodyFields } = body
-
-    const updated = {
-      ...existing,
-      ...bodyFields,
-      productCategory: bodyFields.productCategory || existing.productCategory || 'غير محدد',
-      packagingType: bodyFields.packagingType || existing.packagingType || 'غير محدد',
+    // Patch only supplied editable fields; never round-trip a fetched row,
+    // virtual catalogue prices, or a browser-provided timestamp.
+    const editableFields = [
+      'productName', 'productDescription', 'bestRecipes', 'productCategory',
+      'fatRatioComments', 'isStandardPackage', 'packagingType', 'weightGrams',
+      'basePrice', 'offerPrice', 'hasDailyPriceChange', 'isByReservation',
+      'productCondition', 'isActive', 'isTargeted', 'pricingMode',
+      'stockStatus', 'stockQuantity', 'onlineEnabled',
+    ]
+    const patch: Record<string, unknown> = {}
+    for (const field of editableFields) {
+      if (Object.prototype.hasOwnProperty.call(body, field)) patch[field] = body[field]
     }
+    if (Object.keys(patch).length === 0) {
+      return NextResponse.json({ error: 'No product changes provided' }, { status: 400 })
+    }
+    for (const flag of ['onlineEnabled', 'isActive', 'isTargeted']) {
+      if (flag in patch && typeof patch[flag] !== 'boolean') {
+        return NextResponse.json({ error: `Invalid ${flag}` }, { status: 400 })
+      }
+    }
+    if ('productCategory' in patch) patch.productCategory = patch.productCategory || existing.productCategory || 'غير محدد'
+    if ('packagingType' in patch) patch.packagingType = patch.packagingType || existing.packagingType || 'غير محدد'
+    patch.updatedAt = new Date().toISOString()
 
     const { data: result, error } = await supabase
       .from('products')
-      .update(updated)
+      .update(patch)
       .eq('id', body.id)
       .select()
       .single()
@@ -284,11 +290,13 @@ export async function PUT(request: NextRequest) {
       )
     }
 
-    const saved = result || updated
+    const saved = result || { ...existing, ...patch }
     // Keep the 'online' catalogue row in sync with the legacy columns
     // whenever they change here (admin edit form, inline price save, CSV
     // import-apply for the default catalogue, stock toggles, etc.).
-    await mirrorOnlineCataloguePrice(saved)
+    if (['basePrice', 'offerPrice', 'stockStatus', 'stockQuantity'].some((field) => field in patch)) {
+      await mirrorOnlineCataloguePrice(saved)
+    }
 
     return NextResponse.json(saved, { status: 200 })
   } catch (error) {

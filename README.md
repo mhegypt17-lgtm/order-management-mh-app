@@ -18,6 +18,19 @@ Built with **Next.js 14+**, **Tailwind CSS**, and **Google Sheets** for data sto
 - 👤 **Customer Service (CS)** - Create & manage orders
 - 👤 **Branch/Factory** - View orders & update delivery status
 
+### Recovering excluded catalogue products
+
+In **Admin > Products**, select the catalogue and enable **عرض المنتجات خارج الكتالوج**.
+Search for the product, then select **إعادة لأونلاين** (Online/App) or **إضافة للكتالوج**
+to restore membership. This view uses already-loaded products; it adds no database reads.
+Online restoration preserves existing prices and active status. Adding to another
+catalogue uses the existing Online prices as a starting point. Removing membership
+requires confirmation. Excluded products must be added before editing catalogue prices.
+Product edits send only changed fields; unrelated visibility, stock and active flags
+are not resubmitted, and the server assigns the update timestamp.
+Run the isolated recovery/save regression tests with
+`node --test scripts/product-recovery.test.cjs` (mocked requests; no database writes).
+
 ---
 
 ## 📋 Phase Roadmap

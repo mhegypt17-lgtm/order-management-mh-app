@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import toast from 'react-hot-toast'
 import { useProductCategories } from '@/lib/useProductCategories'
@@ -45,6 +45,13 @@ export interface Product {
 
 type StockStatus = 'available' | 'low' | 'out'
 
+const EDITABLE_PRODUCT_FIELDS = [
+  'productName', 'productDescription', 'bestRecipes', 'productCategory',
+  'fatRatioComments', 'isStandardPackage', 'packagingType', 'weightGrams',
+  'basePrice', 'offerPrice', 'hasDailyPriceChange', 'isByReservation',
+  'productCondition', 'isActive', 'isTargeted', 'pricingMode',
+] as const satisfies readonly (keyof Product)[]
+
 export default function ProductCatalogPage() {
   const { activeCategories, compareCategories } = useProductCategories()
   const { activeCatalogues } = useCatalogues()
@@ -57,6 +64,8 @@ export default function ProductCatalogPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [showTargetedOnly, setShowTargetedOnly] = useState(false)
   const [showWeightOnly, setShowWeightOnly] = useState(false)
+  const [showExcluded, setShowExcluded] = useState(false)
+  const editedFields = useRef(new Set<keyof Product>())
   const [selectedCategory, setSelectedCategory] = useState<string>('')
   const [stockFilter, setStockFilter] = useState<'all' | StockStatus>('all')
   const [sortBy, setSortBy] = useState<'default' | 'category' | 'name' | 'priceAsc' | 'priceDesc'>('default')
@@ -111,6 +120,11 @@ export default function ProductCatalogPage() {
   }
 
   const handleOpenModal = (product?: Product) => {
+    if (product && !isCatalogueMember(product, activeCatalogue)) {
+      toast.error('أضف المنتج إلى الكتالوج أولاً ثم عدّل بياناته')
+      return
+    }
+    editedFields.current.clear()
     if (product) {
       setFormData({
         productName: '',
@@ -167,6 +181,8 @@ export default function ProductCatalogPage() {
     const { name, value, type } = e.target
     const checked = (e.target as HTMLInputElement).checked
 
+    const field = EDITABLE_PRODUCT_FIELDS.find((key) => key === name)
+    if (field) editedFields.current.add(field)
     setFormData((prev) => ({
       ...prev,
       [name]:
@@ -199,45 +215,48 @@ export default function ProductCatalogPage() {
     }
 
     try {
+      const changes = Object.fromEntries(
+        EDITABLE_PRODUCT_FIELDS
+          .filter((key) => !editingId || editedFields.current.has(key))
+          .map((key) => [key, formData[key]]),
+      )
+      if (editingId && Object.keys(changes).length === 0) {
+        toast('لا توجد تعديلات للحفظ')
+        return
+      }
       if (editingId && activeCatalogue !== ONLINE_CATALOGUE_KEY) {
-        // Editing an EXISTING product from a non-Online tab: the form's
-        // price/offer fields are showing THIS catalogue's price (via the
-        // displayProducts overlay), not the legacy Online one. Splitting the
-        // save in two here is what keeps LOBs actually independent — without
-        // this, saving from the B2B tab would silently overwrite the Online
-        // price/stock columns.
-        // Shared identity fields (name/category/packaging/etc.) go to
-        // /api/products. Catalogue-scoped fields (price/offer) — and
-        // stock/prices which aren't even edited by this form but would
-        // otherwise get dragged along from the overlay — are stripped out
-        // and sent to /api/products/prices instead.
-        const { basePrice, offerPrice, stockStatus, stockQuantity, prices, id: _omit, ...identityFields } = formData
+        // Split only edited fields: shared details vs this catalogue's prices.
+        const { basePrice, offerPrice, ...identityFields } = changes
 
-        const identityRes = await fetch('/api/products', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...identityFields, id: editingId }),
-        })
-        if (!identityRes.ok) {
-          const data = await identityRes.json().catch(() => null)
-          throw new Error(data?.error || 'Failed to save')
+        if (Object.keys(identityFields).length > 0) {
+          const identityRes = await fetch('/api/products', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...identityFields, id: editingId }),
+          })
+          if (!identityRes.ok) {
+            const data = await identityRes.json().catch(() => null)
+            throw new Error(data?.error || 'Failed to save')
+          }
         }
 
-        const priceRes = await fetch('/api/products/prices', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            productId: editingId,
-            catalogueKey: activeCatalogue,
-            basePrice,
-            offerPrice,
-            role: 'admin',
-            actor: user?.name || 'admin',
-          }),
-        })
-        if (!priceRes.ok) {
-          const data = await priceRes.json().catch(() => null)
-          throw new Error(data?.error || 'Failed to save price')
+        if (basePrice !== undefined || offerPrice !== undefined) {
+          const priceRes = await fetch('/api/products/prices', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              productId: editingId,
+              catalogueKey: activeCatalogue,
+              basePrice,
+              offerPrice,
+              role: 'admin',
+              actor: user?.name || 'admin',
+            }),
+          })
+          if (!priceRes.ok) {
+            const data = await priceRes.json().catch(() => null)
+            throw new Error(data?.error || 'Failed to save price')
+          }
         }
       } else {
         const method = editingId ? 'PUT' : 'POST'
@@ -245,7 +264,7 @@ export default function ProductCatalogPage() {
           method,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            ...formData,
+            ...changes,
             id: editingId,
             // New product created while a non-Online tab is active is scoped to
             // that catalogue only — never leaks into Online/App by accident.
@@ -321,7 +340,7 @@ export default function ProductCatalogPage() {
       const res = await fetch('/api/products', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedProduct),
+        body: JSON.stringify({ id: product.id, isActive: updatedProduct.isActive }),
       })
 
       if (!res.ok) throw new Error('Failed to update')
@@ -340,7 +359,7 @@ export default function ProductCatalogPage() {
       const res = await fetch('/api/products', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedProduct),
+        body: JSON.stringify({ id: product.id, isTargeted: updatedProduct.isTargeted }),
       })
       if (!res.ok) throw new Error('Failed to update')
       toast.success(
@@ -378,7 +397,7 @@ export default function ProductCatalogPage() {
         const res = await fetch('/api/products', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(updated),
+          body: JSON.stringify({ id: product.id, ...patch }),
         })
         if (!res.ok) throw new Error('Failed to update')
         toast.success('💰 تم تحديث السعر')
@@ -445,6 +464,10 @@ export default function ProductCatalogPage() {
    */
   const handleToggleMembership = async (product: Product) => {
     const original = products.find((p) => p.id === product.id) || product
+    if (isCatalogueMember(original, activeCatalogue)) {
+      const label = activeCatalogues.find((c) => c.key === activeCatalogue)?.label || activeCatalogue
+      if (!confirm(`إزالة "${original.productName}" من كتالوج "${label}"؟ سيختفي من طلبات هذا الكتالوج فقط. يمكنك إعادته باستخدام "عرض المنتجات خارج الكتالوج".`)) return
+    }
 
     if (activeCatalogue === ONLINE_CATALOGUE_KEY) {
       const nextEnabled = original.onlineEnabled === false
@@ -455,7 +478,7 @@ export default function ProductCatalogPage() {
         const res = await fetch('/api/products', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...original, onlineEnabled: nextEnabled }),
+          body: JSON.stringify({ id: original.id, onlineEnabled: nextEnabled }),
         })
         if (!res.ok) throw new Error('Failed to update')
         toast.success(nextEnabled ? '✅ تمت الإضافة لأونلاين / تطبيق' : '🚫 تم الإخفاء من أونلاين / تطبيق')
@@ -539,16 +562,11 @@ export default function ProductCatalogPage() {
     }
   }
 
-  // Products actually IN the active catalogue, re-priced/re-stocked for it.
-  // Filtering by membership first is what makes each LOB tab show its own
-  // segment instead of the full 199-product list under every tab — every
-  // count/filter/stat below reads from this, so switching tabs re-derives
-  // the whole view with zero extra network requests (the embedded `prices`
-  // map already has everything).
+  // Recovery mode includes excluded products from the already-loaded list.
   const displayProducts = useMemo<Product[]>(
     () =>
       products
-        .filter((p) => isCatalogueMember(p, activeCatalogue))
+        .filter((p) => showExcluded || isCatalogueMember(p, activeCatalogue))
         .map((p) => ({
           ...p,
           basePrice: catalogueBasePrice(p, activeCatalogue) ?? 0,
@@ -556,7 +574,7 @@ export default function ProductCatalogPage() {
           stockStatus: catalogueStockStatus(p, activeCatalogue),
           stockQuantity: catalogueStockQuantity(p, activeCatalogue),
         })),
-    [products, activeCatalogue],
+    [products, activeCatalogue, showExcluded],
   )
 
   const filteredProducts = useMemo(() => {
@@ -685,6 +703,20 @@ export default function ProductCatalogPage() {
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-blue-300 bg-blue-50 text-blue-800 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showExcluded}
+              onChange={(e) => {
+                setShowExcluded(e.target.checked)
+                setShowTargetedOnly(false)
+                setShowWeightOnly(false)
+                setSelectedCategory('')
+                setStockFilter('all')
+              }}
+            />
+            عرض المنتجات خارج الكتالوج
+          </label>
           <button
             type="button"
             onClick={() => setShowTargetedOnly((v) => !v)}
@@ -819,11 +851,9 @@ export default function ProductCatalogPage() {
                 <th className="px-6 py-3 text-center text-sm font-semibold text-gray-900">
                   🎯 مستهدف
                 </th>
-                {activeCatalogues.length > 1 && (
-                  <th className="px-6 py-3 text-center text-sm font-semibold text-gray-900">
-                    الكتالوج الحالي
-                  </th>
-                )}
+                <th className="px-6 py-3 text-center text-sm font-semibold text-gray-900">
+                  الكتالوج الحالي
+                </th>
                 <th className="px-6 py-3 text-center text-sm font-semibold text-gray-900">
                   الإجراءات
                 </th>
@@ -839,6 +869,9 @@ export default function ProductCatalogPage() {
                 >
                   <td className="px-6 py-4 text-sm font-medium text-gray-900">
                     {product.productName}
+                    {!isCatalogueMember(product, activeCatalogue) && (
+                      <span className="block text-xs text-amber-700 mt-1">خارج الكتالوج — أضفه أولاً للتعديل</span>
+                    )}
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-700 font-medium">
                     {product.productCategory ? (
@@ -860,13 +893,13 @@ export default function ProductCatalogPage() {
                     className="px-6 py-4 text-sm text-gray-900 font-semibold"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <InlinePriceCell
+                    {isCatalogueMember(product, activeCatalogue) ? <InlinePriceCell
                       value={product.basePrice}
                       allowNull={false}
                       onSave={(v) =>
                         saveProductField(product, { basePrice: v ?? 0 })
                       }
-                    />
+                    /> : <span>—</span>}
                     {product.pricingMode === 'weight' && (
                       <span className="mr-1 inline-flex items-center rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold px-1.5 py-0.5">بالكيلو</span>
                     )}
@@ -875,11 +908,11 @@ export default function ProductCatalogPage() {
                     className="px-6 py-4 text-sm text-green-600 font-semibold"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <InlinePriceCell
+                    {isCatalogueMember(product, activeCatalogue) ? <InlinePriceCell
                       value={product.offerPrice}
                       allowNull
                       onSave={(v) => saveProductField(product, { offerPrice: v })}
-                    />
+                    /> : <span>—</span>}
                     {product.offerPrice && product.offerPrice < product.basePrice && (
                       <div className="text-xs text-gray-500 mt-1">
                         -{(((product.basePrice - product.offerPrice) / product.basePrice) * 100).toFixed(0)}%
@@ -946,7 +979,6 @@ export default function ProductCatalogPage() {
                       {product.isTargeted ? '🎯 مستهدف' : 'غير مستهدف'}
                     </button>
                   </td>
-                  {activeCatalogues.length > 1 && (
                     <td className="px-6 py-4 text-center" onClick={(e) => e.stopPropagation()}>
                       {(() => {
                         const isMember =
@@ -964,14 +996,14 @@ export default function ProductCatalogPage() {
                             }`}
                             title={isMember ? 'اضغط لإزالة المنتج من هذا الكتالوج' : 'اضغط لإضافة المنتج لهذا الكتالوج'}
                           >
-                            {isMember ? '✅ ضمن الكتالوج' : '➕ إضافة'}
+                            {isMember ? '✅ ضمن الكتالوج' : activeCatalogue === ONLINE_CATALOGUE_KEY ? '➕ إعادة لأونلاين' : '➕ إضافة للكتالوج'}
                           </button>
                         )
                       })()}
                     </td>
-                  )}
                   <td className="px-6 py-4 text-sm flex items-center justify-center space-x-2 rtl:space-x-reverse">
                     <button
+                      disabled={!isCatalogueMember(product, activeCatalogue)}
                       onClick={(e) => {
                         e.stopPropagation()
                         handleOpenModal(product)
@@ -981,6 +1013,7 @@ export default function ProductCatalogPage() {
                       ✏️ تعديل
                     </button>
                     <button
+                      disabled={!isCatalogueMember(product, activeCatalogue)}
                       onClick={(e) => {
                         e.stopPropagation()
                         handleDeleteProduct(product.id || '')
@@ -1072,7 +1105,10 @@ export default function ProductCatalogPage() {
                       name="pricingMode"
                       value="unit"
                       checked={(formData.pricingMode || 'unit') === 'unit'}
-                      onChange={() => setFormData((prev) => ({ ...prev, pricingMode: 'unit' }))}
+                      onChange={() => {
+                        editedFields.current.add('pricingMode')
+                        setFormData((prev) => ({ ...prev, pricingMode: 'unit' }))
+                      }}
                     />
                     <span>بالقطعة (سعر ثابت)</span>
                   </label>
@@ -1082,7 +1118,10 @@ export default function ProductCatalogPage() {
                       name="pricingMode"
                       value="weight"
                       checked={formData.pricingMode === 'weight'}
-                      onChange={() => setFormData((prev) => ({ ...prev, pricingMode: 'weight' }))}
+                      onChange={() => {
+                        editedFields.current.add('pricingMode')
+                        setFormData((prev) => ({ ...prev, pricingMode: 'weight' }))
+                      }}
                     />
                     <span>بالوزن (السعر للكيلو)</span>
                   </label>
@@ -1123,6 +1162,7 @@ export default function ProductCatalogPage() {
                   name="offerPrice"
                   value={formData.offerPrice || ''}
                   onChange={(e) => {
+                    editedFields.current.add('offerPrice')
                     const value = e.target.value === '' ? null : parseFloat(e.target.value)
                     setFormData((prev) => ({ ...prev, offerPrice: value }))
                   }}
