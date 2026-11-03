@@ -21,6 +21,7 @@ type OrderRecord = {
   orderMethod: 'FB' | 'Call' | 'App' | 'WhatsApp' | 'B2B' | 'W.S'
   orderType?: string
   orderReceiver?: string
+  paymentMethod?: string
   customerType: 'جديد' | 'قديم' | 'عائد' | 'استكمال' | 'استرجاع' | 'استبدال' | 'تسويق' | 'تعويض' | 'فحص' | 'تحصيل'
   orderTotal: number
   items: OrderItem[]
@@ -239,6 +240,28 @@ export default function ReportsPage() {
     const totalDelivered = rows.reduce((s, r) => s + r.delivered, 0)
     return { rows, totalRevenue, totalCount, totalDelivered }
   }, [rangeOrders, role])
+
+  // Payment method mix. Cancelled orders are excluded (nothing was collected);
+  // revenue (admin only) counts delivered orders, same rule as the revenue table.
+  const paymentStats = useMemo(() => {
+    const map = new Map<string, { count: number; revenue: number }>()
+    for (const o of rangeOrders) {
+      if (o.orderStatus === 'لاغي') continue
+      const key = String(o.paymentMethod || '').trim() || 'غير محدد'
+      const entry = map.get(key) || { count: 0, revenue: 0 }
+      entry.count += 1
+      if (o.orderStatus === 'تم') entry.revenue += Number(o.orderTotal || 0)
+      map.set(key, entry)
+    }
+    const rows = Array.from(map.entries())
+      .map(([name, v]) => ({ name, ...v }))
+      .sort((a, b) => b.count - a.count)
+    return {
+      rows,
+      total: rows.reduce((s, r) => s + r.count, 0),
+      totalRevenue: rows.reduce((s, r) => s + r.revenue, 0),
+    }
+  }, [rangeOrders])
 
   // Orders per CS agent (orderReceiver). الفرع (branch / Instashop) is kept
   // out of the agent list and shown separately, same separation as the
@@ -616,6 +639,63 @@ export default function ReportsPage() {
                     <td className="px-3 py-2 text-center text-gray-900">{agentOrders.total}</td>
                     <td className="px-3 py-2 text-center text-emerald-700">{agentOrders.totalDelivered}</td>
                     <td className="px-3 py-2 text-center text-gray-700">100%</td>
+                  </tr>
+                </tfoot>
+              </table>
+            )}
+          </section>
+
+          <section className="bg-white rounded-lg border border-gray-200 p-4 overflow-x-auto">
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <h2 className="font-bold text-gray-900">💳 طرق الدفع</h2>
+              <span className="text-xs text-gray-500">النسبة من الطلبات غير الملغاة في النطاق المحدد</span>
+            </div>
+            {paymentStats.rows.length === 0 ? (
+              <div className="p-6 text-center text-gray-500">لا توجد بيانات في هذا النطاق</div>
+            ) : (
+              <table className="w-full min-w-[420px] text-sm">
+                <thead className="bg-gray-100 border-b border-gray-200">
+                  <tr>
+                    <th className="px-3 py-2 text-right">طريقة الدفع</th>
+                    <th className="px-3 py-2 text-center">عدد الطلبات</th>
+                    <th className="px-3 py-2 text-center">النسبة</th>
+                    {role === 'admin' && <th className="px-3 py-2 text-right">الإيراد المسلَّم</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {paymentStats.rows.map((row) => {
+                    const share = paymentStats.total > 0 ? (row.count / paymentStats.total) * 100 : 0
+                    return (
+                      <tr key={row.name} className="border-b border-gray-100">
+                        <td className="px-3 py-2 font-semibold text-gray-900">{row.name}</td>
+                        <td className="px-3 py-2 text-center text-gray-900">{row.count}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-2 justify-center">
+                            <div className="h-2 w-24 bg-gray-100 rounded-full overflow-hidden">
+                              <div className="h-full bg-sky-500" style={{ width: `${share}%` }} />
+                            </div>
+                            <span className="text-gray-700 w-12 text-left">{share.toFixed(1)}%</span>
+                          </div>
+                        </td>
+                        {role === 'admin' && (
+                          <td className="px-3 py-2 text-right font-bold text-emerald-800">
+                            {row.revenue.toLocaleString()} ج.م
+                          </td>
+                        )}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+                <tfoot className="bg-gray-50 border-t-2 border-gray-200 font-bold">
+                  <tr>
+                    <td className="px-3 py-2 text-gray-900">الإجمالي</td>
+                    <td className="px-3 py-2 text-center text-gray-900">{paymentStats.total}</td>
+                    <td className="px-3 py-2 text-center text-gray-700">100%</td>
+                    {role === 'admin' && (
+                      <td className="px-3 py-2 text-right text-emerald-800">
+                        {paymentStats.totalRevenue.toLocaleString()} ج.م
+                      </td>
+                    )}
                   </tr>
                 </tfoot>
               </table>
