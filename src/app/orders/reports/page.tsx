@@ -20,6 +20,7 @@ type OrderRecord = {
   orderStatus: 'تم' | 'مؤجل' | 'لاغي' | 'حجز'
   orderMethod: 'FB' | 'Call' | 'App' | 'WhatsApp' | 'B2B' | 'W.S'
   orderType?: string
+  orderReceiver?: string
   customerType: 'جديد' | 'قديم' | 'عائد' | 'استكمال' | 'استرجاع' | 'استبدال' | 'تسويق' | 'تعويض' | 'فحص' | 'تحصيل'
   orderTotal: number
   items: OrderItem[]
@@ -232,9 +233,39 @@ export default function ReportsPage() {
     }
     const rows = Array.from(map.entries())
       .map(([name, v]) => ({ name, ...v }))
-      .sort((a, b) => b.revenue - a.revenue)
+      .sort((a, b) => (role === 'admin' ? b.revenue - a.revenue : b.count - a.count))
     const totalRevenue = rows.reduce((s, r) => s + r.revenue, 0)
-    return { rows, totalRevenue }
+    const totalCount = rows.reduce((s, r) => s + r.count, 0)
+    const totalDelivered = rows.reduce((s, r) => s + r.delivered, 0)
+    return { rows, totalRevenue, totalCount, totalDelivered }
+  }, [rangeOrders, role])
+
+  // Orders per CS agent (orderReceiver). الفرع (branch / Instashop) is kept
+  // out of the agent list and shown separately, same separation as the
+  // targeted-products team total.
+  const agentOrders = useMemo(() => {
+    const map = new Map<string, { count: number; delivered: number }>()
+    let branchCount = 0
+    for (const o of rangeOrders) {
+      const name = String(o.orderReceiver || '').trim() || 'غير محدد'
+      if (name === 'الفرع') {
+        branchCount += 1
+        continue
+      }
+      const entry = map.get(name) || { count: 0, delivered: 0 }
+      entry.count += 1
+      if (o.orderStatus === 'تم') entry.delivered += 1
+      map.set(name, entry)
+    }
+    const rows = Array.from(map.entries())
+      .map(([name, v]) => ({ name, ...v }))
+      .sort((a, b) => b.count - a.count)
+    return {
+      rows,
+      total: rows.reduce((s, r) => s + r.count, 0),
+      totalDelivered: rows.reduce((s, r) => s + r.delivered, 0),
+      branchCount,
+    }
   }, [rangeOrders])
 
   const deliveryDurationStats = useMemo(() => {
@@ -432,6 +463,167 @@ export default function ReportsPage() {
         )}
       </section>
 
+      {/* Date range + order counts (right under targeted products) */}
+      <section className="bg-white rounded-lg border border-gray-200 p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1 text-right">من تاريخ</label>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg"
+              dir="ltr"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1 text-right">إلى تاريخ</label>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg"
+              dir="ltr"
+            />
+          </div>
+          <button
+            onClick={resetToMonth}
+            className="px-4 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 font-semibold"
+          >
+            هذا الشهر
+          </button>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1 text-right">قناة البيع (LOB)</label>
+            <select
+              value={catalogueFilter}
+              onChange={(e) => setCatalogueFilter(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg"
+            >
+              <option value="all">كل القنوات</option>
+              <option value="exclude_instashop">كل القنوات عدا إنستاشوب (Online/App/B2B)</option>
+              {activeCatalogues.map((c) => (
+                <option key={c.key} value={c.key}>{c.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="text-sm text-gray-600">عدد الطلبات في النطاق: {rangeOrders.length}</div>
+        </div>
+      </section>
+
+      {!isLoading && (
+        <>
+          <section className="bg-white rounded-lg border border-gray-200 p-4 overflow-x-auto">
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <h2 className="font-bold text-gray-900">
+                {role === 'admin' ? '💰' : '📦'} {role === 'admin' ? 'الطلبات والإيراد' : 'عدد الطلبات'} حسب نوع الطلب (B2B / Online / Instashop / App)
+              </h2>
+              {role === 'admin' && (
+                <span className="text-xs text-gray-500">
+                  إجمالي الإيراد المسلَّم: {orderTypeRevenue.totalRevenue.toLocaleString()} ج.م
+                </span>
+              )}
+            </div>
+            {orderTypeRevenue.rows.length === 0 ? (
+              <div className="p-6 text-center text-gray-500">لا توجد بيانات في هذا النطاق</div>
+            ) : (
+              <table className="w-full min-w-[460px] text-sm">
+                <thead className="bg-gray-100 border-b border-gray-200">
+                  <tr>
+                    <th className="px-3 py-2 text-right">نوع الطلب</th>
+                    <th className="px-3 py-2 text-center">إجمالي الطلبات</th>
+                    <th className="px-3 py-2 text-center">المسلَّم</th>
+                    {role === 'admin' && <th className="px-3 py-2 text-right">الإيراد المسلَّم</th>}
+                    <th className="px-3 py-2 text-center">{role === 'admin' ? 'النسبة من الإيراد' : 'النسبة من الطلبات'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orderTypeRevenue.rows.map((row) => {
+                    const share = role === 'admin'
+                      ? orderTypeRevenue.totalRevenue > 0
+                        ? Math.round((row.revenue / orderTypeRevenue.totalRevenue) * 100)
+                        : 0
+                      : orderTypeRevenue.totalCount > 0
+                        ? Math.round((row.count / orderTypeRevenue.totalCount) * 100)
+                        : 0
+                    return (
+                      <tr key={row.name} className="border-b border-gray-100">
+                        <td className="px-3 py-2 font-semibold text-gray-900">{row.name}</td>
+                        <td className="px-3 py-2 text-center text-gray-900">{row.count}</td>
+                        <td className="px-3 py-2 text-center text-emerald-700 font-semibold">{row.delivered}</td>
+                        {role === 'admin' && (
+                          <td className="px-3 py-2 text-right font-bold text-emerald-800">
+                            {row.revenue.toLocaleString()} ج.م
+                          </td>
+                        )}
+                        <td className="px-3 py-2 text-center text-gray-700">{share}%</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+                <tfoot className="bg-gray-50 border-t-2 border-gray-200 font-bold">
+                  <tr>
+                    <td className="px-3 py-2 text-gray-900">الإجمالي</td>
+                    <td className="px-3 py-2 text-center text-gray-900">{orderTypeRevenue.totalCount}</td>
+                    <td className="px-3 py-2 text-center text-emerald-700">{orderTypeRevenue.totalDelivered}</td>
+                    {role === 'admin' && (
+                      <td className="px-3 py-2 text-right text-emerald-800">
+                        {orderTypeRevenue.totalRevenue.toLocaleString()} ج.م
+                      </td>
+                    )}
+                    <td className="px-3 py-2 text-center text-gray-700">100%</td>
+                  </tr>
+                </tfoot>
+              </table>
+            )}
+          </section>
+
+          <section className="bg-white rounded-lg border border-gray-200 p-4 overflow-x-auto">
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <h2 className="font-bold text-gray-900">👥 عدد الطلبات لكل وكيل</h2>
+              {agentOrders.branchCount > 0 && (
+                <span className="text-xs text-gray-500">
+                  طلبات الفرع (Instashop + الطلبات المباشرة) غير محسوبة هنا: {agentOrders.branchCount}
+                </span>
+              )}
+            </div>
+            {agentOrders.rows.length === 0 ? (
+              <div className="p-6 text-center text-gray-500">لا توجد بيانات في هذا النطاق</div>
+            ) : (
+              <table className="w-full min-w-[420px] text-sm">
+                <thead className="bg-gray-100 border-b border-gray-200">
+                  <tr>
+                    <th className="px-3 py-2 text-right">الوكيل</th>
+                    <th className="px-3 py-2 text-center">إجمالي الطلبات</th>
+                    <th className="px-3 py-2 text-center">المسلَّم</th>
+                    <th className="px-3 py-2 text-center">النسبة من طلبات الوكلاء</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {agentOrders.rows.map((row) => (
+                    <tr key={row.name} className="border-b border-gray-100">
+                      <td className="px-3 py-2 font-semibold text-gray-900">{row.name}</td>
+                      <td className="px-3 py-2 text-center text-gray-900">{row.count}</td>
+                      <td className="px-3 py-2 text-center text-emerald-700 font-semibold">{row.delivered}</td>
+                      <td className="px-3 py-2 text-center text-gray-700">
+                        {agentOrders.total > 0 ? Math.round((row.count / agentOrders.total) * 100) : 0}%
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-gray-50 border-t-2 border-gray-200 font-bold">
+                  <tr>
+                    <td className="px-3 py-2 text-gray-900">الإجمالي</td>
+                    <td className="px-3 py-2 text-center text-gray-900">{agentOrders.total}</td>
+                    <td className="px-3 py-2 text-center text-emerald-700">{agentOrders.totalDelivered}</td>
+                    <td className="px-3 py-2 text-center text-gray-700">100%</td>
+                  </tr>
+                </tfoot>
+              </table>
+            )}
+          </section>
+        </>
+      )}
+
       <section className="bg-white rounded-lg border border-gray-200 p-4 space-y-4">
         <div className="flex items-center justify-between gap-2">
           <h2 className="font-bold text-gray-900">مؤشرات الشكاوى</h2>
@@ -604,52 +796,6 @@ export default function ReportsPage() {
         </section>
       </section>
 
-      <section className="bg-white rounded-lg border border-gray-200 p-4">
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1 text-right">من تاريخ</label>
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg"
-              dir="ltr"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1 text-right">إلى تاريخ</label>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg"
-              dir="ltr"
-            />
-          </div>
-          <button
-            onClick={resetToMonth}
-            className="px-4 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 font-semibold"
-          >
-            هذا الشهر
-          </button>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1 text-right">قناة البيع (LOB)</label>
-            <select
-              value={catalogueFilter}
-              onChange={(e) => setCatalogueFilter(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg"
-            >
-              <option value="all">كل القنوات</option>
-              <option value="exclude_instashop">كل القنوات عدا إنستاشوب (Online/App/B2B)</option>
-              {activeCatalogues.map((c) => (
-                <option key={c.key} value={c.key}>{c.label}</option>
-              ))}
-            </select>
-          </div>
-          <div className="text-sm text-gray-600">عدد الطلبات في النطاق: {rangeOrders.length}</div>
-        </div>
-      </section>
-
       {isLoading ? (
         <div className="p-8 text-center text-gray-500">⏳ جاري تحميل التقارير...</div>
       ) : (
@@ -663,48 +809,6 @@ export default function ReportsPage() {
             <ReportTable title="مصدر الطلبات (Call / App / FB ...)" rows={sourceStats.map((s) => ({ name: s.name, value: s.count }))} emptyLabel="لا توجد بيانات" />
             <ReportTable title="نوع العميل (جديد / قديم / عائد ...)" rows={customerTypeStats.map((s) => ({ name: s.name, value: s.count }))} emptyLabel="لا توجد بيانات" />
           </div>
-
-          <section className="bg-white rounded-lg border border-gray-200 p-4 overflow-x-auto">
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <h2 className="font-bold text-gray-900">💰 الإيراد حسب نوع الطلب (B2B / Online / Instashop / App)</h2>
-              <span className="text-xs text-gray-500">
-                إجمالي الإيراد المسلَّم: {orderTypeRevenue.totalRevenue.toLocaleString()} ج.م
-              </span>
-            </div>
-            {orderTypeRevenue.rows.length === 0 ? (
-              <div className="p-6 text-center text-gray-500">لا توجد بيانات في هذا النطاق</div>
-            ) : (
-              <table className="w-full min-w-[560px] text-sm">
-                <thead className="bg-gray-100 border-b border-gray-200">
-                  <tr>
-                    <th className="px-3 py-2 text-right">نوع الطلب</th>
-                    <th className="px-3 py-2 text-center">إجمالي الطلبات</th>
-                    <th className="px-3 py-2 text-center">المسلَّم</th>
-                    <th className="px-3 py-2 text-right">الإيراد المسلَّم</th>
-                    <th className="px-3 py-2 text-center">النسبة من الإيراد</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {orderTypeRevenue.rows.map((row) => {
-                    const share = orderTypeRevenue.totalRevenue > 0
-                      ? Math.round((row.revenue / orderTypeRevenue.totalRevenue) * 100)
-                      : 0
-                    return (
-                      <tr key={row.name} className="border-b border-gray-100">
-                        <td className="px-3 py-2 font-semibold text-gray-900">{row.name}</td>
-                        <td className="px-3 py-2 text-center text-gray-900">{row.count}</td>
-                        <td className="px-3 py-2 text-center text-emerald-700 font-semibold">{row.delivered}</td>
-                        <td className="px-3 py-2 text-right font-bold text-emerald-800">
-                          {row.revenue.toLocaleString()} ج.م
-                        </td>
-                        <td className="px-3 py-2 text-center text-gray-700">{share}%</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            )}
-          </section>
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <ReportTable title="حالة التوصيل" rows={deliveryStats.map((s) => ({ name: s.name, value: s.count }))} emptyLabel="لا توجد بيانات" />
