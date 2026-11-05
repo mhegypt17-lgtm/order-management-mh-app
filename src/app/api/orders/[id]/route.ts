@@ -376,19 +376,36 @@ export async function PUT(
 
     // 🔒 Lock edits once branch starts delivery (unless admin)
     const requesterRole = String(body.role || new URL(request.url).searchParams.get('role') || '').toLowerCase()
-    if (requesterRole !== 'admin') {
-      const { data: currentDelivery } = await supabase
+    // `attachmentsOnly` is the narrow save (attachments, notes, payment method
+    // only). It must NEVER fall through to the full-save path further down:
+    // that path rewrites every line item from body.items, so a request with no
+    // items wipes the order (031126app1, 041026app1). It is therefore handled
+    // here whatever the lock state — including when the lock lookup fails.
+    const narrowSave = body.attachmentsOnly === true
+    if (requesterRole !== 'admin' || narrowSave) {
+      const { data: currentDelivery, error: deliveryError } = await supabase
         .from('order_delivery')
         .select('deliveryStatus')
         .eq('orderId', params.id)
         .maybeSingle()
+      // A failed lookup is not "unlocked": refuse and let the user retry,
+      // instead of silently skipping the lock. (The narrow save is safe either
+      // way, so it does not need the lock state.)
+      if (deliveryError && !narrowSave) {
+        console.error('[orders PUT] delivery lock lookup failed:', deliveryError)
+        return NextResponse.json(
+          { error: 'تعذر التحقق من حالة التوصيل — لم يتم حفظ أي تعديل، حاول مرة أخرى' },
+          { status: 503 },
+        )
+      }
       const lockingStatuses = ['في الطريق', 'تم التوصيل']
-      if (currentDelivery && lockingStatuses.includes((currentDelivery as any).deliveryStatus)) {
+      const isLockedNow = !!currentDelivery && lockingStatuses.includes((currentDelivery as any).deliveryStatus)
+      if (narrowSave || (isLockedNow && requesterRole !== 'admin')) {
         // Exception: CS may still add/edit attachments (proof of payment,
         // post-delivery receipts, etc.) on a locked order. The client sends
         // `attachmentsOnly: true` to opt into this narrow patch; nothing
         // else on the order is touched.
-        if (body.attachmentsOnly === true) {
+        if (narrowSave) {
           // csAttachments is only touched when the client actually sent the
           // array (it skips it when attachments were never loaded/changed,
           // e.g. a payment-method-only edit) so nothing is wiped by accident.
@@ -456,13 +473,13 @@ export async function PUT(
             action: 'updated',
             changedBy: body.createdBy || 'unknown',
             summary: paymentChanged
-              ? `تم تغيير طريقة الدفع من "${existing.paymentMethod || '-'}" إلى "${incomingPayment}" (الطلب مقفل بعد التوصيل)`
-              : 'تم تحديث مرفقات/ملاحظات خدمة العملاء (الطلب مقفل بعد التوصيل)',
+              ? `تم تغيير طريقة الدفع من "${existing.paymentMethod || '-'}" إلى "${incomingPayment}"${isLockedNow ? ' (الطلب مقفل بعد التوصيل)' : ''}`
+              : `تم تحديث مرفقات/ملاحظات خدمة العملاء${isLockedNow ? ' (الطلب مقفل بعد التوصيل)' : ''}`,
             details: {
               attachmentCount: attachmentsProvided ? storedAttachments.length : null,
               notesUpdated: notesProvided,
               ...(paymentChanged ? { paymentMethodFrom: existing.paymentMethod || null, paymentMethodTo: incomingPayment } : {}),
-              lockedStatus: (currentDelivery as any).deliveryStatus,
+              lockedStatus: (currentDelivery as any)?.deliveryStatus ?? null,
             },
           })
           const refreshed = {
@@ -486,6 +503,17 @@ export async function PUT(
           { status: 423 }
         )
       }
+    }
+
+    // A full save must always carry the complete item list. A request without
+    // one (e.g. a narrow save that reached this point by mistake, or a stale
+    // client) would otherwise be read as "this order has no items" and wipe
+    // every line. Refuse before anything is written.
+    if (!Array.isArray(body.items) || body.items.length === 0) {
+      return NextResponse.json(
+        { error: 'لا يمكن حفظ طلب بدون بنود — لم يتم تغيير أي شيء', code: 'EMPTY_ITEMS' },
+        { status: 400 },
+      )
     }
 
     let deliveryAddress: CustomerAddressRecord | undefined
@@ -590,6 +618,16 @@ export async function PUT(
           lineTotal: quantity * unitPrice,
         }
       })
+
+    // Same protection after normalisation: if none of the submitted lines
+    // resolves to a real product (or all have zero quantity) the delete-and-
+    // reinsert below would still leave the order empty.
+    if (normalizedItems.length === 0) {
+      return NextResponse.json(
+        { error: 'لا يمكن حفظ طلب بدون بنود صالحة — لم يتم تغيير أي شيء', code: 'EMPTY_ITEMS' },
+        { status: 400 },
+      )
+    }
 
     const subtotal = normalizedItems.reduce((sum, i) => sum + i.lineTotal, 0)
     const deliveryFee = await computeDeliveryFeeByArea(

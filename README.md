@@ -42,6 +42,16 @@ than silently substituting a catalogue price. No new columns or price queries
 are required. Existing incorrectly repriced orders are not automatically repaired.
 Regression tests: `node --test scripts/b2b-weight-price.test.cjs`.
 
+### Order save safety
+
+A full order save must carry its item list: a save with no items (or none that
+match a product) is refused with `EMPTY_ITEMS` and changes nothing. The narrow
+"attachments / notes / payment method" save (`attachmentsOnly`) is always
+handled as a narrow save and can never fall through to a full save, even if the
+delivery-lock lookup returns nothing. If the lock lookup itself fails, a full
+save is refused (503) instead of being treated as unlocked. Tests (mocked, no
+database writes): `node --test scripts/order-save-safety.test.cjs`.
+
 ---
 
 ## 📋 Phase Roadmap
