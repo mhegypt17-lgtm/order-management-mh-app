@@ -384,7 +384,7 @@ export default function ReportsPage() {
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div>
             <h2 className="font-bold text-gray-900">🎯 المنتجات المستهدفة</h2>
-            <p className="text-xs text-gray-500">وحدات مباعة هذا الشهر · طلبات تمت أو تم توصيلها</p>
+            <p className="text-xs text-gray-500">وحدات مباعة هذا الشهر · تُحتسب في شهر تاريخ التوصيل (تم التوصيل)</p>
           </div>
           <span className="px-3 py-1 rounded-full text-sm font-bold bg-amber-500 text-white">
             {targetedStats.monthlyGoal > 0

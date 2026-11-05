@@ -615,7 +615,7 @@ export default function DashboardPage() {
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div>
             <h2 className="font-bold text-gray-900">🎯 أداء الوكلاء على المنتجات المستهدفة</h2>
-            <p className="text-xs text-gray-500">وحدات مباعة خلال الشهر الحالي (طلبات تمت فقط) — وكلاء الفرع غير محسوبة ضمن هدف الفريق</p>
+            <p className="text-xs text-gray-500">وحدات مباعة خلال الشهر الحالي (تُحتسب في شهر تاريخ التوصيل — تم التوصيل فقط) — وكلاء الفرع غير محسوبة ضمن هدف الفريق</p>
           </div>
           <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1">
             {targetedStats.productCount === 0

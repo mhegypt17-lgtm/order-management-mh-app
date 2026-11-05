@@ -4,7 +4,7 @@ import {
   fetchRowsIn,
 } from '@/lib/omsData'
 import { supabase } from '@/lib/supabase'
-import { cairoFirstDayOfMonth, cairoLastDayOfMonth, cairoYMD } from '@/lib/cairoTime'
+import { addDays, cairoDateString, cairoFirstDayOfMonth, cairoLastDayOfMonth, cairoYMD } from '@/lib/cairoTime'
 
 // This aggregate changes slowly (once per order edit, which is minutes apart)
 // so a 5-minute cache is safe and dramatically reduces DB reads when multiple
@@ -12,7 +12,10 @@ import { cairoFirstDayOfMonth, cairoLastDayOfMonth, cairoYMD } from '@/lib/cairo
 export const revalidate = 300
 
 // Aggregates units sold of targeted products in the CURRENT calendar month.
-// Successful orders only (orderStatus === 'تم' OR branch delivered).
+// An order counts in the month (Cairo time) in which the branch marked it
+// 'تم التوصيل' (order_delivery.deliveredAt) — NOT the month it was placed. So
+// an order placed on 31 Oct and delivered on 1 Nov belongs to November.
+// Orders that are cancelled (لاغي) never count.
 // Query params:
 //   ?scope=cs|admin (default admin)
 //   ?agent=<name>   (CS view: filter to one agent)
@@ -56,17 +59,25 @@ export async function GET(req: NextRequest) {
     const lastDay = cairoLastDayOfMonth()
     const monthLabel = `${String(month).padStart(2, '0')}/${year}`
 
-    // 1) Targeted products, month orders, settings — parallel. Fetches EVERY
+    // 1) Targeted products, this month's deliveries, settings — parallel.
+    // Counting is by DELIVERY date, so instead of selecting orders by
+    // orderDate we select the order_delivery rows delivered this month (3
+    // small columns) and fetch just those orders afterwards. Fetches EVERY
     // channel (no Instashop/Branch exclusion here) so bySource can segment
     // the full picture for admin — the agent-vs-branch split happens below,
     // in the aggregation step, not at the query level.
-    const [targetedRes, monthOrdersRes, settings] = await Promise.all([
+    //
+    // The query window is padded by a day each side (UTC) and then narrowed
+    // exactly by Cairo calendar date below, so Cairo/UTC offsets and DST
+    // can never push a delivery into the wrong month.
+    const [targetedRes, deliveriesRes, settings] = await Promise.all([
       supabase.from('products').select('id,productName').eq('isTargeted', true),
       supabase
-        .from('orders')
-        .select('id,orderDate,orderStatus,orderReceiver,createdBy,orderType')
-        .gte('orderDate', firstDay)
-        .lte('orderDate', lastDay),
+        .from('order_delivery')
+        .select('orderId,deliveredAt')
+        .eq('deliveryStatus', 'تم التوصيل')
+        .gte('deliveredAt', `${addDays(firstDay, -1)}T00:00:00.000Z`)
+        .lte('deliveredAt', `${addDays(lastDay, 1)}T23:59:59.999Z`),
       readOrderSettings(),
     ])
 
@@ -90,18 +101,24 @@ export async function GET(req: NextRequest) {
 
     if (targetedIds.size === 0) return emptyResponse(0)
 
-    const monthOrders = (monthOrdersRes.data as any[]) || []
-    if (monthOrders.length === 0) return emptyResponse(targeted.length)
-    const monthOrderIds = monthOrders.map((o) => o.id)
+    // Orders delivered within this Cairo calendar month.
+    const deliveredThisMonthIds = ((deliveriesRes.data as any[]) || [])
+      .filter((d) => {
+        if (!d.deliveredAt) return false
+        const day = cairoDateString(d.deliveredAt)
+        return day >= firstDay && day <= lastDay
+      })
+      .map((d) => String(d.orderId))
+    if (deliveredThisMonthIds.length === 0) return emptyResponse(targeted.length)
 
-    // 2) Deliveries for month orders + items for targeted products — parallel.
-    //    fetchRowsIn chunks the ID list to stay under the URL length limit.
-    const [deliveryRows, targetedItems] = await Promise.all([
-      fetchRowsIn<{ orderId: string; deliveryStatus: string }>(
-        'order_delivery',
-        'orderId',
-        monthOrderIds,
-        'orderId,deliveryStatus',
+    // 2) Those orders + items for targeted products — parallel. fetchRowsIn
+    //    chunks the ID list to stay under the URL length limit.
+    const [monthOrders, targetedItems] = await Promise.all([
+      fetchRowsIn<{ id: string; orderStatus: string; orderReceiver: string; createdBy: string; orderType: string }>(
+        'orders',
+        'id',
+        deliveredThisMonthIds,
+        'id,orderStatus,orderReceiver,createdBy,orderType',
       ),
       fetchRowsIn<{ orderId: string; productId: string; quantity: number }>(
         'order_items',
@@ -111,20 +128,12 @@ export async function GET(req: NextRequest) {
       ),
     ])
 
-    const deliveredOrderIds = new Set<string>()
-    for (const d of deliveryRows) {
-      if (d.deliveryStatus === 'تم التوصيل') deliveredOrderIds.add(d.orderId)
-    }
-
-    // Effective month orders = completed OR branch-delivered. This rule is
-    // unchanged — every aggregation below (agents, branch, bySource) is
-    // scoped to effectiveById only, so nothing counts a placed-but-
-    // undelivered order.
+    // Effective orders = delivered this month and not cancelled. Every
+    // aggregation below (agents, branch, bySource) is scoped to
+    // effectiveById only, so nothing counts an undelivered order.
     const effectiveById = new Map<string, any>()
     for (const o of monthOrders) {
-      if (o.orderStatus === 'تم' || deliveredOrderIds.has(o.id)) {
-        effectiveById.set(o.id, o)
-      }
+      if (o.orderStatus !== 'لاغي') effectiveById.set(o.id, o)
     }
 
     // Sum quantities of targeted items linked to those orders.

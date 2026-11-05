@@ -42,6 +42,17 @@ than silently substituting a catalogue price. No new columns or price queries
 are required. Existing incorrectly repriced orders are not automatically repaired.
 Regression tests: `node --test scripts/b2b-weight-price.test.cjs`.
 
+### Targeted products month
+
+Targeted-product units are counted in the Cairo calendar month in which the
+branch marked the order "تم التوصيل" (`order_delivery.deliveredAt`), not the
+month it was placed: an order placed 31 Oct and delivered 1 Nov counts toward
+November. Only delivered orders count; cancelled (لاغي) orders never do, and an
+order that merely has status "تم" without a branch delivery does not count.
+The route reads the month's deliveries (3 small columns) and then only those
+orders, so there is no extra egress. Tests (mocked, fixed clock, no database
+writes): `node --test scripts/targeted-stats-delivery-month.test.cjs`.
+
 ### Order save safety
 
 A full order save must carry its item list: a save with no items (or none that
