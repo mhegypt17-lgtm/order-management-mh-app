@@ -42,6 +42,15 @@ than silently substituting a catalogue price. No new columns or price queries
 are required. Existing incorrectly repriced orders are not automatically repaired.
 Regression tests: `node --test scripts/b2b-weight-price.test.cjs`.
 
+### Area name on the branch order screen
+
+The branch order page shows a "المنطقة" row (area, plus sub-area when present,
+e.g. "التجمع الخامس - التجمع") above the address, and the WhatsApp dispatch
+message includes a "🏘️ المنطقة" line. Addresses with no area show "-" on the
+page and the line is left out of the message. The data already comes with the
+order, so there are no extra requests. Tests:
+`node --test scripts/branch-area-name.test.cjs`.
+
 ### Branch order lines stay in sync with CS edits
 
 A CS save keeps the id of every line that already existed (new lines get new

@@ -8,6 +8,7 @@ import { formatCairoFriendly } from '@/lib/cairoTime'
 import { compressImage } from '@/lib/imageCompression'
 import { useDiscountCodeInfo, describeDiscountBrief } from '@/lib/discountCodeInfo'
 import { reconcileItems, describeCsChange, draftFromItem, type CsLineChange } from '@/lib/branchItemSync'
+import { formatAreaName } from '@/lib/addressArea'
 import DeliveryDispatchShare from '@/components/orders/DeliveryDispatchShare'
 import ImageLightbox from '@/components/orders/ImageLightbox'
 import type { CSAttachment } from '@/lib/omsData'
@@ -43,7 +44,7 @@ type OrderDetail = {
   discountAmount?: number | null
   netTotal?: number | null
   customer: { customerName: string; phone: string } | null
-  address: { streetAddress: string; googleMapsLink: string } | null
+  address: { streetAddress: string; googleMapsLink: string; area?: string | null; subArea?: string | null } | null
   items: OrderItemDetail[]
   delivery: {
     deliveryStatus: 'لم يخرج بعد' | 'جاهز' | 'في الطريق' | 'تم التوصيل'
@@ -561,6 +562,7 @@ export default function BranchOrderDetailPage() {
           <h2 className="font-bold text-gray-900">بيانات العميل (قراءة فقط)</h2>
           <p><span className="font-semibold">الاسم:</span> {order.customer?.customerName || '-'}</p>
           <p><span className="font-semibold">الهاتف:</span> <span dir="ltr">{order.customer?.phone || '-'}</span></p>
+          <p><span className="font-semibold">المنطقة:</span> {formatAreaName(order.address?.area, order.address?.subArea) || '-'}</p>
           <p><span className="font-semibold">العنوان:</span> {order.address?.streetAddress || '-'}</p>
           {order.address?.googleMapsLink && (
             <a
@@ -862,6 +864,7 @@ export default function BranchOrderDetailPage() {
         appOrderNo={order.appOrderNo}
         customerName={order.customer?.customerName || ''}
         customerPhone={order.customer?.phone || ''}
+        areaName={formatAreaName(order.address?.area, order.address?.subArea)}
         streetAddress={order.address?.streetAddress || ''}
         googleMapsLink={order.address?.googleMapsLink || ''}
         itemCount={totalItemCount}

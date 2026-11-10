@@ -8,6 +8,7 @@ import toast from 'react-hot-toast'
 // needs to hand the courier the essentials to make the drop:
 //   • customer name
 //   • mobile number
+//   • area name (المنطقة), when the address has one
 //   • address
 //   • location (Google Maps pin)
 //   • number of items to carry
@@ -18,13 +19,15 @@ interface Props {
   appOrderNo: string
   customerName: string
   customerPhone: string
+  /** Area (and sub-area) name; the line is left out when empty. */
+  areaName?: string
   streetAddress: string
   googleMapsLink: string
   itemCount: number
 }
 
 export default function DeliveryDispatchShare(props: Props) {
-  const { appOrderNo, customerName, customerPhone, streetAddress, googleMapsLink, itemCount } = props
+  const { appOrderNo, customerName, customerPhone, areaName, streetAddress, googleMapsLink, itemCount } = props
 
   const message = useMemo(() => {
     const lines: string[] = []
@@ -33,11 +36,12 @@ export default function DeliveryDispatchShare(props: Props) {
     lines.push('')
     lines.push(`👤 العميل: ${customerName || '-'}`)
     lines.push(`📞 الموبايل: ${customerPhone || '-'}`)
+    if (areaName) lines.push(`🏘️ المنطقة: ${areaName}`)
     lines.push(`📍 العنوان: ${streetAddress || '-'}`)
     if (googleMapsLink) lines.push(`🗺️ الموقع: ${googleMapsLink}`)
     lines.push(`📦 عدد الأصناف: *${itemCount}*`)
     return lines.join('\n')
-  }, [appOrderNo, customerName, customerPhone, streetAddress, googleMapsLink, itemCount])
+  }, [appOrderNo, customerName, customerPhone, areaName, streetAddress, googleMapsLink, itemCount])
 
   const waHref = useMemo(() => `https://wa.me/?text=${encodeURIComponent(message)}`, [message])
 
@@ -61,7 +65,7 @@ export default function DeliveryDispatchShare(props: Props) {
         <textarea
           readOnly
           value={message}
-          rows={7}
+          rows={8}
           className="w-full px-3 py-2 border border-emerald-200 rounded-lg bg-white text-sm font-mono whitespace-pre-wrap"
           dir="rtl"
         />
