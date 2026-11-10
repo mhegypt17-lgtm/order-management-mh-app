@@ -10,6 +10,7 @@ import {
 } from '@/lib/omsData'
 import { supabase } from '@/lib/supabase'
 import { cairoDateString, addDays } from '@/lib/cairoTime'
+import { complaintNotificationHref } from '@/lib/complaintLinks'
 
 // Make this endpoint short-cached at the edge so a burst of bell pollers
 // in the same role share one DB read.
@@ -377,8 +378,10 @@ export async function GET(req: NextRequest) {
     // Branch has its own read-only complaints view; every other role uses
     // the CS one. Previously hardcoded to '/orders/complaints', which
     // silently 404'd (redirected home) for branch since these items were
-    // never role-filtered out for them in the first place.
-    const complaintsHref = role === 'branch' ? '/branch/complaints' : '/orders/complaints'
+    // never role-filtered out for them in the first place. For branch the
+    // link also carries the ticket id so the page opens THAT ticket directly
+    // (the id is already on the complaint row — no extra query).
+    const complaintHref = (complaintId: string) => complaintNotificationHref(role, complaintId)
 
     // Track complaints that breached SLA in this pass so we can create
     // (idempotent) auto-tasks for their owners after the notification loop.
@@ -392,7 +395,7 @@ export async function GET(req: NextRequest) {
           type: 'complaint-new',
           title: '🎫 شكوى جديدة',
           body: `تذكرة #${c.ticketNumber || c.id.slice(-6)} — ${c.channel || ''}`.trim(),
-          href: complaintsHref,
+          href: complaintHref(c.id),
           createdAt: c.createdAt,
           actor: c.createdBy,
           priority: 'high',
@@ -416,7 +419,7 @@ export async function GET(req: NextRequest) {
             type: 'complaint-sla-breach',
             title: '🚨 تذكرة تجاوزت SLA',
             body: `#${c.ticketNumber || c.id.slice(-6)} — مفتوحة منذ ${overdueHours}س${c.assignedTo ? ' · ' + c.assignedTo : ''}`,
-            href: complaintsHref,
+            href: complaintHref(c.id),
             createdAt: new Date(openedMs + slaMs).toISOString(),
             actor: c.assignedTo,
             priority: 'urgent',
@@ -437,7 +440,7 @@ export async function GET(req: NextRequest) {
           type: 'complaint-comment',
           title: '💬 تعليق على شكوى',
           body: `#${c.ticketNumber || c.id.slice(-6)}: ${(cm.text || '').slice(0, 100)}`,
-          href: complaintsHref,
+          href: complaintHref(c.id),
           createdAt: cm.createdAt,
           actor: cm.authorName,
           priority: 'normal',

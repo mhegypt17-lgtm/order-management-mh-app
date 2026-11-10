@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { formatCairoDateTime } from '@/lib/cairoTime'
 
 // Read-only complaints view for branch staff — visibility only, per the
@@ -53,28 +54,71 @@ const PRIORITY_COLORS: Record<string, string> = {
 }
 
 export default function BranchComplaintsView() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  // Set by a notification link (/branch/complaints?complaintId=…): open that
+  // ticket directly instead of leaving the user to hunt for it in the list.
+  const targetId = (searchParams.get('complaintId') || '').trim()
   const [complaints, setComplaints] = useState<Complaint[]>([])
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'in-progress' | 'closed'>('all')
   const [selected, setSelected] = useState<Complaint | null>(null)
   const [attachmentsByComplaint, setAttachmentsByComplaint] = useState<Record<string, Attachment[]>>({})
   const [loadingAttachments, setLoadingAttachments] = useState(false)
+  const [targetMissing, setTargetMissing] = useState(false)
+  // Ids already opened / already retried, so each link acts once and the
+  // list is never refetched in a loop.
+  const openedFor = useRef<string | null>(null)
+  const refetchedFor = useRef<string | null>(null)
+
+  const loadComplaints = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/complaints')
+      const data = await res.json()
+      setComplaints(Array.isArray(data) ? data : [])
+    } catch {
+      setComplaints([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
-    const load = async () => {
-      setLoading(true)
-      try {
-        const res = await fetch('/api/complaints')
-        const data = await res.json()
-        setComplaints(Array.isArray(data) ? data : [])
-      } catch {
-        setComplaints([])
-      } finally {
-        setLoading(false)
-      }
+    loadComplaints()
+  }, [loadComplaints])
+
+  useEffect(() => {
+    if (!targetId) {
+      openedFor.current = null
+      refetchedFor.current = null
+      setTargetMissing(false)
+      return
     }
-    load()
-  }, [])
+    if (loading || openedFor.current === targetId) return
+    const found = complaints.find((c) => c.id === targetId)
+    if (found) {
+      openedFor.current = targetId
+      setTargetMissing(false)
+      setSelected(found)
+      return
+    }
+    // Not in the list we already hold (e.g. the ticket was opened after this
+    // page loaded). Reload the list once; if it is still absent, say so.
+    if (refetchedFor.current !== targetId) {
+      refetchedFor.current = targetId
+      loadComplaints()
+    } else {
+      setTargetMissing(true)
+    }
+  }, [targetId, loading, complaints, loadComplaints])
+
+  const closeSelected = () => {
+    setSelected(null)
+    // Drop the id from the URL so tapping the same notification again
+    // (which re-adds it) opens the ticket again.
+    if (targetId) router.replace('/branch/complaints')
+  }
 
   const ensureAttachmentsLoaded = async (complaintId: string) => {
     if (attachmentsByComplaint[complaintId]) return
@@ -98,6 +142,12 @@ export default function BranchComplaintsView() {
         <h1 className="text-3xl font-bold text-gray-900">🎫 الشكاوى</h1>
         <p className="text-gray-600 mt-1">عرض فقط — للتعديل أو الرد يرجى التواصل مع خدمة العملاء</p>
       </div>
+
+      {targetMissing && (
+        <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded-lg p-3 text-sm">
+          تعذر العثور على التذكرة المطلوبة ضمن الشكاوى المعروضة (آخر 90 يوماً).
+        </div>
+      )}
 
       <div className="flex gap-2">
         {(['all', 'open', 'in-progress', 'closed'] as const).map((s) => (
@@ -144,14 +194,14 @@ export default function BranchComplaintsView() {
       )}
 
       {selected && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setSelected(null)}>
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={closeSelected}>
           <div
             className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[85vh] overflow-y-auto p-5 space-y-3"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold text-gray-900">#{selected.ticketNumber} — {selected.subject}</h3>
-              <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+              <button onClick={closeSelected} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
             </div>
 
             <div className="space-y-2 bg-gray-50 border border-gray-200 rounded-lg p-4 text-sm">

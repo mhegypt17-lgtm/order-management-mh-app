@@ -42,6 +42,17 @@ than silently substituting a catalogue price. No new columns or price queries
 are required. Existing incorrectly repriced orders are not automatically repaired.
 Regression tests: `node --test scripts/b2b-weight-price.test.cjs`.
 
+### Complaint notifications (branch)
+
+For branch users, complaint notifications (new ticket, SLA breach, new comment)
+link to `/branch/complaints?complaintId=<id>`, and that page opens the ticket
+directly. The id comes from the complaint row the notification is built from and
+the page uses its normal list load, so there is no extra query. If the ticket is
+not in the list the page already holds, it reloads the list once; if it is still
+missing (older than the 90-day window) it shows a notice. CS and admin links are
+unchanged. Tests (mocked, no database access):
+`node --test scripts/branch-complaint-deeplink.test.cjs`.
+
 ### Targeted products month
 
 Targeted-product units are counted in the Cairo calendar month in which the
