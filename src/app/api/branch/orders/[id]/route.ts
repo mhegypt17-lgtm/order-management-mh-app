@@ -408,6 +408,41 @@ export async function PUT(
         console.error('[branch PUT] failed to read order for line edits:', orderError)
         return NextResponse.json({ error: 'تعذر تحميل الطلب لحساب أسعار البنود' }, { status: 500 })
       }
+      // Optimistic-concurrency check, BEFORE any write. The branch screen sends,
+      // for every line, the quantity/weight it believes is saved
+      // (expectedQuantity / expectedWeightGrams). If the branch edited a line
+      // and the saved line is no longer what the screen saw — CS changed it, or
+      // replaced/removed it — nothing is saved and the screen is told to
+      // reload, instead of silently overwriting CS's change or ignoring the
+      // edit while reporting success. Lines the branch did not touch (draft ==
+      // expected) are skipped in the loop below, so a stale screen can never
+      // write its old numbers back over a CS change.
+      const hasExpectation = (e: any) =>
+        e && Number.isFinite(Number(e.expectedQuantity)) && Number.isFinite(Number(e.expectedWeightGrams))
+      const branchTouched = (e: any) =>
+        !hasExpectation(e) ||
+        Number(e.quantity) !== Number(e.expectedQuantity) ||
+        Number(e.weightGrams) !== Number(e.expectedWeightGrams)
+      const knownIds = new Map(orderItemRows.map((r) => [r.id, r]))
+      for (const edit of body.items) {
+        if (!edit || !branchTouched(edit)) continue
+        const saved = knownIds.get(edit.id)
+        const stale =
+          !saved ||
+          (hasExpectation(edit) &&
+            (Number(saved.quantity) !== Number(edit.expectedQuantity) ||
+              Number(saved.weightGrams || 0) !== Number(edit.expectedWeightGrams)))
+        if (stale) {
+          return NextResponse.json(
+            {
+              error: 'تم تعديل بنود هذا الطلب من خدمة العملاء — لم يتم حفظ تعديلك. تم تحديث الصفحة، راجع البنود ثم أعد المحاولة',
+              code: 'ORDER_CHANGED',
+            },
+            { status: 409 },
+          )
+        }
+      }
+
       // Validate the whole B2B batch before writing any lines. A zero weight
       // would erase the rate encoded in unitPrice / weightGrams.
       const committedRates = new Map<string, number>()
@@ -432,7 +467,9 @@ export async function PUT(
       for (const edit of body.items) {
         const existingItem = orderItemRows.find((r) => r.id === edit.id)
         if (!existingItem) continue
-
+        // The branch did not change this line: never write it back (a stale
+        // screen would otherwise restore its old numbers over a CS change).
+        if (!branchTouched(edit)) continue
         const product = products.find((p) => p.id === existingItem.productId)
         const pricingMode: 'unit' | 'weight' =
           product?.pricingMode === 'weight' ? 'weight' : 'unit'

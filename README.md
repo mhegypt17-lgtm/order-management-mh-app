@@ -42,6 +42,20 @@ than silently substituting a catalogue price. No new columns or price queries
 are required. Existing incorrectly repriced orders are not automatically repaired.
 Regression tests: `node --test scripts/b2b-weight-price.test.cjs`.
 
+### Branch order lines stay in sync with CS edits
+
+A CS save keeps the id of every line that already existed (new lines get new
+ids), so a screen holding the old ids can still match its lines. The branch
+order screen reconciles its lines with the server on focus and after each
+status/comment save: lines CS changed take the fresh quantity/weight and are
+listed in a dismissible notice; lines CS did not change keep the branch
+worker's unsaved draft. Saving line edits sends the quantity/weight the screen
+believes is saved; if CS changed a line the branch edited, the server refuses
+with `ORDER_CHANGED` (409) and writes nothing, and lines the branch did not
+touch are never written. No extra requests: the refresh reuses the existing
+focus/visibility trigger. Tests (mocked, no database writes):
+`node --test scripts/order-line-sync.test.cjs`.
+
 ### Complaint notifications (branch)
 
 For branch users, complaint notifications (new ticket, SLA breach, new comment)

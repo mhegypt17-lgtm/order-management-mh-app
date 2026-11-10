@@ -776,6 +776,23 @@ export async function PUT(
         }
       }
     }
+    // Keep a line's id across a CS save. This route rewrites every line
+    // (delete + insert), which used to mint brand-new ids each time — so any
+    // screen holding the old ids (the branch screen, mid-weigh-in) could no
+    // longer match its lines to the saved ones. A line that already existed
+    // reuses its id; each existing row is claimed at most once, so two lines
+    // for the same product cannot end up with the same id.
+    const claimedPriorIds = new Set<string>()
+    const claimPriorId = (i: (typeof normalizedItems)[number]): string | undefined => {
+      const customName = String(i.productNameInput || '').trim()
+      const match = existingForOrder.find(
+        (p: any) =>
+          !claimedPriorIds.has(p.id) &&
+          (i.isCustomItem ? p.isCustomItem && p.customItemName === customName : !p.isCustomItem && p.productId === i.productId),
+      )
+      if (match) claimedPriorIds.add(match.id)
+      return match?.id
+    }
     const rewrittenItems: any[] = normalizedItems.map((i) => {
       const prior = findPriorItem(i)
       // Price-snapshot preservation rule:
@@ -804,7 +821,7 @@ export async function PUT(
         : (nonOnlinePrice?.offerPrice ?? null)
       const offerPriceSnapshot = offerRaw != null && offerRaw > 0 ? offerRaw : null
       return {
-        id: generateId('item'),
+        id: claimPriorId(i) ?? generateId('item'),
         orderId: params.id,
         productId: i.isCustomItem ? null : i.productId,
         quantity: i.quantity,

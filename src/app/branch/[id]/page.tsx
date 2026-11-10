@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/auth'
 import { formatCairoFriendly } from '@/lib/cairoTime'
 import { compressImage } from '@/lib/imageCompression'
 import { useDiscountCodeInfo, describeDiscountBrief } from '@/lib/discountCodeInfo'
+import { reconcileItems, describeCsChange, draftFromItem, type CsLineChange } from '@/lib/branchItemSync'
 import DeliveryDispatchShare from '@/components/orders/DeliveryDispatchShare'
 import ImageLightbox from '@/components/orders/ImageLightbox'
 import type { CSAttachment } from '@/lib/omsData'
@@ -103,8 +104,17 @@ export default function BranchOrderDetailPage() {
     Record<string, { quantity: number; weightGrams: number; weightDraft: string }>
   >({})
   const [isSavingItems, setIsSavingItems] = useState(false)
+  // Lines CS changed since the branch opened/last refreshed this order. Shown
+  // as a dismissible notice so a quantity change is never missed silently.
+  const [csChanges, setCsChanges] = useState<CsLineChange[]>([])
+  // Latest order/drafts for the async refresh below (it must not read stale
+  // closures, and must not clobber in-progress branch edits).
+  const orderRef = useRef<OrderDetail | null>(null)
+  const itemEditsRef = useRef<Record<string, { quantity: number; weightGrams: number; weightDraft: string }>>({})
 
   const isLocked = deliveryStatus === 'في الطريق' || deliveryStatus === 'تم التوصيل'
+  orderRef.current = order
+  itemEditsRef.current = itemEdits
   // Photos/invoice freeze once delivery is SAVED (persisted status, not the
   // dropdown draft). The API enforces the same rule; this just hides controls.
   const photosLocked = order?.delivery?.deliveryStatus === 'تم التوصيل'
@@ -175,63 +185,63 @@ export default function BranchOrderDetailPage() {
   // branchComments, productPhotos/invoicePhoto, or itemEdits (the branch's
   // own draft quantity/weight edits) so an in-progress branch edit is never
   // silently clobbered by a background refresh.
-  useEffect(() => {
-    let cancelled = false
-    const refreshCsOwnedFields = async () => {
-      try {
-        const res = await fetch(`/api/branch/orders/${params.id}`, { cache: 'no-store' })
-        if (!res.ok || cancelled) return
-        const data = await res.json()
-        const fresh = data.order as OrderDetail
-        setOrder((prev) => {
-          if (!prev) return prev
-          const freshItemsById = new Map(fresh.items.map((i) => [i.id, i]))
-          return {
-            ...prev,
-            notes: fresh.notes,
-            orderType: fresh.orderType,
-            customer: fresh.customer,
-            address: fresh.address,
-            subtotal: fresh.subtotal,
-            deliveryFee: fresh.deliveryFee,
-            orderTotal: fresh.orderTotal,
-            discountCode: fresh.discountCode,
-            discountAmount: fresh.discountAmount,
-            netTotal: fresh.netTotal,
-            items: prev.items.map((item) => {
-              const freshItem = freshItemsById.get(item.id)
-              if (!freshItem) return item
-              return {
-                ...item,
-                productName: freshItem.productName,
-                specialInstructions: freshItem.specialInstructions,
-                unitPrice: freshItem.unitPrice,
-                lineTotal: freshItem.lineTotal,
-                pricingMode: freshItem.pricingMode,
-                pricePerKg: freshItem.pricePerKg,
-                basePrice: freshItem.basePrice,
-                offerPrice: freshItem.offerPrice,
-              }
-            }),
-          }
-        })
-      } catch (err) {
-        console.warn('[branch order] background refresh failed', err)
-      }
-    }
-
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') refreshCsOwnedFields()
-    }
-    document.addEventListener('visibilitychange', onVisibilityChange)
-    window.addEventListener('focus', refreshCsOwnedFields)
-
-    return () => {
-      cancelled = true
-      document.removeEventListener('visibilitychange', onVisibilityChange)
-      window.removeEventListener('focus', refreshCsOwnedFields)
+  // Re-fetches the order and merges it in. Used on focus/visibility-regain and
+  // after a save was refused because CS changed the order.
+  //
+  // Items: the saved lines always come from the server (CS may have replaced
+  // or re-quantified them — previously only names/prices were refreshed, so a
+  // CS quantity change never reached this screen). A line the branch has an
+  // unsaved edit on keeps that draft unless CS changed that same line.
+  // Deliberately does NOT touch deliveryStatus, branchComments or
+  // productPhotos/invoicePhoto, so in-progress branch work is never clobbered.
+  const refreshFromServer = useCallback(async (): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/branch/orders/${params.id}`, { cache: 'no-store' })
+      if (!res.ok) return false
+      const data = await res.json()
+      const fresh = data.order as OrderDetail
+      const prev = orderRef.current
+      if (!prev) return false
+      const merged = reconcileItems(prev.items, fresh.items, itemEditsRef.current)
+      setOrder((current) => {
+        if (!current) return current
+        return {
+          ...current,
+          notes: fresh.notes,
+          orderType: fresh.orderType,
+          customer: fresh.customer,
+          address: fresh.address,
+          subtotal: fresh.subtotal,
+          deliveryFee: fresh.deliveryFee,
+          orderTotal: fresh.orderTotal,
+          discountCode: fresh.discountCode,
+          discountAmount: fresh.discountAmount,
+          netTotal: fresh.netTotal,
+          items: merged.items,
+        }
+      })
+      setItemEdits(merged.drafts)
+      if (merged.changes.length > 0) setCsChanges(merged.changes)
+      return true
+    } catch (err) {
+      console.warn('[branch order] background refresh failed', err)
+      return false
     }
   }, [params.id])
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshFromServer()
+    }
+    const onFocus = () => { refreshFromServer() }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    window.addEventListener('focus', onFocus)
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [refreshFromServer])
 
   // Phase 2H — user clicks the "view saved photos" button. Fetch the photos
   // bytes on demand from /photos and hydrate state. Idempotent; a second click
@@ -337,6 +347,19 @@ export default function BranchOrderDetailPage() {
     toast.success('🗑️ تم حذف صورة الفاتورة. اضغط "حفظ" لتأكيد التغيير')
   }
 
+  // Server responses that carry the whole order (status / comments saves) go
+  // through here so the line drafts are reconciled too — otherwise lines CS
+  // changed would show the branch's stale quantities until the next reload.
+  const applyServerOrder = (next: OrderDetail) => {
+    const prev = orderRef.current
+    if (prev) {
+      const merged = reconcileItems(prev.items, next.items, itemEditsRef.current)
+      setItemEdits(merged.drafts)
+      if (merged.changes.length > 0) setCsChanges(merged.changes)
+    }
+    setOrder(next)
+  }
+
   const handleStatusChange = async (newStatus: OrderDetail['delivery']['deliveryStatus']) => {
     setDeliveryStatus(newStatus)
     setIsSaving(true)
@@ -368,7 +391,7 @@ export default function BranchOrderDetailPage() {
       // photo bytes — we keep our own state authoritative for photos.
       const data = await res.json().catch(() => null)
       if (data?.order) {
-        setOrder(data.order as OrderDetail)
+        applyServerOrder(data.order as OrderDetail)
         // Server may return updated counts even when we didn't send photos.
         if (typeof data.order.productPhotosCount === 'number') {
           setSavedPhotosCount(data.order.productPhotosCount)
@@ -411,7 +434,7 @@ export default function BranchOrderDetailPage() {
 
       const data = await res.json().catch(() => null)
       if (data?.order) {
-        setOrder(data.order as OrderDetail)
+        applyServerOrder(data.order as OrderDetail)
         if (typeof data.order.productPhotosCount === 'number') {
           setSavedPhotosCount(data.order.productPhotosCount)
         }
@@ -440,6 +463,10 @@ export default function BranchOrderDetailPage() {
         id: it.id,
         quantity: draft ? draft.quantity : it.quantity,
         weightGrams: draft ? draft.weightGrams : it.weightGrams,
+        // What this screen believes is currently saved. The server uses it to
+        // refuse the save (instead of overwriting) if CS changed the line.
+        expectedQuantity: it.quantity,
+        expectedWeightGrams: it.weightGrams,
       }
     })
     if (order.orderType === 'B2B' && payloadItems.some((edit) =>
@@ -461,20 +488,23 @@ export default function BranchOrderDetailPage() {
       })
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}))
+        if (errBody?.code === 'ORDER_CHANGED') {
+          // CS changed the order since this screen loaded: nothing was saved.
+          // Pull the current lines in (the notice explains what changed) and
+          // let the branch re-apply their edit on top of them.
+          await refreshFromServer()
+          toast.error(errBody.error || 'تم تعديل الطلب من خدمة العملاء — لم يتم الحفظ')
+          return
+        }
         throw new Error(errBody?.error || 'Failed')
       }
       const data = await res.json()
       const refreshed = data.order as OrderDetail
       setOrder(refreshed)
       const drafts: Record<string, { quantity: number; weightGrams: number; weightDraft: string }> = {}
-      for (const it of refreshed.items || []) {
-        drafts[it.id] = {
-          quantity: Number(it.quantity) || 1,
-          weightGrams: Number(it.weightGrams) || 0,
-          weightDraft: it.weightGrams ? (Number(it.weightGrams) / 1000).toString() : '',
-        }
-      }
+      for (const it of refreshed.items || []) drafts[it.id] = draftFromItem(it)
       setItemEdits(drafts)
+      setCsChanges([])
       toast.success('✅ تم حفظ تعديلات البنود')
     } catch (err: any) {
       toast.error(err?.message || 'تعذر حفظ التعديلات')
@@ -496,6 +526,28 @@ export default function BranchOrderDetailPage() {
 
   return (
     <div className="space-y-6">
+      {csChanges.length > 0 && (
+        <div className="bg-amber-50 border-2 border-amber-400 rounded-lg p-4 text-amber-900" role="alert">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="font-bold">⚠️ خدمة العملاء عدّلت بنود هذا الطلب — تم تحديث الصفحة</p>
+              <ul className="mt-2 text-sm list-disc pr-5 space-y-0.5">
+                {csChanges.map((c, i) => (
+                  <li key={`${c.productName}-${i}`}>{describeCsChange(c)}</li>
+                ))}
+              </ul>
+              <p className="text-xs mt-2">راجع الكميات والأوزان قبل التجهيز.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCsChanges([])}
+              className="px-3 py-1 rounded bg-amber-200 hover:bg-amber-300 text-amber-900 text-sm font-semibold whitespace-nowrap"
+            >
+              تم
+            </button>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900" dir="ltr">🚚 {order.appOrderNo}</h1>
