@@ -23,6 +23,7 @@ function load(file, mocks) {
 }
 
 const catalogue = load('src/lib/catalogue.ts', {})
+const b2bLineRate = load('src/lib/b2bLineRate.ts', {})
 const PRODUCTS = [
   { id: 'p1', productName: 'Product one', pricingMode: 'weight', basePrice: 289, offerPrice: null },
   { id: 'p2', productName: 'Product two', pricingMode: 'unit', basePrice: 100, offerPrice: null },
@@ -96,6 +97,7 @@ function harness({ deliveryLookup = { data: null, error: null } } = {}) {
     '@/lib/attachmentStorage': { persistAttachment: async (url) => url },
     '@/lib/omsData': omsData,
     '@/lib/catalogue': catalogue,
+    '@/lib/b2bLineRate': b2bLineRate,
   })
   const put = (body) => route.PUT(
     { url: 'https://example.test/api/orders/order', json: async () => body },

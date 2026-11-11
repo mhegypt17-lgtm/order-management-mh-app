@@ -35,6 +35,7 @@ import {
   PRODUCT_COLUMNS,
 } from '@/lib/omsData'
 import { ONLINE_CATALOGUE_KEY, DEFAULT_CATALOGUES, resolveCatalogueKey } from '@/lib/catalogue'
+import { findLoweredB2BRates, describeLoweredRates } from '@/lib/b2bLineRate'
 
 // Disable Next.js fetch caching — Supabase queries here must always
 // return fresh data, otherwise a just-created order can 404 on its
@@ -54,6 +55,8 @@ type OrderUpdateItem = {
   /** Optional CS quick-adjust % audit note for a regular catalog line. */
   priceAdjustmentPct?: number | null
   priceAdjustmentReason?: string | null
+  /** Set by the CS form when the agent deliberately changed this line's price. */
+  priceEdited?: boolean
 }
 
 function normalizeProductName(value: string) {
@@ -783,7 +786,7 @@ export async function PUT(
     // reuses its id; each existing row is claimed at most once, so two lines
     // for the same product cannot end up with the same id.
     const claimedPriorIds = new Set<string>()
-    const claimPriorId = (i: (typeof normalizedItems)[number]): string | undefined => {
+    const claimPrior = (i: (typeof normalizedItems)[number]): any | undefined => {
       const customName = String(i.productNameInput || '').trim()
       const match = existingForOrder.find(
         (p: any) =>
@@ -791,9 +794,34 @@ export async function PUT(
           (i.isCustomItem ? p.isCustomItem && p.customItemName === customName : !p.isCustomItem && p.productId === i.productId),
       )
       if (match) claimedPriorIds.add(match.id)
-      return match?.id
+      return match
     }
-    const rewrittenItems: any[] = normalizedItems.map((i) => {
+    const claimedPriors = normalizedItems.map(claimPrior)
+
+    // B2B agreed price per kg: a CS save must not silently lower a weight
+    // line's price per kg (the form used to swap a negotiated 540 for the
+    // catalogue 518 whenever the weight was retyped). A deliberate change is
+    // flagged by the form with priceEdited. Nothing has been written yet.
+    const loweredRates = findLoweredB2BRates(
+      existing.orderType,
+      body.orderType || existing.orderType,
+      normalizedItems.map((i, idx) => {
+        const prior = claimedPriors[idx]
+        return {
+          productName: String(i.productNameInput || productById.get(i.productId)?.productName || ''),
+          isWeightMode: !i.isCustomItem && productById.get(i.productId)?.pricingMode === 'weight',
+          incoming: { unitPrice: i.unitPrice, weightGrams: i.weightGrams, priceEdited: i.priceEdited },
+          prior: prior ? { unitPrice: Number(prior.unitPrice), weightGrams: Number(prior.weightGrams) } : null,
+        }
+      }),
+    )
+    if (loweredRates.length > 0) {
+      return NextResponse.json(
+        { error: describeLoweredRates(loweredRates), code: 'B2B_PRICE_LOWERED', lines: loweredRates },
+        { status: 409 },
+      )
+    }
+    const rewrittenItems: any[] = normalizedItems.map((i, idx) => {
       const prior = findPriorItem(i)
       // Price-snapshot preservation rule:
       //   • If this productId already existed on the order, keep the prior
@@ -821,7 +849,7 @@ export async function PUT(
         : (nonOnlinePrice?.offerPrice ?? null)
       const offerPriceSnapshot = offerRaw != null && offerRaw > 0 ? offerRaw : null
       return {
-        id: claimPriorId(i) ?? generateId('item'),
+        id: claimedPriors[idx]?.id ?? generateId('item'),
         orderId: params.id,
         productId: i.isCustomItem ? null : i.productId,
         quantity: i.quantity,

@@ -7,6 +7,7 @@ import { useAuthStore } from '@/lib/auth'
 import { cairoDateString, cairoTimeString, formatCairoFriendly } from '@/lib/cairoTime'
 import { compressImage } from '@/lib/imageCompression'
 import { useDiscountCodeInfo } from '@/lib/discountCodeInfo'
+import { lineRatePerKg, effectivePricePerKg } from '@/lib/b2bLineRate'
 import {
   CatalogueEntry,
   CataloguePrice,
@@ -93,6 +94,19 @@ type OrderItemForm = {
   priceAdjustmentPct?: number | null
   /** Required-in-UI free-text reason when priceAdjustmentPct is set. */
   priceAdjustmentReason?: string | null
+  /**
+   * B2B weight lines only: this line's own agreed price per kg (its saved
+   * unit price ÷ its weight, or what the agent typed). Used when the weight
+   * changes so a negotiated price is never replaced by the catalogue price.
+   * Client-only — never sent to the server.
+   */
+  ratePerKg?: number | null
+  /**
+   * True once the agent deliberately changed this line's price (typed it,
+   * refreshed prices). Sent to the server so it can tell a real price change
+   * from an accidental drop; cleared after a successful save.
+   */
+  priceEdited?: boolean
 }
 
 const normalizeProductName = (value: string) =>
@@ -217,6 +231,8 @@ const emptyItem = (): OrderItemForm => ({
   isCustomItem: false,
   priceAdjustmentPct: null,
   priceAdjustmentReason: '',
+  ratePerKg: null,
+  priceEdited: false,
 })
 
 /**
@@ -555,6 +571,9 @@ export default function OrderForm({ mode, orderId }: Props) {
             isCustomItem: item.isCustomItem ?? false,
             priceAdjustmentPct: item.priceAdjustmentPct ?? null,
             priceAdjustmentReason: item.priceAdjustmentReason || '',
+            // B2B lines remember their own agreed price per kg (see ratePerKg).
+            ratePerKg: order.orderType === 'B2B' ? lineRatePerKg(item.unitPrice, item.weightGrams) : null,
+            priceEdited: false,
           }))
 
           setItems(mappedItems.length > 0 ? mappedItems : [emptyItem()])
@@ -774,6 +793,8 @@ export default function OrderForm({ mode, orderId }: Props) {
           isCustomItem: item.isCustomItem ?? false,
           priceAdjustmentPct: item.priceAdjustmentPct ?? null,
           priceAdjustmentReason: item.priceAdjustmentReason || '',
+          // A B2B reorder keeps the previous agreed price per kg.
+          ratePerKg: src.orderType === 'B2B' ? lineRatePerKg(item.unitPrice, item.weightGrams) : null,
         }))
         setItems(mapped.length > 0 ? mapped : [emptyItem()])
 
@@ -978,6 +999,8 @@ export default function OrderForm({ mode, orderId }: Props) {
         prev.map((it) => {
           const fresh = refreshedByProductId.get(it.productId)
           if (!fresh) return it
+          const nextUnit = fresh.unitPrice != null ? fresh.unitPrice : it.unitPrice
+          const unitChanged = Number(nextUnit) !== Number(it.unitPrice)
           return {
             ...it,
             basePriceSnapshot: fresh.basePriceSnapshot,
@@ -986,7 +1009,13 @@ export default function OrderForm({ mode, orderId }: Props) {
             // (weight-aware) — apply it directly so subtotal/orderTotal/
             // netTotal (all derived live from items[].unitPrice) update
             // immediately, matching the newly-persisted order totals.
-            unitPrice: fresh.unitPrice != null ? fresh.unitPrice : it.unitPrice,
+            unitPrice: nextUnit,
+            // A price the refresh itself changed is a deliberate catalogue
+            // refresh: keep it from being mistaken for an accidental drop,
+            // and let later weight edits follow the refreshed rate.
+            ...(unitChanged
+              ? { priceEdited: true, ratePerKg: form.orderType === 'B2B' ? lineRatePerKg(nextUnit, it.weightGrams) : null }
+              : {}),
           }
         }),
       )
@@ -1200,7 +1229,7 @@ export default function OrderForm({ mode, orderId }: Props) {
     const selected = findProductByName(catalogueProducts, productName)
 
     if (!selected) {
-      updateItem(index, { productNameInput: productName, productId: '' })
+      updateItem(index, { productNameInput: productName, productId: '', ratePerKg: null, priceEdited: false })
       return
     }
 
@@ -1212,6 +1241,9 @@ export default function OrderForm({ mode, orderId }: Props) {
       productId: selected.id,
       weightGrams: optimistic.weightGrams,
       unitPrice: optimistic.unitPrice,
+      // A different product starts from the catalogue price again.
+      ratePerKg: null,
+      priceEdited: false,
     })
 
     // Re-verify against the DB right now, bypassing both the in-memory list
@@ -1459,7 +1491,7 @@ export default function OrderForm({ mode, orderId }: Props) {
         isScheduled: form.orderStatus === 'حجز',
         deliveryArea: resolvedDeliveryArea,
         deliverySubArea: form.deliverySubArea || '',
-        items: validItems,
+        items: validItems.map(({ ratePerKg: _clientOnlyRate, ...line }) => line),
         discountCode: appliedDiscount?.code || null,
         manualDiscountType: manualDiscountType || null,
         manualDiscountValue: manualDiscountType ? manualDiscountValueRaw : null,
@@ -1484,7 +1516,17 @@ export default function OrderForm({ mode, orderId }: Props) {
         return
       }
 
-      if (!response.ok) throw new Error('Save failed')
+      if (!response.ok) {
+        // Refusals that carry their own explanation (empty items, a B2B price
+        // that dropped, lock check unavailable) must reach the agent instead
+        // of the generic "error while saving" message.
+        const err = await response.json().catch(() => ({}))
+        if (err?.code || response.status === 503) {
+          toast.error(err?.error || 'حدث خطأ أثناء الحفظ', { duration: 10000 })
+          return
+        }
+        throw new Error('Save failed')
+      }
 
       const data = await response.json()
       setDirtyFlag(false)
@@ -1508,6 +1550,9 @@ export default function OrderForm({ mode, orderId }: Props) {
         // state stays authoritative, and let the user keep working.
         setSavedCsCount(Array.isArray(form.csAttachments) ? form.csAttachments.length : 0)
         setPhotosLoaded(true)
+        // The saved prices are now the baseline; later accidental drops are
+        // checked against them again.
+        setItems((prev) => (prev.some((i) => i.priceEdited) ? prev.map((i) => (i.priceEdited ? { ...i, priceEdited: false } : i)) : prev))
       }
     } catch {
       toast.error('حدث خطأ أثناء الحفظ')
@@ -1800,7 +1845,15 @@ export default function OrderForm({ mode, orderId }: Props) {
                       ? Math.round(refFloorPerUnit * (Number(item.weightGrams || 0) / 1000) * 100) / 100
                       : refFloorPerUnit)
                   : null
-                const pricePerKg = isWeightMode ? Number((isB2B ? selectedProduct?.basePrice : (selectedProduct?.offerPrice ?? selectedProduct?.basePrice)) ?? 0) : 0
+                const pricePerKg = isWeightMode
+                  ? effectivePricePerKg({
+                      isB2B,
+                      // B2B: the line's own agreed rate (e.g. a negotiated 540)
+                      // wins over the catalogue price (518) when the weight changes.
+                      lineRate: item.ratePerKg,
+                      catalogueRate: Number((isB2B ? selectedProduct?.basePrice : (selectedProduct?.offerPrice ?? selectedProduct?.basePrice)) ?? 0),
+                    })
+                  : 0
                 const stockRaw = String((selectedProduct?.stockStatus as any) || 'available').toLowerCase().trim()
                 const stockQty = selectedProduct?.stockQuantity
                 // Quantity is an OPTIONAL, informational-only field on the
@@ -1961,10 +2014,25 @@ export default function OrderForm({ mode, orderId }: Props) {
                         type="number"
                         min={minUnitPrice ?? undefined}
                         value={item.unitPrice}
-                        onChange={(e) => updateItem(index, { unitPrice: Number(e.target.value) || 0 })}
+                        onChange={(e) => {
+                          // Typing a price on a B2B weight line is a deliberate
+                          // price decision: remember it as this line's rate per kg
+                          // (so a later weight change keeps it) and flag it so the
+                          // server accepts a deliberate reduction.
+                          const typed = Number(e.target.value) || 0
+                          updateItem(index, {
+                            unitPrice: typed,
+                            ...(isB2B && isWeightMode
+                              ? { ratePerKg: lineRatePerKg(typed, item.weightGrams), priceEdited: true }
+                              : {}),
+                          })
+                        }}
                         onBlur={() => {
                           if (minUnitPrice != null && Number(item.unitPrice) < minUnitPrice) {
-                            updateItem(index, { unitPrice: minUnitPrice })
+                            updateItem(index, {
+                              unitPrice: minUnitPrice,
+                              ...(isB2B && isWeightMode ? { ratePerKg: lineRatePerKg(minUnitPrice, item.weightGrams) } : {}),
+                            })
                           }
                         }}
                         readOnly={isWeightMode && !isB2B}

@@ -25,6 +25,7 @@ const plain = (v) => JSON.parse(JSON.stringify(v))
 const catalogue = load('src/lib/catalogue.ts', {})
 const sync = load('src/lib/branchItemSync.ts', {})
 const pricing = load('src/lib/b2bWeightPrice.ts', {})
+const b2bLineRate = load('src/lib/b2bLineRate.ts', {})
 
 // ───────────────────────── reconcileItems (branch screen) ─────────────────────────
 const line = (id, name, quantity, weightGrams = 1000) => ({ id, productName: name, quantity, weightGrams })
@@ -148,6 +149,7 @@ function csHarness(existingItems) {
     '@/lib/attachmentStorage': { persistAttachment: async (url) => url },
     '@/lib/omsData': omsData,
     '@/lib/catalogue': catalogue,
+    '@/lib/b2bLineRate': b2bLineRate,
   })
   return {
     ops,

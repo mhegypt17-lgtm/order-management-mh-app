@@ -42,6 +42,22 @@ than silently substituting a catalogue price. No new columns or price queries
 are required. Existing incorrectly repriced orders are not automatically repaired.
 Regression tests: `node --test scripts/b2b-weight-price.test.cjs`.
 
+### B2B agreed price per kg on CS edits
+
+On a B2B order the CS form remembers each weight line's own price per kg (saved
+unit price ÷ weight, or the price the agent typed) and uses it when the weight is
+retyped, instead of the catalogue B2B price. Previously a negotiated 540/kg
+turned into the catalogue 518/kg after the branch weighed the item and CS saved.
+The form sends `priceEdited` for a line only when the agent typed a price,
+changed the product or refreshed prices. The server refuses (409
+`B2B_PRICE_LOWERED`, nothing written) a save of an existing B2B weight line whose
+price per kg drops without that flag; to lower a price on purpose, type it in the
+unit-price box. Raises, other order types and unit-priced lines are unaffected.
+Validation errors that carry a message (this one, empty items, lock check
+unavailable) are now shown to the agent. No new requests or columns. Orders
+already repriced are not repaired automatically.
+Tests: `node --test scripts/b2b-line-rate.test.cjs`.
+
 ### Area name on the branch order screen
 
 The branch order page shows a "المنطقة" row (area, plus sub-area when present,
