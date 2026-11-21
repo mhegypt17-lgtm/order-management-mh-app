@@ -58,6 +58,30 @@ unavailable) are now shown to the agent. No new requests or columns. Orders
 already repriced are not repaired automatically.
 Tests: `node --test scripts/b2b-line-rate.test.cjs`.
 
+### Retention page (admin) and the 1,000-row limit
+
+PostgREST returns at most 1000 rows per request without any error, so the
+retention page was only looking at the first 1000 of 1,629 customers. It now
+reads every page (`src/lib/pagedRead.ts`, stable `.order()`), and no longer
+downloads the customer list at all: totals are head-only counts and details are
+fetched only for the customers that are in a stage. Cancelled orders are
+filtered in the query.
+
+Known, not yet changed: the notification engine
+(`src/app/api/notifications/route.ts`) that auto-creates stage follow-up tasks
+has the same 1000-row limit on customers and on the 400-day orders (918 now), so
+customers beyond the first 1000 are never evaluated. Fixing it makes stage 3
+("task") create a task per newly visible customer at once (81 in stage 3 against
+14 seen before), so it is held until that burst is agreed.
+
+The page also shows, from the nightly `customer_intelligence_scores` (no new
+calculation): segment, past spend and order count, usual order rhythm and how
+late the customer is ("متأخر ×N"), churn risk, an open-complaint flag, past
+spend per stage, and when the scores were last computed. Search by name/phone
+and sort by days, spend, lateness or risk use a plain GET form (`?q=&sort=`).
+The old 100-row display limit is gone. Logic is in `src/lib/retentionView.ts`.
+Tests: `node --test scripts/retention-view.test.cjs`.
+
 ### Area name on the branch order screen
 
 The branch order page shows a "المنطقة" row (area, plus sub-area when present,
