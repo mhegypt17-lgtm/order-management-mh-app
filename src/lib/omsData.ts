@@ -458,6 +458,8 @@ export interface RetentionConfig {
   stage1: RetentionStageConfig
   stage2: RetentionStageConfig
   stage3: RetentionStageConfig
+  /** Rules for the CS "اتصل بهم اليوم" queue (see lib/retentionQueue). */
+  queue?: { minStage: 1 | 2 | 3; minSpend: number; dailySize: number }
 }
 
 export const DEFAULT_RETENTION_CONFIG: RetentionConfig = {

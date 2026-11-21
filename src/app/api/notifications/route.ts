@@ -11,6 +11,7 @@ import {
 import { supabase } from '@/lib/supabase'
 import { cairoDateString, addDays } from '@/lib/cairoTime'
 import { complaintNotificationHref } from '@/lib/complaintLinks'
+import { readAllPages } from '@/lib/pagedRead'
 
 // Make this endpoint short-cached at the edge so a burst of bell pollers
 // in the same role share one DB read.
@@ -44,8 +45,12 @@ const NOTIF_CUSTOMERS_CACHE_TAG = 'notifications-customers'
 
 const readNotificationCustomersCached = unstable_cache(
   async (): Promise<{ data: unknown; error: { message: string } | null }> => {
-    const res = await supabase.from('customers').select(CUSTOMER_COLS)
-    return { data: res.data, error: res.error ? { message: res.error.message } : null }
+    // Every page: a single request returns at most 1000 customers, and the
+    // rest would never be checked for follow-ups.
+    const { rows, error } = await readAllPages<unknown>(
+      (from, to) => supabase.from('customers').select(CUSTOMER_COLS).order('id', { ascending: true }).range(from, to) as any,
+    )
+    return error ? { data: null, error: { message: error } } : { data: rows, error: null }
   },
   ['notifications-customers'],
   { revalidate: 60, tags: [NOTIF_CUSTOMERS_CACHE_TAG] }
@@ -138,12 +143,22 @@ const INACTIVITY_BUCKET_MS = 12 * 60 * 60 * 1000 // 12 hours — twice daily
 
 const readInactivityOrdersCached = unstable_cache(
   async (_bucket: number, inactivityCutoffISO: string) => {
-    const { data } = await supabase
-      .from('orders')
-      .select(ORDER_INACTIVITY_COLS)
-      .gte('createdAt', inactivityCutoffISO)
-      .not('customerId', 'is', null)
-    return (data as Array<{ id: string; customerId: string | null; orderStatus: string; createdAt: string }>) || []
+    // Paged (stable order) so a window above 1000 orders is read completely;
+    // cancelled orders never count as activity, so they aren't downloaded.
+    const { rows, error } = await readAllPages<{ id: string; customerId: string | null; orderStatus: string; createdAt: string }>(
+      (from, to) =>
+        supabase
+          .from('orders')
+          .select(ORDER_INACTIVITY_COLS)
+          .gte('createdAt', inactivityCutoffISO)
+          .not('customerId', 'is', null)
+          .neq('orderStatus', 'لاغي')
+          .order('id', { ascending: true })
+          .range(from, to) as any,
+    )
+    // A partial read would make customers look inactive, so a failed read
+    // yields nothing (no follow-ups) rather than a wrong list.
+    return error ? [] : rows
   },
   ['notifications-inactivity-orders'],
   { revalidate: 12 * 60 * 60, tags: [NOTIF_INACTIVITY_CACHE_TAG] }
@@ -324,8 +339,10 @@ export async function GET(req: NextRequest) {
     // applied), Supabase rejects the whole select. Detect that and retry
     // with the legacy projection so the rest of the endpoint keeps working.
     if (customersRes.error && /doNotFollowUp|followUpSnoozeUntil/i.test(customersRes.error.message || '')) {
-      const fallback = await supabase.from('customers').select('id,customerName,phone')
-      customers = (fallback.data as CustomerRec[]) || []
+      const fallback = await readAllPages<CustomerRec>(
+        (from, to) => supabase.from('customers').select('id,customerName,phone').order('id', { ascending: true }).range(from, to) as any,
+      )
+      customers = fallback.rows
     }
     const history: HistoryRec[] = bundle.history
 
@@ -655,11 +672,16 @@ export async function GET(req: NextRequest) {
       const existingAutoTasks = new Map<string, { id: string; linkedCustomerId: string | null; status?: string }>()
       const lastCompletedMs = new Map<string, number>()
       try {
-        const { data: autoTasks } = await supabase
-          .from('tasks')
-          .select('id,linkedCustomerId,status,source,updatedAt,completedAt')
-          .eq('source', 'auto-followup')
-        for (const t of (autoTasks || []) as Array<{ id: string; linkedCustomerId: string | null; status?: string; source?: string; updatedAt?: string; completedAt?: string }>) {
+        const { rows: autoTasks } = await readAllPages<{ id: string; linkedCustomerId: string | null; status?: string; source?: string; updatedAt?: string; completedAt?: string }>(
+          (from, to) =>
+            supabase
+              .from('tasks')
+              .select('id,linkedCustomerId,status,source,updatedAt,completedAt')
+              .eq('source', 'auto-followup')
+              .order('id', { ascending: true })
+              .range(from, to) as any,
+        )
+        for (const t of autoTasks) {
           if (!t.linkedCustomerId) continue
           if (t.status !== 'مكتملة') {
             existingAutoTasks.set(t.linkedCustomerId, t)

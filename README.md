@@ -67,20 +67,57 @@ downloads the customer list at all: totals are head-only counts and details are
 fetched only for the customers that are in a stage. Cancelled orders are
 filtered in the query.
 
-Known, not yet changed: the notification engine
-(`src/app/api/notifications/route.ts`) that auto-creates stage follow-up tasks
-has the same 1000-row limit on customers and on the 400-day orders (918 now), so
-customers beyond the first 1000 are never evaluated. Fixing it makes stage 3
-("task") create a task per newly visible customer at once (81 in stage 3 against
-14 seen before), so it is held until that burst is agreed.
+The notification engine (`src/app/api/notifications/route.ts`) that auto-creates
+stage follow-up tasks had the same 1000-row limit on customers, the 400-day
+orders and the auto-follow-up tasks, so customers beyond the first 1000 were
+never evaluated. It now pages all three; a failed order read yields no
+follow-ups rather than marking everyone inactive. Effect: stage 3 ("task")
+creates a task for each newly visible customer once (approved), then the
+per-customer cooldown applies as before.
 
 The page also shows, from the nightly `customer_intelligence_scores` (no new
 calculation): segment, past spend and order count, usual order rhythm and how
 late the customer is ("متأخر ×N"), churn risk, an open-complaint flag, past
 spend per stage, and when the scores were last computed. Search by name/phone
 and sort by days, spend, lateness or risk use a plain GET form (`?q=&sort=`).
-The old 100-row display limit is gone. Logic is in `src/lib/retentionView.ts`.
+The old 100-row display limit is gone. Logic is in `src/lib/retentionView.ts`;
+the shared reads are in `src/lib/retentionData.ts`.
 Tests: `node --test scripts/retention-view.test.cjs`.
+
+### CS call queue and outcome tracking
+
+**One-time setup:** run `data/retention-contacts-migration.sql` in Supabase (new
+table `retention_contacts`). Until then the pages work but calls cannot be
+logged, and say so.
+
+- **`/orders/retention` ("اتصل بهم اليوم", CS):** a short list of inactive
+  customers, ranked by value tier, then lateness against the customer's own
+  order rhythm, then churn risk. Customers with an open complaint appear first
+  in a separate "service call first" lane. Each card shows only what is needed
+  (phone/WhatsApp, days inactive, usual gap, orders, spend, one reason tag). A
+  drawer loads on demand (one request when opened): favourite products, last
+  order, survey and weakest area, last complaint, wallet, B2B/status flags,
+  earlier calls, and a suggested opening line.
+- **Logging a call** (`POST /api/retention/contacts`): result (no answer, wrong
+  number, answered, promised, ordered, not interested + required reason), optional
+  offer/note/next-call date. The customer leaves the queue until the next-call
+  date (defaults: 1 day no answer, 5 promised, 14 answered, 30 ordered, 90 not
+  interested). A promise/answer snoozes the auto follow-up engine for that
+  customer; a wrong number opts them out. Stage, days, segment and spend are
+  stored with the call.
+- **Rules (admin, Settings → Retention):** lowest stage that enters the queue,
+  minimum past spend and calls shown per day (default stage 1, no minimum, 25).
+- **`/admin/retention/outcomes`:** nothing is entered by hand. A call is a win
+  when the customer places a non-cancelled order within 30 days after it (or
+  before the next call to the same customer, so an order is credited once);
+  younger calls are "pending". Shows contact rate, win rate and recovered revenue
+  overall and by agent, stage, segment, result, refusal reason and offer, plus
+  rule-based recommendations that appear only after 15 matured calls.
+- Egress: the queue reads the same data as the admin page; the drawer and the
+  outcomes page read only when opened; writes happen only when a call is logged.
+
+Logic: `src/lib/retentionQueue.ts`, `src/lib/retentionDetails.ts`. Tests:
+`node --test scripts/retention-queue.test.cjs`.
 
 ### Area name on the branch order screen
 

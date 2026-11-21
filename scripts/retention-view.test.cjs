@@ -135,10 +135,11 @@ function makeDb(tables) {
         then(resolve, reject) {
           let out = (tables[table] || []).filter((r) => filters.every((f) => f(r)))
           for (const [c, dir] of orders.slice().reverse()) out = out.slice().sort((x, y) => (x[c] < y[c] ? -dir : x[c] > y[c] ? dir : 0))
-          requests.push({ table, range, head })
-          if (head) return Promise.resolve({ count: out.length, data: null, error: null }).then(resolve, reject)
           const [a, b] = range || [0, 999]
-          return Promise.resolve({ data: out.slice(a, Math.min(b, a + 999) + 1), error: null }).then(resolve, reject)
+          const page = out.slice(a, Math.min(b, a + 999) + 1)
+          requests.push({ table, range, head, returned: head ? 0 : page.length })
+          if (head) return Promise.resolve({ count: out.length, data: null, error: null }).then(resolve, reject)
+          return Promise.resolve({ data: page, error: null }).then(resolve, reject)
         },
       }
       return q
@@ -186,6 +187,11 @@ async function renderPage(searchParams = {}) {
   const db = makeDb(fixtures())
   const Controls = function Controls() { return null }
   const jsx = (type, props) => ({ type, props })
+  const retentionData = load('src/lib/retentionData.ts', {
+    '@/lib/supabase': { supabase: db },
+    '@/lib/pagedRead': paged,
+    '@/lib/retentionView': view,
+  })
   const page = load('src/app/admin/retention/page.tsx', {
     'next/headers': { headers: () => ({}) },
     'next/link': { __esModule: true, default: function Link() { return null } },
@@ -193,13 +199,11 @@ async function renderPage(searchParams = {}) {
     '@/lib/omsData': {
       DEFAULT_RETENTION_CONFIG: retentionCfg,
       readOrderSettings: async () => ({ retention: retentionCfg }),
-      fetchRowsIn: async (table, column, values) => {
-        const set = new Set(values)
-        return fixturesCache()[table].filter((r) => set.has(r[column]))
-      },
     },
     '@/lib/pagedRead': paged,
+    '@/lib/retentionData': retentionData,
     '@/lib/retentionView': view,
+    '@/components/retention/CustomerDetails': { __esModule: true, default: function CustomerDetails() { return null } },
     './CustomerControls': { __esModule: true, default: Controls },
     'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'fragment' },
   }, true).default
@@ -227,8 +231,9 @@ test('Retention page: total customers is the real count, not 1000', async () => 
 
 test('Retention page: the live customer list is never downloaded, only the staged customers', async () => {
   const { db } = await renderPage()
-  const customerReads = db.requests.filter((r) => r.table === 'customers')
-  assert.ok(customerReads.every((r) => r.head), 'customers are only counted')
+  const customerReads = db.requests.filter((r) => r.table === 'customers' && !r.head)
+  const downloaded = customerReads.reduce((s, r) => s + r.returned, 0)
+  assert.equal(downloaded, 100, 'only the 100 customers in a stage are read, never the 1300')
   assert.ok(db.requests.filter((r) => r.table === 'orders').length >= 2, 'orders are paged')
 })
 
@@ -249,4 +254,66 @@ test('Retention page: the search box filters rows but not the stage totals', asy
   assert.deepEqual(sectionRows(0), ['c01199'])
   assert.equal(sectionRows(1).length, 0)
   assert.equal(kpi('مرحلة 3').props.value, 20)
+})
+
+// ───────────────────────── Notification engine (creates the follow-up tasks) ─────────────────────────
+test('Notifications: follow-up tasks are created for customers beyond the first 1000 rows', async () => {
+  cache = fixtures()
+  const db = makeDb(cache)
+  const created = []
+  const route = load('src/app/api/notifications/route.ts', {
+    'next/server': { NextResponse: { json: (body) => body } },
+    'next/cache': { unstable_cache: (fn) => fn },
+    '@/lib/supabase': { supabase: db },
+    '@/lib/cairoTime': { cairoDateString: () => '2026-11-21', addDays: () => '2026-11-22' },
+    '@/lib/complaintLinks': { complaintNotificationHref: () => '/x' },
+    '@/lib/pagedRead': paged,
+    '@/lib/omsData': {
+      DEFAULT_RETENTION_CONFIG: retentionCfg,
+      readOrderSettings: async () => ({ retention: retentionCfg }),
+      createTask: async (t) => { created.push(t.linkedCustomerId); return { id: `t${created.length}`, linkedCustomerId: t.linkedCustomerId, status: 'جديدة' } },
+    },
+  })
+  const res = await route.GET({ url: 'https://example.test/api/notifications?role=cs&user=x' })
+  const stage3 = Array.from({ length: 20 }, (_, i) => `c${pad(1180 + i)}`)
+  assert.deepEqual(created.slice().sort(), stage3)
+  const inactive = res.items.filter((i) => i.type === 'inactive-customer')
+  assert.ok(inactive.length > 0, 'reminders are listed (the bell itself shows at most 50 items)')
+})
+
+test('Notifications: a failed order read creates no tasks instead of marking everyone inactive', async () => {
+  cache = fixtures()
+  const db = makeDb(cache)
+  const realFrom = db.from
+  let orderReads = 0
+  db.from = (table) => {
+    const q = realFrom(table)
+    if (table !== 'orders') return q
+    const realThen = q.then
+    const realRange = q.range
+    let ranged = false
+    q.range = (a, b) => { ranged = true; return realRange(a, b) }
+    // Only the paged inactivity read uses .range(); fail its second page.
+    q.then = (resolve, reject) => (ranged && ++orderReads === 2
+      ? Promise.resolve({ data: null, error: { message: 'timeout' } }).then(resolve, reject)
+      : realThen(resolve, reject))
+    return q
+  }
+  const created = []
+  const route = load('src/app/api/notifications/route.ts', {
+    'next/server': { NextResponse: { json: (body) => body } },
+    'next/cache': { unstable_cache: (fn) => fn },
+    '@/lib/supabase': { supabase: db },
+    '@/lib/cairoTime': { cairoDateString: () => '2026-11-21', addDays: () => '2026-11-22' },
+    '@/lib/complaintLinks': { complaintNotificationHref: () => '/x' },
+    '@/lib/pagedRead': paged,
+    '@/lib/omsData': {
+      DEFAULT_RETENTION_CONFIG: retentionCfg,
+      readOrderSettings: async () => ({ retention: retentionCfg }),
+      createTask: async (t) => { created.push(t.linkedCustomerId); return { id: 't', linkedCustomerId: t.linkedCustomerId, status: 'جديدة' } },
+    },
+  })
+  const res = await route.GET({ url: 'https://example.test/api/notifications?role=cs&user=x' })
+  assert.deepEqual(created, [])
+  assert.equal(res.items.filter((i) => i.type === 'inactive-customer').length, 0)
 })

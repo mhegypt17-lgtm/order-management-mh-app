@@ -101,6 +101,7 @@ export default function Navbar({ user }: NavbarProps) {
       { label: '⭐ تقييمات العملاء', href: '/orders/feedback' },
       { label: '📞 سجل المكالمات', href: '/orders/call-logs' },
       { label: '✅ المهام', href: '/orders/tasks' },
+      { label: '🔁 اتصل بهم اليوم', href: '/orders/retention' },
       { label: '🕐 الورديات', href: '/orders/shifts' },
       { label: '🚚 التوصيل', href: '/orders/delivery' },
       { label: '🏷️ أكواد الخصم', href: '/orders/discount-codes' },

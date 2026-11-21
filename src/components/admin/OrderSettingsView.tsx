@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
+import { sanitizeQueueConfig, DEFAULT_QUEUE_CONFIG } from '@/lib/retentionQueue'
 import {
   DEFAULT_RETENTION_CONFIG,
   type RetentionConfig,
@@ -204,6 +205,7 @@ export default function OrderSettingsView() {
             stage1: { ...DEFAULT_RETENTION_CONFIG.stage1, ...(data.settings.retention.stage1 || {}) },
             stage2: { ...DEFAULT_RETENTION_CONFIG.stage2, ...(data.settings.retention.stage2 || {}) },
             stage3: { ...DEFAULT_RETENTION_CONFIG.stage3, ...(data.settings.retention.stage3 || {}) },
+            queue: sanitizeQueueConfig(data.settings.retention.queue),
           }
           setRetention(merged)
         }
@@ -1186,6 +1188,54 @@ export default function OrderSettingsView() {
               </div>
             )
           })}
+        </div>
+
+        <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50/50 p-3 space-y-2">
+          <div className="font-bold text-emerald-900">📞 قائمة «اتصل بهم اليوم» لخدمة العملاء</div>
+          {(() => {
+            const q = retention.queue || DEFAULT_QUEUE_CONFIG
+            const setQ = (patch: Partial<typeof q>) => setRetention({ ...retention, queue: { ...q, ...patch } })
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <label className="block text-sm">
+                  <span className="text-gray-700 font-medium">أقل مرحلة تدخل القائمة</span>
+                  <select
+                    value={q.minStage}
+                    onChange={(e) => setQ({ minStage: Number(e.target.value) as 1 | 2 | 3 })}
+                    className="mt-1 w-full px-2 py-1.5 border-2 border-gray-300 rounded-lg"
+                  >
+                    <option value={1}>المرحلة 1 فأعلى</option>
+                    <option value={2}>المرحلة 2 فأعلى</option>
+                    <option value={3}>المرحلة 3 فقط</option>
+                  </select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-gray-700 font-medium">أقل إنفاق سابق (ج.م)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={q.minSpend}
+                    onChange={(e) => setQ({ minSpend: Math.max(0, Number(e.target.value) || 0) })}
+                    className="mt-1 w-full px-2 py-1.5 border-2 border-gray-300 rounded-lg text-center"
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-gray-700 font-medium">عدد المكالمات المعروضة يومياً</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={q.dailySize}
+                    onChange={(e) => setQ({ dailySize: Math.max(1, Number(e.target.value) || 1) })}
+                    className="mt-1 w-full px-2 py-1.5 border-2 border-gray-300 rounded-lg text-center"
+                  />
+                </label>
+              </div>
+            )
+          })()}
+          <p className="text-xs text-gray-600">
+            تُرتّب القائمة حسب قيمة العميل ثم التأخر عن عادته ثم خطر الفقد. العملاء أصحاب الشكاوى المفتوحة يظهرون أولاً في خانة منفصلة ولا يُحسبون من الحد اليومي.
+          </p>
         </div>
 
         <div className="text-xs text-gray-600 bg-gray-50 rounded-lg p-2 border border-gray-200">

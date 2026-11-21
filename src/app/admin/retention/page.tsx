@@ -1,8 +1,9 @@
 import { headers } from 'next/headers'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import { DEFAULT_RETENTION_CONFIG, fetchRowsIn, readOrderSettings, type RetentionConfig } from '@/lib/omsData'
+import { DEFAULT_RETENTION_CONFIG, readOrderSettings, type RetentionConfig } from '@/lib/omsData'
 import { readAllPages } from '@/lib/pagedRead'
+import { readRetentionStaging } from '@/lib/retentionData'
 import {
   CHURN_LABELS,
   LIFECYCLE_LABELS,
@@ -15,22 +16,10 @@ import {
   type RetentionRow,
 } from '@/lib/retentionView'
 import RetentionCustomerControls from './CustomerControls'
+import CustomerDetails from '@/components/retention/CustomerDetails'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
-
-type CustomerRow = {
-  id: string
-  customerName: string | null
-  phone: string | null
-  doNotFollowUp?: boolean | null
-  followUpSnoozeUntil?: string | null
-}
-
-type OrderRow = {
-  customerId: string | null
-  createdAt: string
-}
 
 type TaskRow = {
   linkedCustomerId: string | null
@@ -39,25 +28,7 @@ type TaskRow = {
   createdAt: string
 }
 
-type IntelDbRow = {
-  customerId: string
-  lifecycleStage: string | null
-  churnRisk: string | null
-  healthScore: number | null
-  totalOrders: number | null
-  totalRevenue: number | null
-  typicalIntervalDays: number | null
-  computedAt: string | null
-}
-
 const fmtMoney = (n: number) => Math.round(n).toLocaleString('en-US')
-
-function stageForDays(days: number, ret: RetentionConfig): 0 | 1 | 2 | 3 {
-  if (days >= ret.stage3.days) return 3
-  if (days >= ret.stage2.days) return 2
-  if (days >= ret.stage1.days) return 1
-  return 0
-}
 
 export default async function RetentionDashboardPage({
   searchParams,
@@ -73,24 +44,15 @@ export default async function RetentionDashboardPage({
   const settings = await readOrderSettings()
   const retention: RetentionConfig = settings.retention || DEFAULT_RETENTION_CONFIG
 
-  // Pull recent orders + auto-followup tasks (every page — PostgREST caps a
-  // single request at 1000 rows) and cheap head-only counts for the customer
-  // totals, so no customer list is downloaded just to be counted.
+  // Staging (paged reads, details only for customers in a stage), the
+  // auto-followup tasks, and head-only counts for the customer totals so no
+  // customer list is downloaded just to be counted.
   const nowIso = new Date().toISOString()
-  const inactivityCutoffISO = new Date(Date.now() - 400 * 86_400_000).toISOString()
+  const nowMs = Date.now()
   const monthStartISO = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()
 
-  const [ordersRead, tasksRead, totalCustomersRes, optedOutRes, snoozedRes] = await Promise.all([
-    readAllPages<OrderRow>((from, to) =>
-      supabase
-        .from('orders')
-        .select('customerId,createdAt')
-        .gte('createdAt', inactivityCutoffISO)
-        .not('customerId', 'is', null)
-        .neq('orderStatus', 'لاغي')
-        .order('id', { ascending: true })
-        .range(from, to) as any,
-    ),
+  const [staging, tasksRead, totalCustomersRes, optedOutRes, snoozedRes] = await Promise.all([
+    readRetentionStaging(retention),
     readAllPages<TaskRow>((from, to) =>
       supabase
         .from('tasks')
@@ -109,79 +71,14 @@ export default async function RetentionDashboardPage({
   // Supabase rejects the follow-up column filters; surface it in the header.
   const customersErrorMsg = optedOutRes.error?.message || snoozedRes.error?.message || totalCustomersRes.error?.message || ''
   const missingFollowUpColumns =
-    /doNotFollowUp|followUpSnoozeUntil|column .* does not exist/i.test(customersErrorMsg)
-  const readErrorMsg = ordersRead.error || tasksRead.error || ''
-  const orders: OrderRow[] = ordersRead.rows
+    staging.missingFollowUpColumns || /doNotFollowUp|followUpSnoozeUntil|column .* does not exist/i.test(customersErrorMsg)
+  const readErrorMsg = staging.error || tasksRead.error || ''
   const tasks: TaskRow[] = tasksRead.rows
-
-  // Last (non-cancelled) order per customer
-  const nowMs = Date.now()
-  const lastOrderMs = new Map<string, number>()
-  for (const o of orders) {
-    if (!o.customerId) continue
-    const ts = new Date(o.createdAt).getTime()
-    if (!isFinite(ts)) continue
-    const prev = lastOrderMs.get(o.customerId) || 0
-    if (ts > prev) lastOrderMs.set(o.customerId, ts)
-  }
-
-  // Which customers fall in a stage, then load details for just those.
-  const staged: Array<{ id: string; days: number; lastMs: number; stage: 1 | 2 | 3 }> = []
-  for (const [id, lastMs] of lastOrderMs) {
-    const days = Math.floor((nowMs - lastMs) / 86_400_000)
-    const stage = stageForDays(days, retention)
-    if (stage !== 0) staged.push({ id, days, lastMs, stage })
-  }
-  const stagedIds = staged.map((s) => s.id)
-  const [customerRecords, intelRecords, complaintRecords] = await Promise.all([
-    fetchRowsIn<CustomerRow>(
-      'customers',
-      'id',
-      stagedIds,
-      missingFollowUpColumns ? 'id,customerName,phone' : 'id,customerName,phone,doNotFollowUp,followUpSnoozeUntil',
-    ),
-    fetchRowsIn<IntelDbRow>(
-      'customer_intelligence_scores',
-      'customerId',
-      stagedIds,
-      'customerId,lifecycleStage,churnRisk,healthScore,totalOrders,totalRevenue,typicalIntervalDays,computedAt',
-    ),
-    fetchRowsIn<{ customerId: string; status: string }>('complaints', 'customerId', stagedIds, 'customerId,status'),
-  ])
-  const customerById = new Map(customerRecords.map((c) => [c.id, c]))
-  const intelById = new Map(intelRecords.map((r) => [r.customerId, r]))
-  const openComplaintsById = new Map<string, number>()
-  for (const cp of complaintRecords) {
-    if (cp.status === 'closed') continue
-    openComplaintsById.set(cp.customerId, (openComplaintsById.get(cp.customerId) || 0) + 1)
-  }
-  const scoresUpdatedAt = intelRecords.reduce((latest, r) => (r.computedAt && r.computedAt > latest ? r.computedAt : latest), '')
+  const customerById = staging.customerById
+  const scoresUpdatedAt = staging.scoresUpdatedAt
 
   // Stage buckets (unfiltered, used for the KPI cards and diagnostics)
-  const allBuckets: Record<1 | 2 | 3, RetentionRow[]> = { 1: [], 2: [], 3: [] }
-  for (const s of staged) {
-    const c = customerById.get(s.id)
-    if (!c) continue
-    const intel = intelById.get(s.id)
-    allBuckets[s.stage].push({
-      id: s.id,
-      name: c.customerName || '',
-      phone: c.phone || '',
-      days: s.days,
-      lastMs: s.lastMs,
-      intel: intel
-        ? {
-            lifecycleStage: intel.lifecycleStage,
-            churnRisk: intel.churnRisk,
-            healthScore: intel.healthScore,
-            totalOrders: intel.totalOrders,
-            totalRevenue: intel.totalRevenue,
-            typicalIntervalDays: intel.typicalIntervalDays,
-          }
-        : null,
-      openComplaints: openComplaintsById.get(s.id) || 0,
-    })
-  }
+  const allBuckets: Record<1 | 2 | 3, RetentionRow[]> = staging.byStage
   // Rows shown: filtered by the search box and sorted by the chosen key
   const buckets: Record<1 | 2 | 3, RetentionRow[]> = {
     1: sortRows(allBuckets[1].filter((r) => matchesQuery(r, query)), sortKey),
@@ -231,20 +128,34 @@ export default async function RetentionDashboardPage({
             )}
           </p>
         </div>
-        <Link
-          href="/admin/settings"
-          className="px-3 py-1.5 rounded-lg bg-white border-2 border-emerald-300 text-emerald-700 hover:bg-emerald-50 text-sm font-medium"
-        >
-          ⚙️ ضبط المراحل
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/admin/retention/outcomes"
+            className="px-3 py-1.5 rounded-lg bg-white border-2 border-indigo-300 text-indigo-700 hover:bg-indigo-50 text-sm font-medium"
+          >
+            📈 نتائج المتابعة
+          </Link>
+          <Link
+            href="/orders/retention"
+            className="px-3 py-1.5 rounded-lg bg-white border-2 border-emerald-300 text-emerald-700 hover:bg-emerald-50 text-sm font-medium"
+          >
+            📞 قائمة الاتصال (CS)
+          </Link>
+          <Link
+            href="/admin/settings"
+            className="px-3 py-1.5 rounded-lg bg-white border-2 border-emerald-300 text-emerald-700 hover:bg-emerald-50 text-sm font-medium"
+          >
+            ⚙️ ضبط المراحل
+          </Link>
+        </div>
       </div>
 
       {/* Diagnostics: explain what's loaded so the user understands an empty dashboard. */}
       {(() => {
         const totalCustomers = totalCustomersRes.count || 0
-        const customersWithOrders = lastOrderMs.size
+        const customersWithOrders = staging.customersWithOrders
         const inAnyStage = allBuckets[1].length + allBuckets[2].length + allBuckets[3].length
-        const ordersInWindow = orders.length
+        const ordersInWindow = staging.ordersInWindow
         const issues: Array<{ tone: 'red' | 'amber' | 'blue'; text: string }> = []
         if (missingFollowUpColumns) {
           issues.push({
@@ -268,7 +179,7 @@ export default async function RetentionDashboardPage({
             tone: 'blue',
             text: `كل العملاء النشطين طلبوا خلال آخر ${retention.stage1.days} يوم — لا أحد في أي مرحلة متابعة حالياً. يمكنك خفض حد المرحلة الأولى من الإعدادات لاختبار النظام.`,
           })
-        } else if (intelRecords.length === 0) {
+        } else if (staging.intelCount === 0) {
           issues.push({
             tone: 'amber',
             text: 'لا توجد بيانات تقييم (RFM) لهؤلاء العملاء بعد — تُحسب ليلاً، أو اضغط «تحديث الآن» في صفحة Customers.',
@@ -400,6 +311,7 @@ export default async function RetentionDashboardPage({
                         <tr key={r.id} className="border-t border-gray-100 hover:bg-gray-50">
                           <td className="px-3 py-2 font-medium text-gray-900">
                             <div>{r.name || '—'}</div>
+                            <CustomerDetails customerId={r.id} name={r.name} days={r.days} audience="admin" />
                             <div className="flex flex-wrap gap-1 mt-0.5">
                               {intel?.lifecycleStage && (
                                 <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[11px] font-medium">

@@ -94,3 +94,14 @@ export const LIFECYCLE_LABELS: Record<string, string> = {
 }
 
 export const CHURN_LABELS: Record<string, string> = { High: 'مرتفع', Medium: 'متوسط', Low: 'منخفض' }
+
+/** Retention stage (0 = still active) for a number of days without a (non-cancelled) order. */
+export function stageForDays(
+  days: number,
+  ret: { stage1: { days: number }; stage2: { days: number }; stage3: { days: number } },
+): 0 | 1 | 2 | 3 {
+  if (days >= ret.stage3.days) return 3
+  if (days >= ret.stage2.days) return 2
+  if (days >= ret.stage1.days) return 1
+  return 0
+}
