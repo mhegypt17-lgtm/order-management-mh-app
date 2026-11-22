@@ -142,6 +142,22 @@ touch are never written. No extra requests: the refresh reuses the existing
 focus/visibility trigger. Tests (mocked, no database writes):
 `node --test scripts/order-line-sync.test.cjs`.
 
+### Branch alert when CS edits a ready order
+
+If CS (or an admin) changes lines of an order whose delivery status is جاهز or
+في الطريق, the branch gets an urgent bell alert ("✏️ خدمة العملاء عدّلت طلباً
+جاهزاً") naming the order and the change (e.g. "لحم مفروم: الكمية 1 → 2"), linking
+to the branch order screen; admin sees it too, CS does not. Nothing extra is
+read or written: the line-level diff (quantity, weight, price, added/removed)
+is added to the `edit_history` row the save already writes
+(`details.lateEdit = true`, `source: 'cs'`), and the bell's existing history
+query gets one extra filter (`or=action.eq.status_changed,details->>lateEdit.eq.true`).
+The status comes from the lock lookup CS saves already do; an admin save reads it
+only if a line actually changed. The order history page shows these changes too.
+Saves before the order is ready, or with no line change, are not flagged. Origin:
+order 131126online1 (a quantity raised after the branch issued the receipt).
+Logic: `src/lib/lateEdit.ts`. Tests: `node --test scripts/late-edit-alert.test.cjs`.
+
 ### Complaint notifications (branch)
 
 For branch users, complaint notifications (new ticket, SLA breach, new comment)

@@ -25,6 +25,7 @@ const plain = (v) => JSON.parse(JSON.stringify(v))
 const catalogue = load('src/lib/catalogue.ts', {})
 const rate = load('src/lib/b2bLineRate.ts', {})
 const voucher = load('src/lib/voucherAmount.ts', {})
+const lateEditLib = load('src/lib/lateEdit.ts', {})
 
 // ───────────────────────── helpers ─────────────────────────
 test('lineRatePerKg derives the agreed rate from a saved line', () => {
@@ -141,6 +142,7 @@ function csHarness(orderType, existingItems) {
     '@/lib/omsData': omsData,
     '@/lib/catalogue': catalogue,
     '@/lib/b2bLineRate': rate,
+    '@/lib/lateEdit': lateEditLib,
   })
   const writes = () => ops.filter((o) => ['order_items', 'orders', 'order_delivery'].includes(o.table))
   return {

@@ -11,6 +11,7 @@ import {
 import { supabase } from '@/lib/supabase'
 import { cairoDateString, addDays } from '@/lib/cairoTime'
 import { complaintNotificationHref } from '@/lib/complaintLinks'
+import { describeLateEdit, type LineChange } from '@/lib/lateEdit'
 import { readAllPages } from '@/lib/pagedRead'
 
 // Make this endpoint short-cached at the edge so a burst of bell pollers
@@ -112,8 +113,9 @@ const readNotificationBundleCached = unstable_cache(
         // Scheduled orders for today/tomorrow (any age).
         supabase.from('orders').select(ORDER_COLS).eq('isScheduled', true).in('scheduledDate', [todayCairo, tomorrowCairo]),
         // Edit history is the worst offender — was reading up to 100k rows
-        // every poll. Now filtered to 7 days + only status_changed action.
-        supabase.from('edit_history').select(HISTORY_COLS).eq('action', 'status_changed').gte('changedAt', cutoffISO),
+        // every poll. Now filtered to 7 days + only status changes and the rare
+        // "CS edited an order after it was ready" rows (details.lateEdit).
+        supabase.from('edit_history').select(HISTORY_COLS).or('action.eq.status_changed,details->>lateEdit.eq.true').gte('changedAt', cutoffISO),
       ])
 
     return {
@@ -175,6 +177,7 @@ export type NotificationType =
   | 'order-new'
   | 'order-status-changed'
   | 'delivery-status-changed'
+  | 'order-edited-after-ready'
   | 'scheduled-reminder'
   | 'priority-order'
   | 'inactive-customer'
@@ -582,6 +585,25 @@ export async function GET(req: NextRequest) {
 
     // Status-change history → role-targeted notifications
     for (const h of history) {
+      // CS changed lines of an order the branch already prepared/sent → urgent
+      // alert for the branch (and admin), with what changed.
+      if (h.details?.lateEdit === true) {
+        if (role !== 'branch' && role !== 'admin') continue
+        const lateTs = new Date(h.changedAt).getTime()
+        if (!isFinite(lateTs) || lateTs < cutoff) continue
+        const changes = Array.isArray(h.details.changes) ? (h.details.changes as LineChange[]) : []
+        items.push({
+          id: `late-edit:${h.id}`,
+          type: 'order-edited-after-ready',
+          title: '✏️ خدمة العملاء عدّلت طلباً جاهزاً',
+          body: `${orderLabel(h.orderId || h.entityId)}${changes.length ? ' — ' + describeLateEdit(changes) : ''}`,
+          href: `/branch/${h.orderId || h.entityId}`,
+          createdAt: h.changedAt,
+          actor: h.changedBy,
+          priority: 'urgent',
+        })
+        continue
+      }
       if (h.action !== 'status_changed') continue
       const ts = new Date(h.changedAt).getTime()
       if (!isFinite(ts) || ts < cutoff) continue

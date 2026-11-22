@@ -58,7 +58,7 @@ export default function EditOrderPage() {
           <ul className="space-y-2">
             {history.map((entry) => {
               const isBranchLineEdit =
-                entry.details?.source === 'branch' && Array.isArray(entry.details?.changes)
+                (entry.details?.source === 'branch' || entry.details?.source === 'cs') && Array.isArray(entry.details?.changes)
               return (
                 <li key={entry.id} className="rounded-lg border border-gray-100 bg-gray-50 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -68,6 +68,11 @@ export default function EditOrderPage() {
                     </span>
                   </div>
                   <p className="text-xs text-gray-600 mt-1">بواسطة: {entry.changedBy || '-'}</p>
+                  {entry.details?.lateEdit === true && (
+                    <p className="text-xs font-semibold text-red-700 mt-1">
+                      ⚠️ تعديل بعد أن أصبح الطلب «{String(entry.details.deliveryStatus || '')}» — تم تنبيه الفرع
+                    </p>
+                  )}
                   {isBranchLineEdit && (
                     <div className="mt-2 space-y-1">
                       {(entry.details!.changes as any[]).map((c, i) => (
@@ -76,6 +81,11 @@ export default function EditOrderPage() {
                           className="text-xs bg-blue-50 border border-blue-200 rounded px-2 py-1 text-blue-900"
                         >
                           <span className="font-semibold">{c.productName || '—'}</span>
+                          {c.added && <span className="mr-2"> · أُضيف</span>}
+                          {c.removed && <span className="mr-2"> · حُذف</span>}
+                          {c.priceChange && (
+                            <span className="mr-2"> · السعر: {c.priceChange.from} → {c.priceChange.to}</span>
+                          )}
                           {c.qtyChange && (
                             <span className="mr-2">
                               {' · '}الكمية: {c.qtyChange.from} → {c.qtyChange.to}

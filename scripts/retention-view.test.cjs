@@ -28,6 +28,7 @@ function load(file, mocks, jsx = false) {
 const plain = (v) => JSON.parse(JSON.stringify(v))
 const paged = load('src/lib/pagedRead.ts', {})
 const view = load('src/lib/retentionView.ts', {})
+const lateEditLib = load('src/lib/lateEdit.ts', {})
 
 // ───────────────────────── readAllPages ─────────────────────────
 const pageOf = (total, size, calls) => async (from, to) => {
@@ -267,6 +268,7 @@ test('Notifications: follow-up tasks are created for customers beyond the first 
     '@/lib/supabase': { supabase: db },
     '@/lib/cairoTime': { cairoDateString: () => '2026-11-21', addDays: () => '2026-11-22' },
     '@/lib/complaintLinks': { complaintNotificationHref: () => '/x' },
+    '@/lib/lateEdit': lateEditLib,
     '@/lib/pagedRead': paged,
     '@/lib/omsData': {
       DEFAULT_RETENTION_CONFIG: retentionCfg,
@@ -306,6 +308,7 @@ test('Notifications: a failed order read creates no tasks instead of marking eve
     '@/lib/supabase': { supabase: db },
     '@/lib/cairoTime': { cairoDateString: () => '2026-11-21', addDays: () => '2026-11-22' },
     '@/lib/complaintLinks': { complaintNotificationHref: () => '/x' },
+    '@/lib/lateEdit': lateEditLib,
     '@/lib/pagedRead': paged,
     '@/lib/omsData': {
       DEFAULT_RETENTION_CONFIG: retentionCfg,

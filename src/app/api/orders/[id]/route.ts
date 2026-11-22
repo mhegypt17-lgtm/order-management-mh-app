@@ -36,6 +36,7 @@ import {
 } from '@/lib/omsData'
 import { ONLINE_CATALOGUE_KEY, DEFAULT_CATALOGUES, resolveCatalogueKey } from '@/lib/catalogue'
 import { findLoweredB2BRates, describeLoweredRates } from '@/lib/b2bLineRate'
+import { diffOrderLines, isLateEditStatus } from '@/lib/lateEdit'
 
 // Disable Next.js fetch caching — Supabase queries here must always
 // return fresh data, otherwise a just-created order can 404 on its
@@ -385,12 +386,17 @@ export async function PUT(
     // items wipes the order (031126app1, 041026app1). It is therefore handled
     // here whatever the lock state — including when the lock lookup fails.
     const narrowSave = body.attachmentsOnly === true
+    // Delivery status as read for the lock check; stays undefined when that
+    // check is skipped (admin full save), in which case it is read on demand
+    // below, and only if a line actually changed.
+    let deliveryStatusNow: string | null | undefined
     if (requesterRole !== 'admin' || narrowSave) {
       const { data: currentDelivery, error: deliveryError } = await supabase
         .from('order_delivery')
         .select('deliveryStatus')
         .eq('orderId', params.id)
         .maybeSingle()
+      deliveryStatusNow = (currentDelivery as any)?.deliveryStatus ?? null
       // A failed lookup is not "unlocked": refuse and let the user retry,
       // instead of silently skipping the lock. (The narrow save is safe either
       // way, so it does not need the lock state.)
@@ -1061,6 +1067,34 @@ export async function PUT(
       }
     }
 
+    // Late edit: the branch already prepared (جاهز) or sent the order out, so
+    // the line changes go on the history row below and reach the branch bell.
+    const lineChanges = diffOrderLines(
+      normalizedItems.map((i, idx) => {
+        const prior = claimedPriors[idx]
+        const product = i.isCustomItem ? null : productById.get(i.productId)
+        return {
+          itemId: prior?.id ?? null,
+          productName: String(i.isCustomItem ? i.productNameInput || '' : product?.productName || i.productNameInput || ''),
+          isWeightMode: !i.isCustomItem && product?.pricingMode === 'weight',
+          prior: prior ? { quantity: Number(prior.quantity), weightGrams: Number(prior.weightGrams), unitPrice: Number(prior.unitPrice) } : null,
+          next: { quantity: i.quantity, weightGrams: i.weightGrams, unitPrice: i.unitPrice },
+        }
+      }),
+      existingForOrder
+        .filter((p: any) => !claimedPriors.some((c) => c && c.id === p.id))
+        .map((p: any) => ({
+          itemId: p.id as string,
+          productName: String(p.isCustomItem ? p.customItemName || '' : productById.get(p.productId)?.productName || ''),
+          prior: { quantity: Number(p.quantity), weightGrams: Number(p.weightGrams), unitPrice: Number(p.unitPrice) },
+        })),
+    )
+    if (lineChanges.length > 0 && deliveryStatusNow === undefined) {
+      const { data: d } = await supabase.from('order_delivery').select('deliveryStatus').eq('orderId', params.id).maybeSingle()
+      deliveryStatusNow = (d as any)?.deliveryStatus ?? null
+    }
+    const lateEdit = lineChanges.length > 0 && isLateEditStatus(deliveryStatusNow)
+
     await appendEditHistory({
       entityType: 'order',
       entityId: params.id,
@@ -1072,6 +1106,16 @@ export async function PUT(
         changedFields,
         itemCount: rewrittenItems.length,
         orderTotal,
+        ...(lateEdit
+          ? {
+              lateEdit: true,
+              source: 'cs',
+              deliveryStatus: deliveryStatusNow,
+              changes: lineChanges,
+              previousOrderTotal: Number(existing.orderTotal) || 0,
+              newOrderTotal: orderTotal,
+            }
+          : {}),
       },
     })
 
