@@ -7,6 +7,7 @@ import { useAuthStore } from '@/lib/auth'
 import { cairoDateString, cairoTimeString, formatCairoFriendly } from '@/lib/cairoTime'
 import { compressImage } from '@/lib/imageCompression'
 import { useDiscountCodeInfo } from '@/lib/discountCodeInfo'
+import { liveVoucherDiscount } from '@/lib/voucherAmount'
 import { lineRatePerKg, effectivePricePerKg } from '@/lib/b2bLineRate'
 import {
   CatalogueEntry,
@@ -901,8 +902,12 @@ export default function OrderForm({ mode, orderId }: Props) {
     : 95
   const orderTotal = subtotal + deliveryFee
 
-  // Voucher / discount-code applied to the gross total
-  const discountAmount = appliedDiscount ? Math.min(appliedDiscount.amount, orderTotal) : 0
+  // Voucher / discount-code applied to the gross total. Follows the live
+  // basket (see voucherAmount.ts) instead of the amount stored at the last save.
+  const voucherAmount = appliedDiscount
+    ? liveVoucherDiscount(discountCodeInfo[appliedDiscount.code.toUpperCase()], orderTotal, appliedDiscount.amount)
+    : 0
+  const discountAmount = appliedDiscount ? Math.min(voucherAmount, orderTotal) : 0
   // B2B negotiated/manual discount — stacks on top of the voucher discount
   // above. Mirrors the server's resolveManualDiscount() so the on-screen
   // preview matches what will actually be persisted.
@@ -2122,8 +2127,8 @@ export default function OrderForm({ mode, orderId }: Props) {
                     const isPercent = info ? info.type === 'percent' : appliedDiscount.type === 'percent'
                     const pct = info ? info.amount : appliedDiscount.value
                     return isPercent
-                      ? `خصم ${pct}% (${appliedDiscount.amount.toLocaleString()} ج.م)`
-                      : `خصم ${appliedDiscount.amount.toLocaleString()} ج.م`
+                      ? `خصم ${pct}% (${discountAmount.toLocaleString()} ج.م)`
+                      : `خصم ${discountAmount.toLocaleString()} ج.م`
                   })()}
                 </div>
                 <button

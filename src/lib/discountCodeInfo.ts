@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import type { VoucherRule } from '@/lib/voucherAmount'
 
 // Lightweight client-side lookup of discount-code definitions so order views
 // can show the *brief* of the discount that was applied (e.g. "خصم 10%" for
@@ -9,7 +10,7 @@ import { useEffect, useState } from 'react'
 // the discount_codes record, so we fetch the published list (same open GET the
 // codes board uses) and map code -> { type, amount }.
 
-export type DiscountCodeBrief = { type: 'percent' | 'value'; amount: number }
+export type DiscountCodeBrief = VoucherRule
 
 export function useDiscountCodeInfo() {
   const [map, setMap] = useState<Record<string, DiscountCodeBrief>>({})
@@ -27,6 +28,12 @@ export function useDiscountCodeInfo() {
           m[code] = {
             type: c?.type === 'value' ? 'value' : 'percent',
             amount: Number(c?.amount) || 0,
+            maxDiscount: c?.maxDiscount != null ? Number(c.maxDiscount) : null,
+            minOrderTotal: c?.minOrderTotal != null ? Number(c.minOrderTotal) : null,
+            usable:
+              c?.isActive !== false &&
+              !(c?.expiresAt && new Date(c.expiresAt) < new Date()) &&
+              !(c?.usageLimit != null && Number(c.usedCount) >= Number(c.usageLimit)),
           }
         }
         setMap(m)

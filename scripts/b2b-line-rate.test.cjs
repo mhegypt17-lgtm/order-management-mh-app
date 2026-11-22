@@ -24,6 +24,7 @@ function load(file, mocks) {
 const plain = (v) => JSON.parse(JSON.stringify(v))
 const catalogue = load('src/lib/catalogue.ts', {})
 const rate = load('src/lib/b2bLineRate.ts', {})
+const voucher = load('src/lib/voucherAmount.ts', {})
 
 // ───────────────────────── helpers ─────────────────────────
 test('lineRatePerKg derives the agreed rate from a saved line', () => {
@@ -242,7 +243,7 @@ const savedB2BOrder = (orderType = 'B2B') => ({
   items: [{ id: 'item_A', productId: 'w1', productName: 'عكاوى', quantity: 1, weightGrams: 7165, unitPrice: 3869.1, isCustomItem: false }],
 })
 
-function mountForm({ orderType = 'B2B', putStatus = 200, putBody = { order: {} } } = {}) {
+function mountForm({ orderType = 'B2B', putStatus = 200, putBody = { order: {} }, orderPatch = {}, codeInfo = {} } = {}) {
   const hooks = []
   let cursor = 0
   let dirty = false
@@ -291,7 +292,7 @@ function mountForm({ orderType = 'B2B', putStatus = 200, putBody = { order: {} }
       sent.push(JSON.parse(init.body))
       return respond(putStatus, putBody)
     }
-    if (url === '/api/orders/order') return respond(200, { order: savedB2BOrder(orderType) })
+    if (url === '/api/orders/order') return respond(200, { order: { ...savedB2BOrder(orderType), ...orderPatch } })
     return respond(404, {})
   }
   const Form = loadForm({
@@ -306,7 +307,8 @@ function mountForm({ orderType = 'B2B', putStatus = 200, putBody = { order: {} }
       '@/lib/auth': { useAuthStore: () => ({ user: { id: 'u1', name: 'CS', role: 'cs' } }) },
       '@/lib/cairoTime': { cairoDateString: () => '2026-11-10', cairoTimeString: () => '10:00', formatCairoFriendly: () => 'date' },
       '@/lib/imageCompression': { compressImage: async (x) => x },
-      '@/lib/discountCodeInfo': { useDiscountCodeInfo: () => ({}) },
+      '@/lib/discountCodeInfo': { useDiscountCodeInfo: () => codeInfo },
+      '@/lib/voucherAmount': voucher,
       '@/lib/b2bLineRate': rate,
       '@/lib/catalogue': catalogue,
       './WhatsAppShare': { default: () => null },
@@ -401,4 +403,47 @@ test('Form: a successful save clears the edited flags', async () => {
   await h.submit()
   assert.equal(h.sent[0].items[0].priceEdited, true)
   assert.equal(h.sent[1].items[0].priceEdited, false)
+})
+
+// ───────────────────────── voucher amount follows the live basket (order 111126app1) ─────────────────────────
+const GIFT5 = { type: 'percent', amount: 5, maxDiscount: null, minOrderTotal: 1500, usable: true }
+
+test('Voucher: percent discount is recalculated on the live gross, not the stored amount', () => {
+  assert.equal(voucher.liveVoucherDiscount(GIFT5, 4442.03, 220.73), 222.1)
+  assert.equal(voucher.liveVoucherDiscount({ type: 'value', amount: 50, usable: true }, 900, 10), 50)
+})
+
+test('Voucher: max discount and gross caps apply, like the server', () => {
+  assert.equal(voucher.liveVoucherDiscount({ type: 'percent', amount: 50, maxDiscount: 100, usable: true }, 1000, 0), 100)
+  assert.equal(voucher.liveVoucherDiscount({ type: 'value', amount: 500, usable: true }, 300, 0), 300)
+})
+
+test('Voucher: unknown, unusable or below-minimum codes keep the stored amount (the server decides on save)', () => {
+  assert.equal(voucher.liveVoucherDiscount(undefined, 4442.03, 220.73), 220.73)
+  assert.equal(voucher.liveVoucherDiscount({ ...GIFT5, usable: false }, 4442.03, 220.73), 220.73)
+  assert.equal(voucher.liveVoucherDiscount(GIFT5, 1000, 50), 50)
+})
+
+const orderWithStaleDiscount = {
+  orderType: 'App', discountCode: 'GIFT5', discountAmount: 220.73,
+  items: [{ id: 'item_A', productId: 'w1', productName: 'عكاوى', quantity: 1, weightGrams: 1000, unitPrice: 4442.03, isCustomItem: false }],
+}
+const pageText = (n) => (Array.isArray(n) ? n.map(pageText).join('') : !n || typeof n === 'boolean' ? '' : typeof n === 'object' ? pageText(n.props && n.props.children) : String(n))
+
+test('Form: an order saved with a stale 220.73 discount shows 222.10 and the matching total (incident)', async () => {
+  const h = mountForm({ orderType: 'App', orderPatch: orderWithStaleDiscount, codeInfo: { GIFT5 } })
+  await h.settle()
+  const text = pageText(h.tree)
+  assert.ok(text.includes('خصم 5% (222.1 ج.م)'), 'discount line follows the live subtotal')
+  assert.ok(!text.includes('220.73'), 'the stale amount is not shown anywhere')
+  const values = []
+  const walk = (n) => { if (Array.isArray(n)) n.forEach(walk); else if (n && typeof n === 'object') { if (n.props && typeof n.props.value === 'string') values.push(n.props.value); walk(n.props && n.props.children) } }
+  walk(h.tree)
+  assert.ok(values.some((v) => v.startsWith('4,219.93') || v.startsWith('4219.93')), 'total after discount = 4,442.03 - 222.10: ' + values.filter((v) => v.includes('ج.م')).join(' | '))
+})
+
+test('Form: without the code rule loaded the stored amount is still shown (no regression)', async () => {
+  const h = mountForm({ orderType: 'App', orderPatch: orderWithStaleDiscount, codeInfo: {} })
+  await h.settle()
+  assert.ok(pageText(h.tree).includes('220.73'))
 })
