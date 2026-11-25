@@ -12,6 +12,7 @@ import { supabase } from '@/lib/supabase'
 import { cairoDateString, addDays } from '@/lib/cairoTime'
 import { complaintNotificationHref } from '@/lib/complaintLinks'
 import { describeLateEdit, type LineChange } from '@/lib/lateEdit'
+import { instashopOnlyCustomerIds } from '@/lib/retentionView'
 import { readAllPages } from '@/lib/pagedRead'
 
 // Make this endpoint short-cached at the edge so a burst of bell pollers
@@ -26,7 +27,7 @@ const TASK_COLS = 'id,title,assignedTo,status,priority,createdBy,createdAt,sourc
 const BRIEFING_COLS = 'id,authorName,message,type,priority,createdAt'
 const COMPLAINT_COLS = 'id,ticketNumber,channel,status,assignedTo,createdBy,openedAt,closedAt,createdAt,comments'
 const ORDER_COLS = 'id,appOrderNo,orderStatus,customerId,createdBy,createdAt,updatedAt,isScheduled,scheduledDate,scheduledTimeSlot,scheduledSpecificTime,isPriority,priorityReason'
-const ORDER_INACTIVITY_COLS = 'id,customerId,orderStatus,createdAt'
+const ORDER_INACTIVITY_COLS = 'id,customerId,orderStatus,createdAt,orderType'
 const CUSTOMER_COLS = 'id,customerName,phone,doNotFollowUp,followUpSnoozeUntil'
 const HISTORY_COLS = 'id,entityType,entityId,orderId,action,changedBy,changedAt,details'
 
@@ -147,7 +148,7 @@ const readInactivityOrdersCached = unstable_cache(
   async (_bucket: number, inactivityCutoffISO: string) => {
     // Paged (stable order) so a window above 1000 orders is read completely;
     // cancelled orders never count as activity, so they aren't downloaded.
-    const { rows, error } = await readAllPages<{ id: string; customerId: string | null; orderStatus: string; createdAt: string }>(
+    const { rows, error } = await readAllPages<{ id: string; customerId: string | null; orderStatus: string; createdAt: string; orderType?: string | null }>(
       (from, to) =>
         supabase
           .from('orders')
@@ -679,8 +680,10 @@ export async function GET(req: NextRequest) {
       // Build last-order map per customer (any non-cancelled order) using
       // the narrow inactivityOrders projection — covers up to 400 days back.
       const lastOrderMs = new Map<string, number>()
+      // Instashop-only customers are Instashop's: no follow-up tasks/reminders.
+      const instashopOnly = instashopOnlyCustomerIds(inactivityOrders)
       for (const o of inactivityOrders) {
-        if (!o.customerId) continue
+        if (!o.customerId || instashopOnly.has(o.customerId)) continue
         if (o.orderStatus === 'لاغي') continue
         const ts = new Date(o.createdAt).getTime()
         if (!isFinite(ts)) continue

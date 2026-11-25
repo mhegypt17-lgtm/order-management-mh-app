@@ -3,7 +3,7 @@ import { revalidateTag } from 'next/cache'
 import { supabase } from '@/lib/supabase'
 import { DEFAULT_RETENTION_CONFIG, generateId, readOrderSettings, type RetentionConfig } from '@/lib/omsData'
 import { isMissingTable } from '@/lib/retentionData'
-import { NOT_INTERESTED_REASONS, isContactResult, nextCallAt } from '@/lib/retentionQueue'
+import { NOT_INTERESTED_REASONS, isKnownAction, nextCallAt, sanitizeActions } from '@/lib/retentionQueue'
 import { stageForDays } from '@/lib/retentionView'
 
 export const dynamic = 'force-dynamic'
@@ -19,19 +19,22 @@ export async function POST(req: NextRequest) {
     const agent = clip(body.agent, 60)
     if (!customerId) return NextResponse.json({ error: 'العميل مطلوب', code: 'CUSTOMER_REQUIRED' }, { status: 400 })
     if (!agent) return NextResponse.json({ error: 'اسم الموظف مطلوب', code: 'AGENT_REQUIRED' }, { status: 400 })
-    if (!isContactResult(body.result)) return NextResponse.json({ error: 'نتيجة المكالمة غير صحيحة', code: 'BAD_RESULT' }, { status: 400 })
-    const result = body.result
-    const reason = result === 'not_interested' ? clip(body.reason, 40) : ''
-    if (result === 'not_interested' && !NOT_INTERESTED_REASONS.some((r) => r.key === reason)) {
-      return NextResponse.json({ error: 'اختر سبب عدم الاهتمام', code: 'REASON_REQUIRED' }, { status: 400 })
+    // The result must be one of the actions the admin configured (cached settings read).
+    const settings = await readOrderSettings()
+    const retention: RetentionConfig = settings.retention || DEFAULT_RETENTION_CONFIG
+    const actions = sanitizeActions(retention.actions)
+    if (!isKnownAction(body.result, actions)) return NextResponse.json({ error: 'نتيجة المكالمة غير صحيحة', code: 'BAD_RESULT' }, { status: 400 })
+    const result = String(body.result)
+    const action = actions.find((a) => a.key === result)!
+    const reason = action.askReason ? clip(body.reason, 40) : ''
+    if (action.askReason && !NOT_INTERESTED_REASONS.some((r) => r.key === reason)) {
+      return NextResponse.json({ error: 'اختر السبب', code: 'REASON_REQUIRED' }, { status: 400 })
     }
 
     const { data: customer } = await supabase.from('customers').select('id,followUpSnoozeUntil').eq('id', customerId).maybeSingle()
     if (!customer) return NextResponse.json({ error: 'العميل غير موجود', code: 'CUSTOMER_NOT_FOUND' }, { status: 404 })
 
     // Snapshot at call time (stage, segment, spend) so results can be grouped later.
-    const settings = await readOrderSettings()
-    const retention: RetentionConfig = settings.retention || DEFAULT_RETENTION_CONFIG
     const [lastOrder, intel] = await Promise.all([
       supabase
         .from('orders')
@@ -47,7 +50,7 @@ export async function POST(req: NextRequest) {
     const daysInactive = Number.isFinite(lastMs) ? Math.max(0, Math.floor((now - lastMs) / 86_400_000)) : null
     const stage = daysInactive != null ? stageForDays(daysInactive, retention) || null : null
 
-    const next = nextCallAt(result, now, body.nextCallAt)
+    const next = nextCallAt(result, now, body.nextCallAt, actions)
     const row = {
       id: generateId('contact'),
       customerId,
@@ -80,8 +83,8 @@ export async function POST(req: NextRequest) {
     // here must not lose the logged call.
     let warning: string | undefined
     const updates: Record<string, unknown> = {}
-    if (result === 'wrong_number') updates.doNotFollowUp = true
-    else if (next && result !== 'no_answer') {
+    if (action.stopFollowUp) updates.doNotFollowUp = true
+    else if (next && action.reached) {
       const current = customer.followUpSnoozeUntil ? new Date(customer.followUpSnoozeUntil).getTime() : 0
       if (new Date(next).getTime() > current) updates.followUpSnoozeUntil = next
     }

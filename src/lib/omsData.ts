@@ -460,6 +460,10 @@ export interface RetentionConfig {
   stage3: RetentionStageConfig
   /** Rules for the CS "اتصل بهم اليوم" queue (see lib/retentionQueue). */
   queue?: { minStage: 1 | 2 | 3; minSpend: number; dailySize: number }
+  /** WhatsApp message templates for the CS queue ({name} {agent} {days} {product} {complaint}). */
+  messages?: { winback: string; complaint: string }
+  /** What a CS agent can log after contacting a customer (see lib/retentionQueue). */
+  actions?: Array<{ key: string; label: string; reached: boolean; nextCallDays: number; askReason: boolean; stopFollowUp: boolean }>
 }
 
 export const DEFAULT_RETENTION_CONFIG: RetentionConfig = {

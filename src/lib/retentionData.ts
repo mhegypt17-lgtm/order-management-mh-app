@@ -3,7 +3,7 @@
 
 import { supabase } from '@/lib/supabase'
 import { readAllPages } from '@/lib/pagedRead'
-import { stageForDays, type RetentionRow } from '@/lib/retentionView'
+import { instashopOnlyCustomerIds, stageForDays, type ComplaintBrief, type RetentionRow } from '@/lib/retentionView'
 import type { ContactRecord, OrderPoint, QueueCandidate } from '@/lib/retentionQueue'
 
 const DAY = 86_400_000
@@ -58,6 +58,8 @@ export interface StageRow extends RetentionRow {
 export interface Staging {
   ordersInWindow: number
   customersWithOrders: number
+  /** Instashop-only customers left out of the retention lists. */
+  instashopExcluded: number
   /** Customers in a stage, grouped by stage (unfiltered). */
   byStage: Record<1 | 2 | 3, StageRow[]>
   customerById: Map<string, CustomerBasics>
@@ -81,11 +83,11 @@ export async function readRetentionStaging(retention: {
 }): Promise<Staging> {
   const nowMs = Date.now()
   const cutoffISO = new Date(nowMs - 400 * DAY).toISOString()
-  const ordersRead = await readAllPages<{ customerId: string | null; createdAt: string }>(
+  const ordersRead = await readAllPages<{ customerId: string | null; createdAt: string; orderType: string | null }>(
     (from, to) =>
       supabase
         .from('orders')
-        .select('customerId,createdAt')
+        .select('customerId,createdAt,orderType')
         .gte('createdAt', cutoffISO)
         .not('customerId', 'is', null)
         .neq('orderStatus', 'لاغي')
@@ -93,9 +95,11 @@ export async function readRetentionStaging(retention: {
         .range(from, to) as any,
   )
 
+  // Instashop-only customers are Instashop's, not ours to win back.
+  const instashopOnly = instashopOnlyCustomerIds(ordersRead.rows)
   const lastOrderMs = new Map<string, number>()
   for (const o of ordersRead.rows) {
-    if (!o.customerId) continue
+    if (!o.customerId || instashopOnly.has(o.customerId)) continue
     const ts = new Date(o.createdAt).getTime()
     if (!isFinite(ts)) continue
     if (ts > (lastOrderMs.get(o.customerId) || 0)) lastOrderMs.set(o.customerId, ts)
@@ -117,16 +121,22 @@ export async function readRetentionStaging(retention: {
   }
   const [intelRead, complaintsRead] = await Promise.all([
     readRowsIn<IntelDbRow>('customer_intelligence_scores', 'customerId', ids, INTEL_COLUMNS, 'customerId'),
-    readRowsIn<{ customerId: string; status: string }>('complaints', 'customerId', ids, 'id,customerId,status', 'id'),
+    readRowsIn<{ customerId: string; status: string; subject: string | null; reason: string | null; openedAt: string | null }>(
+      'complaints', 'customerId', ids, 'id,customerId,status,subject,reason,openedAt', 'id',
+    ),
   ])
 
   const customerById = new Map(customersRead.rows.map((c) => [c.id, c]))
   const intelById = new Map(intelRead.rows.map((r) => [r.customerId, r]))
   const openComplaints = new Map<string, number>()
+  const complaintsBy = new Map<string, ComplaintBrief[]>()
   for (const cp of complaintsRead.rows) {
-    if (cp.status === 'closed') continue
-    openComplaints.set(cp.customerId, (openComplaints.get(cp.customerId) || 0) + 1)
+    if (cp.status !== 'closed') openComplaints.set(cp.customerId, (openComplaints.get(cp.customerId) || 0) + 1)
+    const list = complaintsBy.get(cp.customerId) || []
+    list.push({ date: cp.openedAt || null, title: String(cp.subject || cp.reason || '').trim() || 'شكوى', status: cp.status })
+    complaintsBy.set(cp.customerId, list)
   }
+  for (const list of complaintsBy.values()) list.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime())
 
   const byStage: Record<1 | 2 | 3, StageRow[]> = { 1: [], 2: [], 3: [] }
   for (const s of staged) {
@@ -151,12 +161,14 @@ export async function readRetentionStaging(retention: {
           }
         : null,
       openComplaints: openComplaints.get(s.id) || 0,
+      complaints: complaintsBy.get(s.id) || [],
     })
   }
 
   return {
     ordersInWindow: ordersRead.rows.length,
     customersWithOrders: lastOrderMs.size,
+    instashopExcluded: instashopOnly.size,
     byStage,
     customerById,
     intelCount: intelRead.rows.length,

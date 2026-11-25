@@ -1,12 +1,14 @@
 import { headers } from 'next/headers'
 import Link from 'next/link'
 import { readContactsSince, readOrdersSince } from '@/lib/retentionData'
+import { readOrderSettings } from '@/lib/omsData'
 import {
   WIN_WINDOW_DAYS,
   buildInsights,
   evaluateContacts,
   reasonLabel,
   resultLabel,
+  sanitizeActions,
   summarize,
   type GroupSummary,
 } from '@/lib/retentionQueue'
@@ -66,12 +68,14 @@ export default async function RetentionOutcomesPage() {
   const now = Date.now()
   const sinceISO = new Date(now - HISTORY_DAYS * 86_400_000).toISOString()
 
+  const settings = await readOrderSettings()
+  const actions = sanitizeActions((settings.retention as any)?.actions)
   const contactsRead = await readContactsSince(sinceISO)
   const contacts = contactsRead.rows.map((c) => ({ ...c, spendAtContact: c.spendAtContact != null ? Number(c.spendAtContact) : null }))
   const ordersRead = contacts.length
     ? await readOrdersSince(contacts.map((c) => c.customerId), sinceISO)
     : { rows: [], error: null }
-  const evaluated = evaluateContacts(contacts, ordersRead.rows, now)
+  const evaluated = evaluateContacts(contacts, ordersRead.rows, now, WIN_WINDOW_DAYS, actions)
 
   const total = summarize(evaluated, () => 'all')[0]
   const customers = new Set(contacts.map((c) => c.customerId)).size
@@ -131,7 +135,7 @@ export default async function RetentionOutcomesPage() {
       <SummaryTable title="حسب الموظف" rows={summarize(evaluated, (c) => c.agent)} labelOf={(k) => k} />
       <SummaryTable title="حسب المرحلة وقت المكالمة" rows={summarize(evaluated, (c) => String(c.stage ?? ''))} labelOf={stageName} />
       <SummaryTable title="حسب شريحة العميل" rows={summarize(evaluated, (c) => c.segment || '')} labelOf={(k) => LIFECYCLE_LABELS[k] || k} />
-      <SummaryTable title="حسب نتيجة المكالمة" rows={summarize(evaluated, (c) => c.result)} labelOf={resultLabel} />
+      <SummaryTable title="حسب الإجراء" rows={summarize(evaluated, (c) => c.result)} labelOf={(k) => resultLabel(k, actions)} />
       <SummaryTable
         title="أسباب عدم الاهتمام"
         rows={summarize(evaluated.filter((c) => c.result === 'not_interested'), (c) => c.reason || '')}

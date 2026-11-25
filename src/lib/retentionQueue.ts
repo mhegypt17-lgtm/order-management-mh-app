@@ -3,23 +3,29 @@
 
 import { churnRank, overdueRatio, type RetentionRow } from '@/lib/retentionView'
 
-// ───────────────────────── contact results ─────────────────────────
-export type ContactResult = 'no_answer' | 'wrong_number' | 'answered' | 'promised' | 'ordered' | 'not_interested'
-
-export const CONTACT_RESULTS: Array<{
-  key: ContactResult
+// ───────────────────────── contact actions (admin-configurable) ─────────────────────────
+export interface ContactAction {
+  /** Stable id stored with each logged call; labels can change without touching history. */
+  key: string
   label: string
-  /** The customer actually spoke to us. */
+  /** The customer actually spoke to us (counts towards the contact rate, snoozes the auto engine). */
   reached: boolean
-  /** Default days until the next call (0 = never call again). */
+  /** Days until the next call by default (0 = none). */
   nextCallDays: number
-}> = [
-  { key: 'no_answer', label: 'لم يرد', reached: false, nextCallDays: 1 },
-  { key: 'wrong_number', label: 'رقم خاطئ', reached: false, nextCallDays: 0 },
-  { key: 'answered', label: 'رد — بدون التزام', reached: true, nextCallDays: 14 },
-  { key: 'promised', label: 'وعد بالطلب', reached: true, nextCallDays: 5 },
-  { key: 'ordered', label: 'طلب أثناء المكالمة', reached: true, nextCallDays: 30 },
-  { key: 'not_interested', label: 'غير مهتم', reached: true, nextCallDays: 90 },
+  /** The agent must also pick a reason (e.g. why not interested). */
+  askReason: boolean
+  /** Opt the customer out of follow-ups altogether (e.g. wrong number). */
+  stopFollowUp: boolean
+}
+
+export const DEFAULT_ACTIONS: ContactAction[] = [
+  { key: 'answered', label: 'تم الاتصال', reached: true, nextCallDays: 14, askReason: false, stopFollowUp: false },
+  { key: 'no_answer', label: 'لم يرد', reached: false, nextCallDays: 1, askReason: false, stopFollowUp: false },
+  { key: 'whatsapp_sent', label: 'أُرسلت رسالة واتساب', reached: false, nextCallDays: 3, askReason: false, stopFollowUp: false },
+  { key: 'promised', label: 'وعد بالطلب', reached: true, nextCallDays: 5, askReason: false, stopFollowUp: false },
+  { key: 'ordered', label: 'طلب أثناء المكالمة', reached: true, nextCallDays: 30, askReason: false, stopFollowUp: false },
+  { key: 'not_interested', label: 'غير مهتم', reached: true, nextCallDays: 90, askReason: true, stopFollowUp: false },
+  { key: 'wrong_number', label: 'رقم خاطئ', reached: false, nextCallDays: 0, askReason: false, stopFollowUp: true },
 ]
 
 export const NOT_INTERESTED_REASONS: Array<{ key: string; label: string }> = [
@@ -31,20 +37,139 @@ export const NOT_INTERESTED_REASONS: Array<{ key: string; label: string }> = [
   { key: 'other', label: 'سبب آخر' },
 ]
 
-export const isContactResult = (v: unknown): v is ContactResult => CONTACT_RESULTS.some((r) => r.key === v)
-export const resultMeta = (key: string) => CONTACT_RESULTS.find((r) => r.key === key)
-export const resultLabel = (key: string) => resultMeta(key)?.label || key
+/** Cleans the admin's action list; falls back to the defaults when it is empty or unusable. */
+export function sanitizeActions(raw: unknown): ContactAction[] {
+  if (!Array.isArray(raw)) return DEFAULT_ACTIONS.map((a) => ({ ...a }))
+  const seen = new Set<string>()
+  const out: ContactAction[] = []
+  for (const a of raw.slice(0, 15) as any[]) {
+    const label = String(a?.label ?? '').trim().slice(0, 40)
+    if (!label) continue
+    let key = String(a?.key ?? '').trim()
+    if (!/^[a-z0-9_]{1,40}$/.test(key) || seen.has(key)) key = `custom_${Date.now().toString(36)}${out.length}`
+    seen.add(key)
+    out.push({
+      key,
+      label,
+      reached: a?.reached === true,
+      nextCallDays: Math.min(365, Math.max(0, Math.floor(Number(a?.nextCallDays) || 0))),
+      askReason: a?.askReason === true,
+      stopFollowUp: a?.stopFollowUp === true,
+    })
+  }
+  return out.length > 0 ? out : DEFAULT_ACTIONS.map((a) => ({ ...a }))
+}
+
+const findAction = (key: string, actions: ContactAction[]) =>
+  actions.find((a) => a.key === key) || DEFAULT_ACTIONS.find((a) => a.key === key)
+export const isKnownAction = (key: unknown, actions: ContactAction[] = DEFAULT_ACTIONS) =>
+  typeof key === 'string' && actions.some((a) => a.key === key)
+export const resultMeta = (key: string, actions: ContactAction[] = DEFAULT_ACTIONS) => findAction(key, actions)
+export const resultLabel = (key: string, actions: ContactAction[] = DEFAULT_ACTIONS) => findAction(key, actions)?.label || key
 export const reasonLabel = (key: string | null | undefined) =>
   NOT_INTERESTED_REASONS.find((r) => r.key === key)?.label || (key ? String(key) : '')
 
-/** ISO timestamp of the next call: an explicit valid date wins, else today + the result's default. */
-export function nextCallAt(result: ContactResult, now: number, explicit?: unknown): string | null {
+/** ISO timestamp of the next call: an explicit valid date wins, else today + the action's default. */
+export function nextCallAt(result: string, now: number, explicit?: unknown, actions: ContactAction[] = DEFAULT_ACTIONS): string | null {
   if (explicit) {
     const t = new Date(String(explicit)).getTime()
     if (Number.isFinite(t) && t >= now - 86_400_000) return new Date(t).toISOString()
   }
-  const days = resultMeta(result)?.nextCallDays ?? 0
+  const days = resultMeta(result, actions)?.nextCallDays ?? 0
   return days > 0 ? new Date(now + days * 86_400_000).toISOString() : null
+}
+
+// ───────────────────────── WhatsApp messages (admin-configurable) ─────────────────────────
+export interface RetentionMessages {
+  /** Win-back message for customers who stopped ordering. */
+  winback: string
+  /** Follow-up message for customers with an open complaint. */
+  complaint: string
+}
+
+export const MESSAGE_PLACEHOLDERS: Array<{ key: string; label: string }> = [
+  { key: 'name', label: 'الاسم الأول للعميل' },
+  { key: 'agent', label: 'اسم الموظف' },
+  { key: 'days', label: 'عدد أيام عدم الطلب' },
+  { key: 'product', label: 'المنتج الأكثر طلباً' },
+  { key: 'complaint', label: 'عنوان آخر شكوى' },
+]
+
+export const DEFAULT_MESSAGES: RetentionMessages = {
+  winback:
+    'أهلاً {name} 👋\nمعاك {agent} من Meat House 🐮\nوحشتنا! بقالك {days} يوم من آخر طلب.\nتحب نجهزلك {product} زي كل مرة؟ 🥩\nنشرف بطلبك في أي وقت 🙏',
+  complaint:
+    'أهلاً {name} 👋\nمعاك {agent} من Meat House 🐮\nبنتابع معاك بخصوص شكوى «{complaint}» — اتحلّت ولا لسه محتاج حاجة؟ 🙏',
+}
+
+export function sanitizeMessages(raw: any): RetentionMessages {
+  const pick = (v: unknown, fallback: string) => {
+    const s = String(v ?? '').replace(/\r\n/g, '\n').trim().slice(0, 800)
+    return s || fallback
+  }
+  return { winback: pick(raw?.winback, DEFAULT_MESSAGES.winback), complaint: pick(raw?.complaint, DEFAULT_MESSAGES.complaint) }
+}
+
+/**
+ * Fills {placeholders}. A line whose placeholder has no value (e.g. no known
+ * favourite product) is dropped instead of sent half-empty; unknown
+ * placeholders are left as typed so a typo is visible before sending.
+ */
+export function renderMessage(template: string, vars: Record<string, string | number | null | undefined>): string {
+  const lines = String(template || '').replace(/\r\n/g, '\n').split('\n')
+  const out: string[] = []
+  for (const line of lines) {
+    let missing = false
+    const filled = line.replace(/\{(\w+)\}/g, (whole, key: string) => {
+      if (!(key in vars)) return whole
+      const v = vars[key]
+      if (v == null || String(v).trim() === '') {
+        missing = true
+        return ''
+      }
+      return String(v).trim()
+    })
+    if (!missing) out.push(filled)
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+export const firstName = (name: string) => (name || '').trim().split(/\s+/)[0] || ''
+
+/** wa.me link (Egyptian numbers: leading 0 becomes 20); null when there is no usable phone. */
+export function whatsappUrl(phone: string, text: string): string | null {
+  const digits = String(phone || '').replace(/\D/g, '')
+  if (!digits) return null
+  const intl = digits.startsWith('20') ? digits : digits.startsWith('0') ? `20${digits.slice(1)}` : digits
+  return `https://wa.me/${intl}${text ? `?text=${encodeURIComponent(text)}` : ''}`
+}
+
+// ───────────────────────── days-inactive buckets ─────────────────────────
+/** Day thresholds for the "calls needed" chart: the three stages, then finer steps beyond stage 3. */
+export function bucketEdges(stages: { stage1: { days: number }; stage2: { days: number }; stage3: { days: number } }): number[] {
+  const s3 = stages.stage3.days
+  const raw = [stages.stage1.days, stages.stage2.days, s3, s3 + 30, s3 + 90, s3 + 180]
+  return Array.from(new Set(raw.filter((d) => Number.isFinite(d) && d > 0))).sort((a, b) => a - b)
+}
+
+/** Index of the bucket a customer falls in, or -1 below the first threshold. */
+export function bucketIndex(days: number, edges: number[]): number {
+  let idx = -1
+  for (let i = 0; i < edges.length; i++) if (days >= edges[i]) idx = i
+  return idx
+}
+
+export function bucketLabel(i: number, edges: number[]): string {
+  return i >= edges.length - 1 ? `${edges[i]}+ يوم` : `${edges[i]}–${edges[i + 1] - 1} يوم`
+}
+
+export function countBuckets(items: Array<{ days: number }>, edges: number[]): number[] {
+  const counts = edges.map(() => 0)
+  for (const it of items) {
+    const i = bucketIndex(it.days, edges)
+    if (i >= 0) counts[i]++
+  }
+  return counts
 }
 
 // ───────────────────────── queue rules ─────────────────────────
@@ -91,7 +216,10 @@ export interface QueueCandidate extends RetentionRow {
 
 export interface BuiltQueue {
   service: QueueCandidate[]
+  /** Today's win-back calls (capped by the admin's daily size). */
   winback: QueueCandidate[]
+  /** Every eligible win-back customer in priority order (for the days-inactive chart and filters). */
+  pool: QueueCandidate[]
   /** Eligible win-back customers beyond today's limit. */
   moreWaiting: number
 }
@@ -109,7 +237,7 @@ export function buildQueue(candidates: QueueCandidate[], config: QueueConfig, no
   // A customer with an open complaint needs a service call before any win-back.
   const service = eligible.filter((c) => c.openComplaints > 0).sort(byPriority)
   const rest = eligible.filter((c) => c.openComplaints === 0).sort(byPriority)
-  return { service, winback: rest.slice(0, config.dailySize), moreWaiting: Math.max(0, rest.length - config.dailySize) }
+  return { service, winback: rest.slice(0, config.dailySize), pool: rest, moreWaiting: Math.max(0, rest.length - config.dailySize) }
 }
 
 /** One short Arabic reason tag explaining why this customer is in the queue. */
@@ -186,6 +314,7 @@ export function evaluateContacts(
   orders: OrderPoint[],
   now: number,
   windowDays = WIN_WINDOW_DAYS,
+  actions: ContactAction[] = DEFAULT_ACTIONS,
 ): EvaluatedContact[] {
   const windowMs = windowDays * 86_400_000
   const ordersBy = new Map<string, number[][]>()
@@ -213,7 +342,7 @@ export function evaluateContacts(
       const hits = custOrders.filter(([t]) => t > start && t < end)
       const revenue = hits.reduce((s, [, total]) => s + total, 0)
       const outcome: Outcome = hits.length > 0 ? 'won' : now - start < windowMs && nextStart === Infinity ? 'pending' : 'lost'
-      out.push({ ...c, outcome, revenue, reached: !!resultMeta(c.result)?.reached })
+      out.push({ ...c, outcome, revenue, reached: !!resultMeta(c.result, actions)?.reached })
     })
   }
   return out
@@ -285,7 +414,8 @@ export function buildInsights(items: EvaluatedContact[], stageLabel: (s: string)
     const worst = byAgent.reduce((a, b) => (rate(b) < rate(a) ? b : a))
     if (rate(worst) <= overall - 0.15) insights.push(`${worst.key}: نسبة الاسترجاع ${worst.winRate}% مقابل ${pct(overall)} للفريق — تحتاج مراجعة أسلوب المكالمة.`)
   }
-  const reasons = summarize(items.filter((c) => c.result === 'not_interested' && c.reason), (c) => reasonLabel(c.reason))
+  // A reason is only stored for actions that ask for one (e.g. "not interested").
+  const reasons = summarize(items.filter((c) => c.reason), (c) => reasonLabel(c.reason))
   const topReason = reasons[0]
   if (topReason && topReason.contacts >= 5) {
     insights.push(`أكثر سبب لرفض العملاء: «${topReason.key}» (${topReason.contacts} مكالمة) — راجع هذا الجانب في المنتج أو الخدمة.`)

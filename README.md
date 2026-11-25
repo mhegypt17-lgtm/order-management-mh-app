@@ -116,6 +116,30 @@ logged, and say so.
 - Egress: the queue reads the same data as the admin page; the drawer and the
   outcomes page read only when opened; writes happen only when a call is logged.
 
+**Later additions**
+- **Instashop:** customers whose orders are *all* Instashop are left out of the
+  admin lists, the CS queue, the auto follow-up tasks and the bell reminders
+  (`instashopOnlyCustomerIds`). A customer who also ordered directly stays. The
+  orders read just gains the `orderType` column.
+- **Settings → Retention:** the CS WhatsApp message templates (win-back and
+  open-complaint; placeholders `{name} {agent} {days} {product} {complaint}`; a
+  line whose placeholder has no value is dropped) and the **action list** CS logs
+  after contact (label, "spoke to them", next-contact days, asks for a reason,
+  stops follow-ups). Stored in the existing `order_settings.retention` JSON; no
+  new table or column. Action keys are stable, so renaming an action relabels past
+  calls.
+- **CS page** is named **Retention**: a "calls needed by days without an order"
+  bar chart (click a bar to filter), name/phone search, WhatsApp button with the
+  ready message, complaints (date, title, status) on every card, and a drawer
+  composer with the full message (favourite product filled in). The queue response
+  carries all eligible customers (capped at 400, goes to the browser, not
+  Supabase) so filtering needs no extra requests.
+- **Admin filters:** segment, churn risk, open complaint only (`?seg=&risk=&cmp=1`).
+- **"الاحتفاظ / Retention %"** is the customer's closeness to their own ordering
+  rhythm (`100 − (days since last order ÷ usual gap − 1) × 100`). With no rhythm
+  (one order) it is a default 100, so the drawer and CRM profile now show it only
+  when there are 2+ orders. The health-score formula is unchanged.
+
 Logic: `src/lib/retentionQueue.ts`, `src/lib/retentionDetails.ts`. Tests:
 `node --test scripts/retention-queue.test.cjs`.
 

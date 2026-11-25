@@ -2,7 +2,7 @@
 // rows. Pure: the API route does the reads (on demand, when a drawer opens).
 
 import { FEEDBACK_DIMENSIONS, findOption } from '@/lib/feedbackDimensions'
-import { reasonLabel, resultLabel, suggestOpening } from '@/lib/retentionQueue'
+import { reasonLabel, resultLabel, suggestOpening, type ContactAction } from '@/lib/retentionQueue'
 
 const num = (v: unknown) => {
   const n = Number(v)
@@ -21,6 +21,8 @@ export interface DetailsInput {
   complaints: Array<{ reason?: string | null; subject?: string | null; status: string; compensationAmount?: number | null; openedAt?: string | null }>
   intel: Record<string, any> | null
   contacts: Array<{ contactedAt: string; agent: string; result: string; reason: string | null; note?: string | null }>
+  /** The admin's configured action list, to label earlier calls. */
+  actions?: ContactAction[]
 }
 
 const itemName = (i: DetailsInput['items'][number], names: Map<string, string>) =>
@@ -85,9 +87,18 @@ export function buildCustomerDetails(input: DetailsInput) {
         open: openComplaints,
         totalCompensation: input.complaints.reduce((s, c) => s + num(c.compensationAmount), 0),
         last: { reason: lastComplaint.reason || null, subject: lastComplaint.subject || null, status: lastComplaint.status, date: lastComplaint.openedAt || null },
+        list: complaintsSorted.slice(0, 5).map((c) => ({
+          date: c.openedAt || null,
+          title: String(c.subject || c.reason || '').trim() || 'شكوى',
+          status: c.status,
+        })),
       }
     : null
 
+  // "Retention %" is how close the customer is to their own ordering rhythm,
+  // so it only means something once there is a rhythm (2+ orders). A one-order
+  // customer is scored 100 by default — showing that would be misleading.
+  const hasRhythm = num(input.intel?.typicalIntervalDays) > 0
   const intel = input.intel
     ? {
         lifecycleStage: input.intel.lifecycleStage ?? null,
@@ -95,8 +106,12 @@ export function buildCustomerDetails(input: DetailsInput) {
         f: input.intel.f ?? null,
         m: input.intel.m ?? null,
         healthScore: input.intel.healthScore ?? null,
-        healthBreakdown: input.intel.healthBreakdown ?? null,
-        retentionPct: input.intel.retentionPct ?? null,
+        healthBreakdown: input.intel.healthBreakdown
+          ? { ...input.intel.healthBreakdown, retention: hasRhythm ? input.intel.healthBreakdown.retention ?? null : null }
+          : null,
+        totalOrders: num(input.intel.totalOrders),
+        typicalIntervalDays: hasRhythm ? num(input.intel.typicalIntervalDays) : null,
+        retentionPct: hasRhythm ? input.intel.retentionPct ?? null : null,
         cohortMonth: input.intel.cohortMonth ?? null,
         isReactivated: !!input.intel.isReactivatedOpportunity,
         isSpendingUp: !!input.intel.isSpendingUp,
@@ -110,7 +125,7 @@ export function buildCustomerDetails(input: DetailsInput) {
     .map((c) => ({
       at: c.contactedAt,
       agent: c.agent,
-      result: resultLabel(c.result),
+      result: resultLabel(c.result, input.actions),
       reason: c.reason ? reasonLabel(c.reason) : null,
       note: String(c.note || '').trim() || null,
     }))

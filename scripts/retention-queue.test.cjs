@@ -329,7 +329,7 @@ test('Queue API: lists inactive customers with limited fields; service lane firs
   assert.deepEqual(plain(res.service.map((c) => c.id)), ['c3'])
   assert.deepEqual(plain(res.winback.map((c) => c.id)), ['c1', 'c2'])
   const c1 = res.winback[0]
-  assert.deepEqual(plain(Object.keys(c1).sort()), ['days', 'id', 'lateBy', 'name', 'openComplaints', 'orders', 'phone', 'segment', 'spend', 'stage', 'tag', 'usualGapDays'])
+  assert.deepEqual(plain(Object.keys(c1).sort()), ['bucket', 'complaints', 'days', 'id', 'lateBy', 'name', 'openComplaints', 'orders', 'phone', 'segment', 'spend', 'stage', 'tag', 'usualGapDays'])
   assert.equal(c1.lateBy, 5)
   assert.ok(!('healthScore' in c1) && !('churnRisk' in c1))
 })
@@ -426,4 +426,188 @@ test('Logging a call removes the customer from the next queue read (end to end)'
   assert.deepEqual(plain(after.winback.map((c) => c.id)), ['c2'])
   assert.equal(after.doneToday, 1)
   assert.equal(after.doneTodayByAgent.Rana, 1)
+})
+
+// ───────────────────────── Instashop exclusion ─────────────────────────
+test('Instashop-only customers are identified; a customer with any direct order stays', () => {
+  const ids = view.instashopOnlyCustomerIds([
+    { customerId: 'a', orderType: 'Instashop' }, { customerId: 'a', orderType: 'Instashop' },
+    { customerId: 'b', orderType: 'Instashop' }, { customerId: 'b', orderType: 'Online' },
+    { customerId: 'c', orderType: 'App' }, { customerId: null, orderType: 'Instashop' },
+    { customerId: 'd', orderType: ' instashop ' },
+  ])
+  assert.deepEqual(Array.from(ids).sort(), ['a', 'd'])
+})
+
+test('Queue API and admin staging leave Instashop-only customers out, and report how many', async () => {
+  const tables = baseTables()
+  tables.orders.find((o) => o.customerId === 'c1').orderType = 'Instashop' // c1: only Instashop
+  tables.orders.find((o) => o.customerId === 'c2').orderType = 'Instashop' // c2: Instashop + direct below
+  tables.orders.push({ id: 'o5', customerId: 'c2', orderStatus: 'تم', createdAt: daysAgo(80), orderTotal: 500, orderType: 'Online' })
+  const route = load('src/app/api/retention/queue/route.ts', modules(makeDb(tables)).base)
+  const res = (await route.GET()).body
+  const all = [...res.service, ...res.winback].map((c) => c.id)
+  assert.equal(all.includes('c1'), false)
+  assert.equal(all.includes('c2'), true)
+  assert.equal(res.instashopExcluded, 1)
+})
+
+// ───────────────────────── complaints on the card ─────────────────────────
+test('Queue API: every card carries its complaints with date and title, newest first', async () => {
+  const tables = baseTables()
+  tables.complaints = [
+    { id: 'k1', customerId: 'c3', status: 'open', subject: 'تاخير توصيل', reason: 'توصيل', openedAt: daysAgo(3) },
+    { id: 'k2', customerId: 'c3', status: 'closed', subject: '', reason: 'جودة', openedAt: daysAgo(60) },
+    { id: 'k3', customerId: 'c1', status: 'closed', subject: 'دهون زيادة', reason: 'x', openedAt: daysAgo(30) },
+  ]
+  const route = load('src/app/api/retention/queue/route.ts', modules(makeDb(tables)).base)
+  const res = (await route.GET()).body
+  const c3 = res.service[0]
+  assert.deepEqual(plain(c3.complaints.map((c) => [c.title, c.status])), [['تاخير توصيل', 'open'], ['جودة', 'closed']])
+  assert.ok(c3.complaints[0].date)
+  const c1 = res.winback.find((c) => c.id === 'c1')
+  assert.deepEqual(plain(c1.complaints.map((c) => c.title)), ['دهون زيادة'])
+  assert.equal(c1.openComplaints, 0, 'a closed complaint does not move the customer to the service lane')
+})
+
+// ───────────────────────── days-inactive chart ─────────────────────────
+test('Buckets: edges follow the stages, counts cover both lanes, and the queue returns them', async () => {
+  const edges = queue.bucketEdges({ stage1: { days: 30 }, stage2: { days: 60 }, stage3: { days: 90 } })
+  assert.deepEqual(plain(edges), [30, 60, 90, 120, 180, 270])
+  assert.equal(queue.bucketIndex(10, edges), -1)
+  assert.equal(queue.bucketIndex(30, edges), 0)
+  assert.equal(queue.bucketIndex(119, edges), 2)
+  assert.equal(queue.bucketIndex(400, edges), 5)
+  assert.equal(queue.bucketLabel(0, edges), '30–59 يوم')
+  assert.equal(queue.bucketLabel(5, edges), '270+ يوم')
+  assert.deepEqual(plain(queue.countBuckets([{ days: 31 }, { days: 45 }, { days: 100 }, { days: 5 }], edges)), [2, 0, 1, 0, 0, 0])
+
+  const res = (await load('src/app/api/retention/queue/route.ts', modules(makeDb(baseTables())).base).GET()).body
+  assert.deepEqual(plain(res.edges), [30, 60, 90, 120, 180, 270])
+  // c1 = 100 days (bucket 2), c2 = 70 days (bucket 1), c3 = 45 days in the service lane (bucket 0)
+  assert.deepEqual(plain(res.bucketCounts), [1, 1, 1, 0, 0, 0])
+  assert.deepEqual(plain(res.winback.map((c) => c.bucket)), [2, 1])
+})
+
+test('Queue API: the response carries every eligible customer plus the daily size, so the page can filter without more requests', async () => {
+  const tables = baseTables()
+  const settings = { retention: { ...retentionCfg, queue: { minStage: 1, minSpend: 0, dailySize: 1 } } }
+  const mods = modules(makeDb(tables), { '@/lib/omsData': omsData({ readOrderSettings: async () => settings }) })
+  const res = (await load('src/app/api/retention/queue/route.ts', mods.base).GET()).body
+  assert.equal(res.dailySize, 1)
+  assert.equal(res.winback.length, 2)
+  assert.equal(res.moreWaiting, 1)
+})
+
+// ───────────────────────── admin-configurable actions ─────────────────────────
+test('Actions: defaults, sanitising, unique keys and labels still resolved for removed actions', () => {
+  assert.equal(queue.sanitizeActions(undefined).length, queue.DEFAULT_ACTIONS.length)
+  assert.equal(queue.sanitizeActions([]).length, queue.DEFAULT_ACTIONS.length)
+  const cleaned = plain(queue.sanitizeActions([
+    { key: 'answered', label: '  تم الاتصال  ', reached: true, nextCallDays: 9999, askReason: false },
+    { key: 'answered', label: 'مكرر', reached: false },
+    { key: 'BAD KEY!', label: 'جديد', nextCallDays: -3, stopFollowUp: true },
+    { key: 'x', label: '   ' },
+  ]))
+  assert.equal(cleaned.length, 3)
+  assert.equal(cleaned[0].label, 'تم الاتصال')
+  assert.equal(cleaned[0].nextCallDays, 365)
+  assert.equal(new Set(cleaned.map((a) => a.key)).size, 3)
+  assert.equal(cleaned[2].nextCallDays, 0)
+  assert.equal(cleaned[2].stopFollowUp, true)
+  assert.equal(queue.resultLabel('not_interested', [{ key: 'x', label: 'X' }]), 'غير مهتم', 'old calls keep a readable label')
+})
+
+const customActions = [
+  { key: 'answered', label: 'تم الاتصال', reached: true, nextCallDays: 7, askReason: false, stopFollowUp: false },
+  { key: 'busy', label: 'مشغول', reached: false, nextCallDays: 2, askReason: false, stopFollowUp: false },
+  { key: 'refused', label: 'رفض', reached: true, nextCallDays: 60, askReason: true, stopFollowUp: false },
+  { key: 'blocked', label: 'حظر', reached: false, nextCallDays: 0, askReason: false, stopFollowUp: true },
+]
+const customContactsRoute = (tables) => {
+  const settings = { retention: { ...retentionCfg, actions: customActions } }
+  const mods = modules(makeDb(tables), { '@/lib/omsData': omsData({ readOrderSettings: async () => settings }) })
+  return load('src/app/api/retention/contacts/route.ts', mods.base)
+}
+
+test('Contact log with a custom action list: only configured actions, the reason rule and the opt-out rule follow the settings', async () => {
+  const tables = baseTables()
+  const route = customContactsRoute(tables)
+  assert.equal((await post(route, { customerId: 'c1', agent: 'Rana', result: 'promised' })).body.code, 'BAD_RESULT', 'removed from the list')
+  assert.equal((await post(route, { customerId: 'c1', agent: 'Rana', result: 'refused' })).body.code, 'REASON_REQUIRED')
+  assert.equal((await post(route, { customerId: 'c1', agent: 'Rana', result: 'refused', reason: 'price' })).status, 201)
+  assert.ok(tables.customers[0].followUpSnoozeUntil, 'a reached action snoozes the auto engine')
+  assert.equal((await post(route, { customerId: 'c2', agent: 'Rana', result: 'busy' })).status, 201)
+  assert.equal(tables.customers[1].followUpSnoozeUntil, null, 'not reached: no snooze')
+  assert.equal((await post(route, { customerId: 'c3', agent: 'Rana', result: 'blocked' })).status, 201)
+  assert.equal(tables.customers[2].doNotFollowUp, true, 'stopFollowUp opts the customer out')
+})
+
+test('Outcomes use the configured "reached" flag, not the built-in one', () => {
+  const ev = queue.evaluateContacts([contact('a', 'c1', daysAgo(40), { result: 'busy' }), contact('b', 'c2', daysAgo(40), { result: 'refused' })], [], NOW, 30, customActions)
+  const r = byId(ev)
+  assert.equal(r.a.reached, false)
+  assert.equal(r.b.reached, true)
+})
+
+// ───────────────────────── WhatsApp messages ─────────────────────────
+test('Messages: placeholders are filled; a line missing its value is dropped; unknown placeholders stay visible', () => {
+  const text = queue.renderMessage(queue.DEFAULT_MESSAGES.winback, { name: 'إيمان', agent: 'مى', days: 95, product: '' })
+  assert.ok(text.includes('أهلاً إيمان') && text.includes('معاك مى') && text.includes('95 يوم'))
+  assert.ok(!text.includes('{') && !text.includes('زي كل مرة'), 'the product line is dropped, nothing half-filled')
+  assert.ok(queue.renderMessage(queue.DEFAULT_MESSAGES.winback, { name: 'إيمان', agent: 'مى', days: 95, product: 'ريب اى' }).includes('ريب اى'))
+  assert.ok(queue.renderMessage('hello {nmae}', { name: 'x' }).includes('{nmae}'))
+  assert.equal(queue.renderMessage('a\n\n\n\nb', {}), 'a\n\nb')
+})
+
+test('Messages: settings are sanitised, with defaults for empty text', () => {
+  assert.deepEqual(plain(queue.sanitizeMessages(undefined)), plain(queue.DEFAULT_MESSAGES))
+  const m = queue.sanitizeMessages({ winback: '  رسالتي {name}  ', complaint: '' })
+  assert.equal(m.winback, 'رسالتي {name}')
+  assert.equal(m.complaint, queue.DEFAULT_MESSAGES.complaint)
+  assert.equal(queue.sanitizeMessages({ winback: 'x'.repeat(2000) }).winback.length, 800)
+})
+
+test('WhatsApp link: Egyptian numbers get the 20 prefix, the text is URL-encoded, no phone gives no link', () => {
+  assert.equal(queue.whatsappUrl('01011112222', 'مرحبا'), `https://wa.me/201011112222?text=${encodeURIComponent('مرحبا')}`)
+  assert.equal(queue.whatsappUrl('+20 101 111 2222', ''), 'https://wa.me/201011112222')
+  assert.equal(queue.whatsappUrl('', 'x'), null)
+  assert.equal(queue.firstName('  Eman Yasser '), 'Eman')
+})
+
+// ───────────────────────── admin filters ─────────────────────────
+test('Admin filters: segment, churn risk and open complaints combine; nothing selected keeps everyone', () => {
+  const rows = [
+    { id: 'a', name: '', phone: '', days: 1, lastMs: 0, openComplaints: 0, intel: { lifecycleStage: 'VIP', churnRisk: 'High' } },
+    { id: 'b', name: '', phone: '', days: 1, lastMs: 0, openComplaints: 2, intel: { lifecycleStage: 'VIP', churnRisk: 'Low' } },
+    { id: 'c', name: '', phone: '', days: 1, lastMs: 0, openComplaints: 0, intel: null },
+  ]
+  const ids = (f) => view.filterRows(rows, f).map((r) => r.id)
+  assert.deepEqual(ids({}), ['a', 'b', 'c'])
+  assert.deepEqual(ids({ segment: 'VIP' }), ['a', 'b'])
+  assert.deepEqual(ids({ segment: 'VIP', risk: 'High' }), ['a'])
+  assert.deepEqual(ids({ complaintsOnly: true }), ['b'])
+})
+
+// ───────────────────────── "الاحتفاظ" is only shown when there is a rhythm ─────────────────────────
+test('Details: retention % is hidden for a one-order customer (it is always a default 100 there) and shown with a rhythm', () => {
+  const base = { name: 'x', days: 50, customer: null, orders: [], items: [], productNames: new Map(), feedback: [], complaints: [], contacts: [] }
+  const one = detailsLib.buildCustomerDetails({ ...base, intel: { lifecycleStage: 'New', totalOrders: 1, typicalIntervalDays: null, retentionPct: 100, healthBreakdown: { recency: 40, retention: 100 } } })
+  assert.equal(one.intel.retentionPct, null)
+  assert.equal(one.intel.healthBreakdown.retention, null)
+  assert.equal(one.intel.typicalIntervalDays, null)
+  const many = detailsLib.buildCustomerDetails({ ...base, intel: { lifecycleStage: 'Active', totalOrders: 5, typicalIntervalDays: 20, retentionPct: 35, healthBreakdown: { recency: 40, retention: 35 } } })
+  assert.equal(many.intel.retentionPct, 35)
+  assert.equal(many.intel.typicalIntervalDays, 20)
+})
+
+test('Details: every complaint is listed with date and title', () => {
+  const d = detailsLib.buildCustomerDetails({
+    name: 'x', days: 5, customer: null, orders: [], items: [], productNames: new Map(), feedback: [], intel: null, contacts: [],
+    complaints: [
+      { subject: 'old', status: 'closed', openedAt: daysAgo(90) },
+      { subject: '', reason: 'delivery', status: 'open', openedAt: daysAgo(2) },
+    ],
+  })
+  assert.deepEqual(plain(d.complaints.list.map((c) => [c.title, c.status])), [['delivery', 'open'], ['old', 'closed']])
 })

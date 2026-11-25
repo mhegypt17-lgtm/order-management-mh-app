@@ -1314,8 +1314,12 @@ export default function CRMView({ role }: CRMViewProps) {
                         <div className="text-[11px] text-gray-500 mt-1">Churn Risk</div>
                       </div>
                       <div className="bg-gray-50 rounded-lg p-3 text-center">
-                        <div className="text-xl font-bold text-gray-800">{profile.intelligence.retentionPct}%</div>
-                        <div className="text-[11px] text-gray-500 mt-0.5">Retention</div>
+                        <div className="text-xl font-bold text-gray-800">
+                          {profile.intelligence.typicalIntervalDays != null && profile.intelligence.typicalIntervalDays > 0 ? `${profile.intelligence.retentionPct}%` : '—'}
+                        </div>
+                        <div className="text-[11px] text-gray-500 mt-0.5">
+                          Retention{profile.intelligence.typicalIntervalDays != null && profile.intelligence.typicalIntervalDays > 0 ? '' : ' (needs 2+ orders)'}
+                        </div>
                       </div>
                     </div>
                     <div className="space-y-1.5 mt-3">

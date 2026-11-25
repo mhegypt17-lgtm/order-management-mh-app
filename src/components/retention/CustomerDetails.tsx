@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { firstName, renderMessage, whatsappUrl, type RetentionMessages } from '@/lib/retentionQueue'
 
 type Details = {
   favourites: Array<{ name: string; quantity: number }>
@@ -25,6 +26,7 @@ type Details = {
     open: number
     totalCompensation: number
     last: { reason: string | null; subject: string | null; status: string; date: string | null }
+    list: Array<{ date: string | null; title: string; status: string }>
   } | null
   intel: {
     lifecycleStage: string | null
@@ -32,7 +34,9 @@ type Details = {
     f: number | null
     m: number | null
     healthScore: number | null
-    healthBreakdown: Record<string, number> | null
+    healthBreakdown: Record<string, number | null> | null
+    totalOrders: number
+    typicalIntervalDays: number | null
     retentionPct: number | null
     cohortMonth: string | null
     isReactivated: boolean
@@ -45,24 +49,48 @@ type Details = {
 const date = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleDateString('ar-EG', { timeZone: 'Africa/Cairo' }) : '—')
 
 const HEALTH_LABELS: Record<string, string> = {
-  recency: 'الحداثة', frequency: 'التكرار', monetary: 'الإنفاق', retention: 'الاحتفاظ', complaints: 'الشكاوى', survey: 'الاستبيان',
+  recency: 'الحداثة', frequency: 'التكرار', monetary: 'الإنفاق', retention: 'الالتزام بإيقاعه', complaints: 'الشكاوى', survey: 'الاستبيان',
 }
 
 export default function CustomerDetails({
   customerId,
   name,
+  phone,
   days,
   audience,
+  messages,
+  agent,
 }: {
   customerId: string
   name: string
+  phone?: string
   days: number
   /** CS sees talking points only; admin also sees scores and health breakdown. */
   audience: 'admin' | 'cs'
+  /** When given, the drawer offers a ready WhatsApp message built from these templates. */
+  messages?: RetentionMessages
+  agent?: string
 }) {
   const [open, setOpen] = useState(false)
   const [data, setData] = useState<Details | null>(null)
   const [state, setState] = useState<'idle' | 'loading' | 'error'>('idle')
+  const [draft, setDraft] = useState<string | null>(null)
+
+  // Template choice + placeholders resolved from the loaded details; the agent can edit before sending.
+  const suggested = (() => {
+    if (!messages || !data) return ''
+    const openComplaint = data.complaints?.list.find((c) => c.status !== 'closed')
+    const template = openComplaint ? messages.complaint : messages.winback
+    return renderMessage(template, {
+      name: firstName(name),
+      agent: agent || '',
+      days,
+      product: data.favourites[0]?.name || '',
+      complaint: openComplaint?.title || data.complaints?.list[0]?.title || '',
+    })
+  })()
+  const messageText = draft ?? suggested
+  const waLink = phone ? whatsappUrl(phone, messageText) : null
 
   const load = async () => {
     setState('loading')
@@ -113,6 +141,45 @@ export default function CustomerDetails({
                   <div className="text-gray-900">{data.opening}</div>
                 </section>
 
+                {messages && (
+                  <section className="rounded-lg bg-green-50 border border-green-200 p-3 space-y-2">
+                    <div className="text-xs font-bold text-green-800">📲 رسالة واتساب جاهزة (يمكن تعديلها قبل الإرسال)</div>
+                    <textarea
+                      value={messageText}
+                      onChange={(e) => setDraft(e.target.value)}
+                      rows={7}
+                      className="w-full px-2 py-1.5 border border-green-200 rounded-lg bg-white text-sm"
+                      dir="rtl"
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      {waLink ? (
+                        <a href={waLink} target="_blank" rel="noreferrer" className="px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold">
+                          📲 فتح واتساب
+                        </a>
+                      ) : (
+                        <span className="text-xs text-red-700">لا يوجد رقم هاتف</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(messageText)
+                          } catch {
+                            /* clipboard blocked: the text is selectable above */
+                          }
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-white border border-green-300 text-green-800 text-sm font-semibold"
+                      >
+                        📋 نسخ
+                      </button>
+                      {draft != null && draft !== suggested && (
+                        <button type="button" onClick={() => setDraft(null)} className="text-xs text-green-800 underline">استعادة النص الأصلي</button>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-gray-500">بعد الإرسال سجّل الإجراء «أُرسلت رسالة واتساب» من البطاقة.</div>
+                  </section>
+                )}
+
                 {(data.status !== 'active' || data.isB2B || data.wallet > 0) && (
                   <section className="flex flex-wrap gap-1.5">
                     {data.status !== 'active' && (
@@ -153,9 +220,16 @@ export default function CustomerDetails({
                       🎫 الشكاوى: {data.complaints.count}{data.complaints.open > 0 ? ` (مفتوحة ${data.complaints.open})` : ''}
                       {data.complaints.totalCompensation > 0 ? ` · تعويضات ${Math.round(data.complaints.totalCompensation)} ج.م` : ''}
                     </div>
-                    <div className="text-gray-700">
-                      آخر شكوى ({date(data.complaints.last.date)}): {data.complaints.last.reason || data.complaints.last.subject || '—'} — {data.complaints.last.status === 'closed' ? 'مغلقة' : 'مفتوحة'}
-                    </div>
+                    <ul className="space-y-0.5 text-gray-700">
+                      {data.complaints.list.map((c, i) => (
+                        <li key={i}>
+                          <span dir="ltr" className="text-gray-500">{date(c.date)}</span> — {c.title}{' '}
+                          <span className={c.status === 'closed' ? 'text-gray-500' : 'text-red-700 font-semibold'}>
+                            ({c.status === 'closed' ? 'مغلقة' : 'مفتوحة'})
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
                   </section>
                 )}
 
@@ -190,14 +264,16 @@ export default function CustomerDetails({
                   <section>
                     <div className="text-xs font-bold text-gray-700 mb-1">
                       📊 RFM {data.intel.r ?? '–'}-{data.intel.f ?? '–'}-{data.intel.m ?? '–'} · صحة {data.intel.healthScore != null ? Math.round(Number(data.intel.healthScore)) : '—'}
-                      {data.intel.retentionPct != null ? ` · احتفاظ ${Math.round(Number(data.intel.retentionPct))}%` : ''}
+                      {data.intel.typicalIntervalDays != null
+                        ? ` · يطلب كل ${Math.round(data.intel.typicalIntervalDays)} يوم${data.intel.retentionPct != null ? ` (التزام ${Math.round(Number(data.intel.retentionPct))}%)` : ''}`
+                        : ` · ${data.intel.totalOrders <= 1 ? 'طلب واحد فقط، لا يوجد إيقاع بعد' : 'لا يوجد إيقاع طلب'}`}
                       {data.intel.cohortMonth ? ` · أول طلب ${data.intel.cohortMonth}` : ''}
                     </div>
                     {data.intel.healthBreakdown && (
                       <div className="flex flex-wrap gap-1">
                         {Object.entries(data.intel.healthBreakdown).map(([k, v]) => (
                           <span key={k} className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 text-[11px]">
-                            {HEALTH_LABELS[k] || k} {Math.round(Number(v))}
+                            {HEALTH_LABELS[k] || k} {v == null ? '—' : Math.round(Number(v))}
                           </span>
                         ))}
                       </div>

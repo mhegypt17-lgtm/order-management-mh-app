@@ -3,7 +3,15 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
-import { sanitizeQueueConfig, DEFAULT_QUEUE_CONFIG } from '@/lib/retentionQueue'
+import {
+  sanitizeQueueConfig,
+  sanitizeMessages,
+  sanitizeActions,
+  DEFAULT_QUEUE_CONFIG,
+  DEFAULT_MESSAGES,
+  DEFAULT_ACTIONS,
+  MESSAGE_PLACEHOLDERS,
+} from '@/lib/retentionQueue'
 import {
   DEFAULT_RETENTION_CONFIG,
   type RetentionConfig,
@@ -206,6 +214,8 @@ export default function OrderSettingsView() {
             stage2: { ...DEFAULT_RETENTION_CONFIG.stage2, ...(data.settings.retention.stage2 || {}) },
             stage3: { ...DEFAULT_RETENTION_CONFIG.stage3, ...(data.settings.retention.stage3 || {}) },
             queue: sanitizeQueueConfig(data.settings.retention.queue),
+            messages: sanitizeMessages(data.settings.retention.messages),
+            actions: sanitizeActions(data.settings.retention.actions),
           }
           setRetention(merged)
         }
@@ -1236,6 +1246,124 @@ export default function OrderSettingsView() {
           <p className="text-xs text-gray-600">
             تُرتّب القائمة حسب قيمة العميل ثم التأخر عن عادته ثم خطر الفقد. العملاء أصحاب الشكاوى المفتوحة يظهرون أولاً في خانة منفصلة ولا يُحسبون من الحد اليومي.
           </p>
+        </div>
+
+        <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50/50 p-3 space-y-2">
+          <div className="font-bold text-emerald-900">💬 رسائل واتساب لخدمة العملاء</div>
+          {(() => {
+            const m = sanitizeMessages(retention.messages)
+            const setM = (patch: Partial<typeof m>) => setRetention({ ...retention, messages: { ...m, ...patch } })
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <label className="block text-sm">
+                  <span className="text-gray-700 font-medium">رسالة استرجاع العميل</span>
+                  <textarea
+                    value={m.winback}
+                    onChange={(e) => setM({ winback: e.target.value })}
+                    rows={7}
+                    maxLength={800}
+                    className="mt-1 w-full px-2 py-1.5 border-2 border-gray-300 rounded-lg text-sm"
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-gray-700 font-medium">رسالة متابعة شكوى مفتوحة</span>
+                  <textarea
+                    value={m.complaint}
+                    onChange={(e) => setM({ complaint: e.target.value })}
+                    rows={7}
+                    maxLength={800}
+                    className="mt-1 w-full px-2 py-1.5 border-2 border-gray-300 rounded-lg text-sm"
+                  />
+                </label>
+              </div>
+            )
+          })()}
+          <p className="text-xs text-gray-600">
+            المتغيرات المتاحة: {MESSAGE_PLACEHOLDERS.map((p) => `{${p.key}} = ${p.label}`).join(' ، ')}.
+            السطر الذي يحتوي متغيراً بدون قيمة (مثلاً عميل بدون منتج مفضل) يُحذف تلقائياً من الرسالة.
+          </p>
+          <button
+            type="button"
+            onClick={() => setRetention({ ...retention, messages: { ...DEFAULT_MESSAGES } })}
+            className="text-xs text-emerald-800 underline"
+          >
+            استعادة النصوص الافتراضية
+          </button>
+        </div>
+
+        <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50/50 p-3 space-y-2">
+          <div className="font-bold text-emerald-900">📋 قائمة إجراءات الموظف بعد التواصل</div>
+          {(() => {
+            const actions = retention.actions && retention.actions.length > 0 ? retention.actions : DEFAULT_ACTIONS
+            const setActions = (next: typeof actions) => setRetention({ ...retention, actions: next })
+            const update = (i: number, patch: Partial<(typeof actions)[number]>) =>
+              setActions(actions.map((a, idx) => (idx === i ? { ...a, ...patch } : a)))
+            return (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="text-gray-700 text-xs">
+                      <tr>
+                        <th className="text-right px-2 py-1">الإجراء</th>
+                        <th className="text-center px-2 py-1" title="العميل رد وتحدثنا معه">تم التحدث معه</th>
+                        <th className="text-center px-2 py-1">المكالمة القادمة بعد (يوم)</th>
+                        <th className="text-center px-2 py-1" title="يطلب من الموظف اختيار سبب">يسأل عن السبب</th>
+                        <th className="text-center px-2 py-1" title="استبعاد العميل من المتابعة نهائياً">إيقاف المتابعة</th>
+                        <th className="px-2 py-1" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {actions.map((a, i) => (
+                        <tr key={a.key} className="border-t border-emerald-100">
+                          <td className="px-2 py-1">
+                            <input value={a.label} maxLength={40} onChange={(e) => update(i, { label: e.target.value })} className="w-full px-2 py-1 border border-gray-300 rounded" />
+                          </td>
+                          <td className="text-center"><input type="checkbox" checked={a.reached} onChange={(e) => update(i, { reached: e.target.checked })} /></td>
+                          <td className="text-center">
+                            <input type="number" min={0} max={365} value={a.nextCallDays} onChange={(e) => update(i, { nextCallDays: Math.max(0, Number(e.target.value) || 0) })} className="w-16 px-1 py-1 border border-gray-300 rounded text-center" />
+                          </td>
+                          <td className="text-center"><input type="checkbox" checked={a.askReason} onChange={(e) => update(i, { askReason: e.target.checked })} /></td>
+                          <td className="text-center"><input type="checkbox" checked={a.stopFollowUp} onChange={(e) => update(i, { stopFollowUp: e.target.checked })} /></td>
+                          <td className="px-2 text-center">
+                            <button
+                              type="button"
+                              disabled={actions.length <= 1}
+                              onClick={() => setActions(actions.filter((_, idx) => idx !== i))}
+                              className="text-red-600 hover:text-red-800 disabled:opacity-30"
+                              title="حذف"
+                            >
+                              ✖
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    disabled={actions.length >= 15}
+                    onClick={() =>
+                      setActions([
+                        ...actions,
+                        { key: `custom_${Date.now().toString(36)}`, label: 'إجراء جديد', reached: false, nextCallDays: 7, askReason: false, stopFollowUp: false },
+                      ])
+                    }
+                    className="px-3 py-1 rounded-lg bg-white border border-emerald-400 text-emerald-800 text-sm"
+                  >
+                    ➕ إضافة إجراء
+                  </button>
+                  <button type="button" onClick={() => setActions(DEFAULT_ACTIONS.map((a) => ({ ...a })))} className="text-xs text-emerald-800 underline">
+                    استعادة القائمة الافتراضية
+                  </button>
+                </div>
+                <p className="text-xs text-gray-600">
+                  «تم التحدث معه» يحسب ضمن نسبة الرد ويؤجّل المتابعة الآلية للعميل. تغيير اسم الإجراء لا يغيّر المكالمات المسجّلة سابقاً (تظهر بالاسم الجديد).
+                </p>
+              </>
+            )
+          })()}
         </div>
 
         <div className="text-xs text-gray-600 bg-gray-50 rounded-lg p-2 border border-gray-200">

@@ -269,6 +269,7 @@ test('Notifications: follow-up tasks are created for customers beyond the first 
     '@/lib/cairoTime': { cairoDateString: () => '2026-11-21', addDays: () => '2026-11-22' },
     '@/lib/complaintLinks': { complaintNotificationHref: () => '/x' },
     '@/lib/lateEdit': lateEditLib,
+    '@/lib/retentionView': view,
     '@/lib/pagedRead': paged,
     '@/lib/omsData': {
       DEFAULT_RETENTION_CONFIG: retentionCfg,
@@ -281,6 +282,30 @@ test('Notifications: follow-up tasks are created for customers beyond the first 
   assert.deepEqual(created.slice().sort(), stage3)
   const inactive = res.items.filter((i) => i.type === 'inactive-customer')
   assert.ok(inactive.length > 0, 'reminders are listed (the bell itself shows at most 50 items)')
+})
+
+test('Notifications: Instashop-only customers get no follow-up task or reminder', async () => {
+  cache = fixtures()
+  // Stage-3 customers c01180..c01189 only ever ordered through Instashop.
+  for (let i = 1180; i < 1190; i++) cache.orders.find((o) => o.customerId === `c${pad(i)}`).orderType = 'Instashop'
+  const created = []
+  const route = load('src/app/api/notifications/route.ts', {
+    'next/server': { NextResponse: { json: (body) => body } },
+    'next/cache': { unstable_cache: (fn) => fn },
+    '@/lib/supabase': { supabase: makeDb(cache) },
+    '@/lib/cairoTime': { cairoDateString: () => '2026-11-21', addDays: () => '2026-11-22' },
+    '@/lib/complaintLinks': { complaintNotificationHref: () => '/x' },
+    '@/lib/lateEdit': lateEditLib,
+    '@/lib/retentionView': view,
+    '@/lib/pagedRead': paged,
+    '@/lib/omsData': {
+      DEFAULT_RETENTION_CONFIG: retentionCfg,
+      readOrderSettings: async () => ({ retention: retentionCfg }),
+      createTask: async (t) => { created.push(t.linkedCustomerId); return { id: `t${created.length}`, linkedCustomerId: t.linkedCustomerId, status: 'جديدة' } },
+    },
+  })
+  await route.GET({ url: 'https://example.test/api/notifications?role=cs&user=x' })
+  assert.deepEqual(created.slice().sort(), Array.from({ length: 10 }, (_, i) => `c${pad(1190 + i)}`))
 })
 
 test('Notifications: a failed order read creates no tasks instead of marking everyone inactive', async () => {
@@ -309,6 +334,7 @@ test('Notifications: a failed order read creates no tasks instead of marking eve
     '@/lib/cairoTime': { cairoDateString: () => '2026-11-21', addDays: () => '2026-11-22' },
     '@/lib/complaintLinks': { complaintNotificationHref: () => '/x' },
     '@/lib/lateEdit': lateEditLib,
+    '@/lib/retentionView': view,
     '@/lib/pagedRead': paged,
     '@/lib/omsData': {
       DEFAULT_RETENTION_CONFIG: retentionCfg,

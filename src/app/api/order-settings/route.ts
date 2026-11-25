@@ -12,7 +12,7 @@ import {
   CustomerIntelligenceConfig,
   DEFAULT_CUSTOMER_INTELLIGENCE_CONFIG,
 } from '@/lib/customerIntelligence'
-import { sanitizeQueueConfig } from '@/lib/retentionQueue'
+import { sanitizeQueueConfig, sanitizeMessages, sanitizeActions } from '@/lib/retentionQueue'
 
 // Order settings change rarely (only when an admin edits a lookup list in the
 // settings screen) but are read on nearly every page load and by several
@@ -268,6 +268,8 @@ export async function PATCH(request: NextRequest) {
         stage2: sanitizeStage(body.retention.stage2, 60, 21),
         stage3: sanitizeStage(body.retention.stage3, 90, 30),
         queue: sanitizeQueueConfig(body.retention.queue),
+        messages: sanitizeMessages(body.retention.messages),
+        actions: sanitizeActions(body.retention.actions),
       } as RetentionConfig
     }
 

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { readRowsIn, readContactsForCustomers } from '@/lib/retentionData'
 import { buildCustomerDetails } from '@/lib/retentionDetails'
+import { readOrderSettings } from '@/lib/omsData'
+import { sanitizeActions } from '@/lib/retentionQueue'
 
 // On-demand only: called when someone opens a customer's drawer, so the
 // retention pages never pay for these reads up front.
@@ -49,6 +51,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       complaints: complaintsRead.rows,
       intel: intelRes.data || null,
       contacts: contactsRead.rows,
+      actions: sanitizeActions(((await readOrderSettings()).retention as any)?.actions),
     })
     return NextResponse.json(details)
   } catch (err) {

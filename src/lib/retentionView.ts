@@ -23,6 +23,12 @@ export interface IntelSnapshot {
   typicalIntervalDays: number | null
 }
 
+export interface ComplaintBrief {
+  date: string | null
+  title: string
+  status: string
+}
+
 export interface RetentionRow {
   id: string
   name: string
@@ -31,6 +37,41 @@ export interface RetentionRow {
   lastMs: number
   intel: IntelSnapshot | null
   openComplaints: number
+  /** Newest first. Title is the complaint subject (or its reason). */
+  complaints?: ComplaintBrief[]
+}
+
+const isInstashop = (t: unknown) => String(t ?? '').trim().toLowerCase() === 'instashop'
+
+/**
+ * Customers who only ever ordered through Instashop (in the orders given):
+ * they are Instashop's customers, not ours to win back. A customer who also
+ * placed any direct order stays.
+ */
+export function instashopOnlyCustomerIds(orders: Array<{ customerId: string | null; orderType?: string | null }>): Set<string> {
+  const seenInstashop = new Set<string>()
+  const seenDirect = new Set<string>()
+  for (const o of orders) {
+    if (!o.customerId) continue
+    if (isInstashop(o.orderType)) seenInstashop.add(o.customerId)
+    else seenDirect.add(o.customerId)
+  }
+  return new Set(Array.from(seenInstashop).filter((id) => !seenDirect.has(id)))
+}
+
+export interface RowFilters {
+  segment?: string
+  risk?: string
+  complaintsOnly?: boolean
+}
+
+export function filterRows(rows: RetentionRow[], f: RowFilters): RetentionRow[] {
+  return rows.filter((r) => {
+    if (f.segment && r.intel?.lifecycleStage !== f.segment) return false
+    if (f.risk && r.intel?.churnRisk !== f.risk) return false
+    if (f.complaintsOnly && r.openComplaints <= 0) return false
+    return true
+  })
 }
 
 /** Days inactive ÷ the customer's usual gap between orders (1 decimal), or null for one-order customers. */

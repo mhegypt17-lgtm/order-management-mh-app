@@ -127,6 +127,7 @@ function csHarness(existingItems, deliveryStatus) {
     '@/lib/catalogue': catalogue,
     '@/lib/b2bLineRate': b2bLineRate,
     '@/lib/lateEdit': late,
+    '@/lib/retentionView': load('src/lib/retentionView.ts', {}),
   })
   return {
     history, deliveryReads,
@@ -218,6 +219,7 @@ async function bell(role, history) {
     '@/lib/complaintLinks': { complaintNotificationHref: () => '/x' },
     '@/lib/pagedRead': paged,
     '@/lib/lateEdit': late,
+    '@/lib/retentionView': load('src/lib/retentionView.ts', {}),
     '@/lib/omsData': {
       DEFAULT_RETENTION_CONFIG: { enabled: false }, readOrderSettings: async () => ({ retention: { enabled: false } }), createTask: async () => ({}),
     },

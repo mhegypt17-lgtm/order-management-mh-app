@@ -9,7 +9,7 @@ create table if not exists public.retention_contacts (
   "customerId"       text not null,
   agent              text not null default '',
   "contactedAt"      timestamptz not null default now(),
-  result             text not null,            -- no_answer | wrong_number | answered | promised | ordered | not_interested
+  result             text not null,            -- key of an action from Settings -> Retention (e.g. answered, no_answer)
   reason             text,                     -- why not interested (price, quality, delivery, ...)
   note               text not null default '',
   offer              text not null default '', -- offer / incentive used on the call
@@ -27,3 +27,6 @@ create index if not exists retention_contacts_contactedat_idx on public.retentio
 
 grant select, insert, update, delete on public.retention_contacts
   to anon, authenticated, service_role;
+
+-- Make the API (PostgREST) pick up the new table immediately.
+notify pgrst, 'reload schema';

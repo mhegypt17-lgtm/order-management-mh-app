@@ -9,6 +9,7 @@ import {
   LIFECYCLE_LABELS,
   RETENTION_SORTS,
   matchesQuery,
+  filterRows,
   overdueRatio,
   parseSort,
   sortRows,
@@ -33,13 +34,18 @@ const fmtMoney = (n: number) => Math.round(n).toLocaleString('en-US')
 export default async function RetentionDashboardPage({
   searchParams,
 }: {
-  searchParams?: { q?: string; sort?: string }
+  searchParams?: { q?: string; sort?: string; seg?: string; risk?: string; cmp?: string }
 }) {
   // Ensure server-side fetch (avoids any caching surprises)
   headers()
 
   const query = String(searchParams?.q || '').trim()
   const sortKey = parseSort(searchParams?.sort)
+  const filters = {
+    segment: Object.prototype.hasOwnProperty.call(LIFECYCLE_LABELS, String(searchParams?.seg)) ? String(searchParams?.seg) : '',
+    risk: Object.prototype.hasOwnProperty.call(CHURN_LABELS, String(searchParams?.risk)) ? String(searchParams?.risk) : '',
+    complaintsOnly: searchParams?.cmp === '1',
+  }
 
   const settings = await readOrderSettings()
   const retention: RetentionConfig = settings.retention || DEFAULT_RETENTION_CONFIG
@@ -81,9 +87,9 @@ export default async function RetentionDashboardPage({
   const allBuckets: Record<1 | 2 | 3, RetentionRow[]> = staging.byStage
   // Rows shown: filtered by the search box and sorted by the chosen key
   const buckets: Record<1 | 2 | 3, RetentionRow[]> = {
-    1: sortRows(allBuckets[1].filter((r) => matchesQuery(r, query)), sortKey),
-    2: sortRows(allBuckets[2].filter((r) => matchesQuery(r, query)), sortKey),
-    3: sortRows(allBuckets[3].filter((r) => matchesQuery(r, query)), sortKey),
+    1: sortRows(filterRows(allBuckets[1], filters).filter((r) => matchesQuery(r, query)), sortKey),
+    2: sortRows(filterRows(allBuckets[2], filters).filter((r) => matchesQuery(r, query)), sortKey),
+    3: sortRows(filterRows(allBuckets[3], filters).filter((r) => matchesQuery(r, query)), sortKey),
   }
 
   // Task KPIs (this month)
@@ -139,7 +145,7 @@ export default async function RetentionDashboardPage({
             href="/orders/retention"
             className="px-3 py-1.5 rounded-lg bg-white border-2 border-emerald-300 text-emerald-700 hover:bg-emerald-50 text-sm font-medium"
           >
-            📞 قائمة الاتصال (CS)
+            🔁 Retention (CS)
           </Link>
           <Link
             href="/admin/settings"
@@ -193,6 +199,9 @@ export default async function RetentionDashboardPage({
               <span>📦 طلبات (غير ملغاة) خلال 400 يوم: <b>{ordersInWindow}</b></span>
               <span>🔗 عملاء لديهم طلب فعّال: <b>{customersWithOrders}</b></span>
               <span>📊 في إحدى المراحل: <b>{inAnyStage}</b></span>
+              {staging.instashopExcluded > 0 && (
+                <span title="عملاء طلبوا من Instashop فقط — مستبعدون من القوائم والمهام الآلية">🛍️ مستبعد (Instashop): <b>{staging.instashopExcluded}</b></span>
+              )}
               {scoresUpdatedAt && (
                 <span>🕒 آخر تحديث للتقييمات: <b>{new Date(scoresUpdatedAt).toLocaleString('ar-EG', { timeZone: 'Africa/Cairo' })}</b></span>
               )}
@@ -247,10 +256,32 @@ export default async function RetentionDashboardPage({
             ))}
           </select>
         </label>
+        <label className="text-xs text-gray-600 flex items-center gap-1">
+          الشريحة
+          <select name="seg" defaultValue={filters.segment} className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
+            <option value="">الكل</option>
+            {Object.entries(LIFECYCLE_LABELS).map(([k, label]) => (
+              <option key={k} value={k}>{label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-gray-600 flex items-center gap-1">
+          خطر الفقد
+          <select name="risk" defaultValue={filters.risk} className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
+            <option value="">الكل</option>
+            {Object.entries(CHURN_LABELS).map(([k, label]) => (
+              <option key={k} value={k}>{label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-gray-600 flex items-center gap-1">
+          <input type="checkbox" name="cmp" value="1" defaultChecked={filters.complaintsOnly} />
+          شكوى مفتوحة فقط
+        </label>
         <button type="submit" className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700">
           تطبيق
         </button>
-        {(query || sortKey !== 'days') && (
+        {(query || sortKey !== 'days' || filters.segment || filters.risk || filters.complaintsOnly) && (
           <Link href="/admin/retention" className="text-xs text-gray-600 underline">مسح</Link>
         )}
       </form>
